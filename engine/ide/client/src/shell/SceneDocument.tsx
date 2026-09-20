@@ -483,6 +483,15 @@ export function SceneDocument({ ctx, path }: ViewerProps) {
   // frame — is told to it as a `replace`; it remounts what differs.
   useEffect(() => tell('replace', { docs }), [docs]);
 
+  // The iframe `src` (`previewUrl`/`id`/`safeBottom`, below) is about to
+  // change — a `safeBottom` change is a new `src`, so the page reloads.
+  // The variant on file is the OLD page's `ready`; forgotten here so a
+  // Properties edit typed in the reload window does not land in the
+  // wrong layer. The new page re-announces its own on `ready`.
+  useEffect(() => {
+    ctx.scenes.setVariant(id, null);
+  }, [ctx, id, previewUrl, safeBottom]);
+
   // The fit follows the stage's box until the user zooms by hand — a
   // ResizeObserver, as the old bar had (jsdom has none: the fit stays 1).
   useEffect(() => {

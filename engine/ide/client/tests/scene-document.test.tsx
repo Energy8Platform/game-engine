@@ -592,6 +592,23 @@ describe('SceneDocument', () => {
     expect(ctx.scenes.variant('base_game')).toBeNull();
   });
 
+  it("a preset change that alters safeBottom forgets the OLD page's variant until the next ready", async () => {
+    const { ctx } = await harness();
+    renderTab(ctx);
+    const select = screen.getByTestId('canvas-viewport') as HTMLSelectElement;
+    const iframe = screen.getByTitle('scene canvas') as HTMLIFrameElement;
+    await userEvent.selectOptions(select, 'phone-portrait');
+    frame(iframe, 'ready', { scene: 'base_game', orientation: 'portrait' });
+    expect(ctx.scenes.variant('base_game')).toBe('portrait');
+    // landscape's safeBottom (wide) differs from phone-portrait's (mobile):
+    // the src changes, the page reloads, and the variant it announced
+    // belongs to the page that is going away.
+    await userEvent.selectOptions(select, 'landscape');
+    expect(ctx.scenes.variant('base_game')).toBeNull();
+    frame(iframe, 'ready', { scene: 'base_game', orientation: 'landscape' });
+    expect(ctx.scenes.variant('base_game')).toBeNull();
+  });
+
   it('with no preview to point at, says so instead of an iframe', async () => {
     const { ctx } = await harness({}, null);
     renderTab(ctx);
