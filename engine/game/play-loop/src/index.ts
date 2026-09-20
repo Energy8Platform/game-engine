@@ -281,6 +281,26 @@ function knownKindsList(registry: BoardStepRegistry | undefined): string {
 type BoardMethod = (step: PresentationStep, opts?: StepOpts) => Promise<void>;
 
 /**
+ * What a caller can be told while a plan runs. Optional, and empty for
+ * every caller that wants nothing.
+ */
+export interface ExecuteHooks {
+  /**
+   * Called SYNCHRONOUSLY the moment a step has been invoked — after the
+   * board method or handler was called, before its promise is awaited.
+   *
+   * The "after, not before" is measured, not stylistic: the legacy
+   * `TumbleController.step` clears its own `_killed` flag on entry, so a
+   * `skip()` fired BEFORE the call would be wiped by the very step it was
+   * meant to collapse. Announcing the step once it is under way is the only
+   * point at which a skip sticks. `PlayService.skip`'s latch is the one
+   * caller of this today: it re-fans a skip latched earlier in the run onto
+   * each later step as that step starts.
+   */
+  onStepStarted?(step: PresentationStep): void;
+}
+
+/**
  * Plays `plan` against `board`, one step at a time, awaiting each before
  * starting the next. Returns the diagnostics collected along the way —
  * empty when everything ran clean. Never rejects and never throws: a step
@@ -323,13 +343,30 @@ type BoardMethod = (step: PresentationStep, opts?: StepOpts) => Promise<void>;
  * of anything this plan itself ran into — see `BoardStepRegistry.collisions`
  * for why this is the outlet, and why the report repeats for every plan
  * rather than firing once.
+ *
+ * `hooks` is last and optional, so every existing call is unchanged. Its
+ * one member, `onStepStarted`, is what lets a caller act ON a step that has
+ * just begun — see `ExecuteHooks` for why the timing is what it is.
  */
 export async function executePlan(
   plan: PresentationStep[],
   board: BoardApi | undefined,
   registry?: BoardStepRegistry,
   opts?: StepOpts,
+  hooks?: ExecuteHooks,
 ): Promise<Diagnostic[]> {
+  // A hook is the caller's code, but it runs inside this function's
+  // never-throws promise, so it gets the same treatment the board and the
+  // registry do: whatever it does, the step it announced still runs and
+  // still awaits. (Not folded into the per-step try below — a throwing hook
+  // there would abandon a promise nobody awaits.)
+  const started = (step: PresentationStep): void => {
+    try {
+      hooks?.onStepStarted?.(step);
+    } catch {
+      // Swallowed: announcing a step must not be able to fail it.
+    }
+  };
   // Read before the `!board` early return, on purpose: a collision is a
   // fact about the composition, not about this plan, so it must not be
   // swallowed by a plan that had nothing to run or no board to run it on.
@@ -436,14 +473,18 @@ export async function executePlan(
         : undefined;
 
       if (typeof method === 'function') {
-        await method.call(board, step, opts);
+        const running = method.call(board, step, opts);
+        started(step);
+        await running;
         continue;
       }
 
       const handler = registry?.get(step.kind);
 
       if (handler) {
-        await handler.run(step, board, opts);
+        const running = handler.run(step, board, opts);
+        started(step);
+        await running;
         continue;
       }
 

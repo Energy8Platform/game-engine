@@ -105,6 +105,11 @@ export interface PlayService {
    * plugin's step kind. Both are optional, and anything that cannot be
    * hurried is simply passed over.
    *
+   * **A no-op with no run in flight**, and **latched for the rest of the
+   * run** when there is one: every step that STARTS after a skip is
+   * collapsed as it starts, so a multi-round tumble chain ends at the
+   * result instead of skipping one round and playing the rest in full.
+   *
    * **The result still lands.** A skip shortens the watching, it does not
    * abandon the round — `execute`'s promise resolves as usual, with the
    * same diagnostics, once the collapsed steps fall through.
@@ -181,7 +186,7 @@ export function apply(ctx: Context): void {
     }
   };
 
-  const skip = () => {
+  const fanOut = () => {
     hurry(lastBoard);
     try {
       for (const kind of lastRegistry.kinds()) hurry(lastRegistry.get(kind));
@@ -189,6 +194,27 @@ export function apply(ctx: Context): void {
       // `kinds()`/`get()` are a third party's, same as `collisions()` in
       // `executePlan` — see the guard there.
     }
+  };
+
+  // Latched for the REST of the run, not fired once. `BoardApi.skip` is
+  // one-shot by nature — the legacy `TumbleController.step` clears its own
+  // `_killed` flag on entry — so on an N-round tumble chain a single
+  // `skip()` hurried the round in flight and every later round played in
+  // full. With the latch, `executePlan`'s `onStepStarted` re-fans the skip
+  // onto each later step the moment it starts, which is exactly when the
+  // step is skippable (see `ExecuteHooks`).
+  let skipped = false;
+
+  const skip = () => {
+    // No live run, nothing to collapse. Without this guard an idle `ui.skip`
+    // (a stray `__e8.skip()`, a flow `emit`) still reached the LAST board
+    // this row played against, and `ReelSystem.skip()` unconditionally
+    // destroys every child of the `fx` overlay layer — so an idle skip wiped
+    // a game's own overlay art. `execute` clears `lastBoard` when it
+    // resolves, which is what makes "live" mean live.
+    if (!lastBoard) return;
+    skipped = true;
+    fanOut();
   };
 
   // The flow bus is the only channel a skip can arrive on DURING a run: a
@@ -221,7 +247,18 @@ export function apply(ctx: Context): void {
     async execute(plan, board, registry = steps, opts) {
       lastBoard = board;
       lastRegistry = registry;
-      const problems = await executePlan(plan, board, registry, opts);
+      const problems = await executePlan(plan, board, registry, opts, {
+        onStepStarted: () => {
+          if (skipped) fanOut();
+        },
+      }).finally(() => {
+        // This run is over: a later `skip()` has nothing live to aim at, and
+        // the next run starts unlatched. `finally`, not two lines after the
+        // await, so a rejection nobody expects (`executePlan` promises not to
+        // produce one) cannot leave the row latched for the life of the page.
+        lastBoard = undefined;
+        skipped = false;
+      });
       // This row IS `executePlan`'s caller — the nearest point that both
       // knows a plan just ran and can reach the composition's shared
       // `diagnostics` service, so every game gets this for free rather

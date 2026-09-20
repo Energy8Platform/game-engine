@@ -214,4 +214,67 @@ describe('executePlan: StepOpts and tumble', () => {
     );
     expect(problem.message).toContain('board cannot perform step "tumble"');
   });
+
+  /**
+   * Slice 25's fix wave: `hooks.onStepStarted`. The timing is the point —
+   * after the step is invoked, before its promise is awaited. A skip fired
+   * before the call would be wiped by `TumbleController.step`'s own
+   * `_killed = false` on entry; one fired after the await would be too late.
+   */
+  describe('hooks.onStepStarted', () => {
+    it('fires synchronously after each step is invoked, before it resolves', async () => {
+      const order: string[] = [];
+      const board = {
+        spinTo: () => {
+          order.push('invoked');
+          return Promise.resolve().then(() => {
+            order.push('resolved');
+          });
+        },
+      };
+      const run = vi.fn(async () => {});
+      const registry = {
+        register: () => () => {},
+        has: () => true,
+        get: (kind: string) => (kind === 'zap' ? { kind, run } : undefined),
+        kinds: () => ['zap'],
+        collisions: () => [],
+      };
+
+      await executePlan(
+        [{ kind: 'spinTo', board: [[1]] }, { kind: 'zap' }],
+        board as never,
+        registry,
+        undefined,
+        {
+          onStepStarted: (step) => order.push(`started:${step.kind}`),
+        },
+      );
+
+      // The registry path announces its step the same way the board path does.
+      expect(order).toEqual(['invoked', 'started:spinTo', 'resolved', 'started:zap']);
+    });
+
+    it('a hook that throws costs its step nothing — and no plan is asked for one', async () => {
+      const board = fakeBoard();
+      const problems = await executePlan(
+        [{ kind: 'spinTo', board: [[1]] }],
+        board,
+        undefined,
+        undefined,
+        {
+          onStepStarted: () => {
+            throw new Error('nope');
+          },
+        },
+      );
+      expect(problems).toEqual([]);
+      expect(board.calls).toEqual(['spinTo']);
+
+      // No hooks at all: the call every caller before this parameter made.
+      const plain = fakeBoard();
+      expect(await executePlan([{ kind: 'spinTo', board: [[1]] }], plain)).toEqual([]);
+      expect(plain.calls).toEqual(['spinTo']);
+    });
+  });
 });

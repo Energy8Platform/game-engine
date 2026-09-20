@@ -374,14 +374,32 @@ const busPlugin = (bus: ReturnType<typeof fakeBus>) => ({
   },
 });
 
-/** Runs one plan so the row has a board to aim `skip()` at; returns that board's spy. */
-async function armedBoard(ctx: Context) {
+/**
+ * Starts a plan and HOLDS it open, so the row has a live run to aim
+ * `skip()` at. Live is the operative word since the `lastBoard` fix: a skip
+ * with nothing running is a deliberate no-op (an idle `ui.skip` used to
+ * reach the last board played, and `ReelSystem.skip()` destroys the `fx`
+ * overlay's children whether or not anything is animating).
+ *
+ * `execute` sets `lastBoard` and `executePlan` invokes the first step both
+ * SYNCHRONOUSLY, before the promise is even returned, so a `skip()` on the
+ * next line already lands inside the run.
+ */
+function liveRun(ctx: Context) {
   const boardSkip = vi.fn();
-  await ctx.play.execute([{ kind: 'spinTo', board: [[1]] }], {
-    spinTo: async () => {},
+  let release!: () => void;
+  const held = new Promise<void>((resolve) => (release = resolve));
+  const running = ctx.play.execute([{ kind: 'spinTo', board: [[1]] }], {
+    spinTo: () => held,
     skip: boardSkip,
   } as unknown as BoardApi);
-  return boardSkip;
+  return {
+    boardSkip,
+    async end() {
+      release();
+      await running;
+    },
+  };
 }
 
 describe('play-loop runtime half: turbo and skip', () => {
@@ -414,14 +432,74 @@ describe('play-loop runtime half: turbo and skip', () => {
     // A handler with no `skip` at all must not break the fan-out.
     ctx.steps.register({ kind: 'quiet', run: async () => {} });
 
-    await ctx.play.execute([{ kind: 'spinTo', board: [[1]] }], {
-      spinTo: async () => {},
+    let release!: () => void;
+    const held = new Promise<void>((resolve) => (release = resolve));
+    const running = ctx.play.execute([{ kind: 'spinTo', board: [[1]] }], {
+      spinTo: () => held,
       skip: boardSkip,
     } as unknown as BoardApi);
     ctx.play.skip();
 
     expect(boardSkip).toHaveBeenCalledTimes(1);
     expect(handlerSkip).toHaveBeenCalledTimes(1);
+
+    release();
+    await running;
+    await ctx.fiber.dispose();
+  });
+
+  /**
+   * `skip()` is one-shot at the board (`TumbleController.step` clears its own
+   * `_killed` on entry), so before the latch a tap during round 1 of an
+   * N-round tumble chain left rounds 2..N playing in full — the spec's
+   * "a second tap skips to the result" was simply false past the first step.
+   */
+  it('a skip latches: every later step of the run is collapsed as it starts', async () => {
+    const ctx = new Context();
+    await ctx.plugin(runtime);
+
+    const order: string[] = [];
+    let release!: () => void;
+    const held = new Promise<void>((resolve) => (release = resolve));
+    let started = 0;
+    const tumble = () => {
+      order.push('tumble');
+      started += 1;
+      return started === 1 ? held : Promise.resolve();
+    };
+    const step = { kind: 'tumble', winning: [], removed: [], fresh: [], settled: [[1]] };
+
+    const running = ctx.play.execute([step, step, step], {
+      tumble,
+      skip: () => order.push('skip'),
+    } as unknown as BoardApi);
+    ctx.play.skip(); // during round 1, the way a second tap on Spin arrives
+    release();
+    await running;
+
+    // Round 1 was hurried where it stood; rounds 2 and 3 were collapsed the
+    // moment they started — after the call, never before it (a skip landing
+    // first would be wiped by the controller's own `_killed = false`).
+    expect(order).toEqual(['tumble', 'skip', 'tumble', 'skip', 'tumble', 'skip']);
+
+    await ctx.fiber.dispose();
+  });
+
+  it('the latch is cleared when the run resolves: a skip after it is a no-op', async () => {
+    const ctx = new Context();
+    await ctx.plugin(runtime);
+
+    const boardSkip = vi.fn();
+    const board = { spinTo: async () => {}, skip: boardSkip } as unknown as BoardApi;
+    await ctx.play.execute([{ kind: 'spinTo', board: [[1]] }], board);
+
+    ctx.play.skip();
+    expect(boardSkip).not.toHaveBeenCalled();
+
+    // …and the next run starts unlatched: its first step is not pre-skipped.
+    const run = liveRun(ctx);
+    await run.end();
+    expect(run.boardSkip).not.toHaveBeenCalled();
 
     await ctx.fiber.dispose();
   });
@@ -434,8 +512,10 @@ describe('play-loop runtime half: turbo and skip', () => {
 
     const handlerSkip = vi.fn();
     ctx.steps.register({ kind: 'reelStep', run: async () => {}, skip: handlerSkip });
-    await ctx.play.execute([{ kind: 'spinTo', board: [[1]] }], {
-      spinTo: async () => {},
+    let release!: () => void;
+    const held = new Promise<void>((resolve) => (release = resolve));
+    const running = ctx.play.execute([{ kind: 'spinTo', board: [[1]] }], {
+      spinTo: () => held,
       skip: () => {
         throw new Error('nope');
       },
@@ -445,6 +525,8 @@ describe('play-loop runtime half: turbo and skip', () => {
     // the throwing board did not cost the handlers their skip
     expect(handlerSkip).toHaveBeenCalledTimes(1);
 
+    release();
+    await running;
     await ctx.fiber.dispose();
   });
 
@@ -454,11 +536,12 @@ describe('play-loop runtime half: turbo and skip', () => {
     ctx.provide('events', bus.service);
     await ctx.plugin(runtime);
 
-    const boardSkip = await armedBoard(ctx);
+    const run = liveRun(ctx);
     bus.emit('ui.skip');
 
-    expect(boardSkip).toHaveBeenCalledTimes(1);
+    expect(run.boardSkip).toHaveBeenCalledTimes(1);
 
+    await run.end();
     await ctx.fiber.dispose();
   });
 
@@ -468,13 +551,15 @@ describe('play-loop runtime half: turbo and skip', () => {
 
     const bus = fakeBus();
     ctx.provide('events', bus.service);
-    // `inject` fires on a later tick (measured), which the `execute` below
-    // gives it; the assertion is that it fires at all, unprompted.
-    const boardSkip = await armedBoard(ctx);
+    // `inject` fires on a later tick (measured), which this await gives it;
+    // the assertion is that it fires at all, unprompted.
+    await new Promise((r) => setTimeout(r, 0));
+    const run = liveRun(ctx);
     bus.emit('ui.skip');
 
-    expect(boardSkip).toHaveBeenCalledTimes(1);
+    expect(run.boardSkip).toHaveBeenCalledTimes(1);
 
+    await run.end();
     await ctx.fiber.dispose();
   });
 
@@ -491,20 +576,24 @@ describe('play-loop runtime half: turbo and skip', () => {
 
     const first = fakeBus();
     const firstRow = await ctx.plugin(busPlugin(first));
-    const boardSkip = await armedBoard(ctx);
+    await new Promise((r) => setTimeout(r, 0));
+    const one = liveRun(ctx);
     first.emit('ui.skip');
-    expect(boardSkip).toHaveBeenCalledTimes(1);
+    expect(one.boardSkip).toHaveBeenCalledTimes(1);
+    await one.end();
 
     await firstRow.dispose();
     const second = fakeBus();
     await ctx.plugin(busPlugin(second));
     await new Promise((r) => setTimeout(r, 0));
 
+    const two = liveRun(ctx);
     second.emit('ui.skip');
-    expect(boardSkip).toHaveBeenCalledTimes(2);
+    expect(two.boardSkip).toHaveBeenCalledTimes(1);
     // the old bus was let go on the way out — a stale emit reaches nothing
     first.emit('ui.skip');
-    expect(boardSkip).toHaveBeenCalledTimes(2);
+    expect(two.boardSkip).toHaveBeenCalledTimes(1);
+    await two.end();
 
     await ctx.fiber.dispose();
   });
