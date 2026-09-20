@@ -107,6 +107,8 @@ interface GameConfig {
   gamesDir: string;
   gameId: string;
   betLevel: number;
+  /** The whole numeric `betLevels` array — see `readGameConfig` below. Forwarded to `dev-game`'s `GET /api/session`. */
+  betLevels: number[];
 }
 
 async function readGameConfig(
@@ -148,6 +150,15 @@ async function readGameConfig(
     Array.isArray(spec.betLevels) && typeof spec.betLevels[0] === 'number'
       ? (spec.betLevels[0] as number)
       : 1;
+  // The whole ladder `GET /api/session` answers — `game/spec.json`'s own
+  // `betLevels`, the same source `betLevel` above already reads its first
+  // entry from (never the compiled `.spin`'s `bet_levels`, a server-side
+  // declaration of the same idea). Falls back to the single `betLevel`
+  // above when the spec's own array isn't one of numbers.
+  const betLevels: number[] =
+    Array.isArray(spec.betLevels) && spec.betLevels.every((n) => typeof n === 'number')
+      ? (spec.betLevels as number[])
+      : [betLevel];
   // A `GameSpec` game's `game/script.spin` is logic only and does not
   // compile by itself — `assemble` writes `prelude ⧺ logic` and hands back
   // the directory e8-server must actually be pointed at (see
@@ -157,7 +168,7 @@ async function readGameConfig(
   const assembled = await assemble(cwd);
   if (assembled.diagnostics.length) return { diagnostics: assembled.diagnostics };
   return {
-    config: { root: cwd, gamesDir: assembled.gamesDir, gameId: spec.id, betLevel },
+    config: { root: cwd, gamesDir: assembled.gamesDir, gameId: spec.id, betLevel, betLevels },
     diagnostics: [],
   };
 }

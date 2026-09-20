@@ -43,6 +43,13 @@ rows:
     name: '@energy8engine/boot'
   - id: renderer1
     name: '@energy8engine/renderer-pixi'
+  # The `session` seam (spec §3, task-3-report.md): today's only candidate
+  # is the dev host's own `GET /api/session` / `POST /api/spin`.
+  # `sessionsdk1` — the Energy8 platform SDK candidate — joins the seam in
+  # Task 4; `@energy8engine/seam` picks one winner per seam from
+  # `buildTarget`/`urlParam`/`default`, and `createGame` drops the rest.
+  - id: sessionhost1
+    name: '@energy8engine/session-host'
   - id: scenes1
     name: '@energy8engine/scenes'
   # Animated pictures as scene nodes (`spritesheet`, `video`, `gif`).

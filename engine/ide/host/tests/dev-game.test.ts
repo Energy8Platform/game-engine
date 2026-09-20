@@ -509,6 +509,43 @@ describe('dev-game — the spin route', () => {
     expect(Array.isArray(result.data.grid)).toBe(true);
   });
 
+  it("answers /api/session with the project's own bet ladder (@energy8engine/session-host's init)", async () => {
+    await bare();
+    await ctx!.plugin(devGame, {
+      root: WEB_ROOT,
+      gamesDir: GAME,
+      gameId: 'first-slot',
+      betLevel: 1.0,
+      betLevels: [1, 2, 5],
+      port: 0,
+      previewPort: 0,
+    });
+
+    const res = await fetch(`${preview(ctx!)}/api/session`);
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({
+      balance: 1000,
+      currency: { code: 'USD', symbol: '$', decimals: 2, position: 'left' },
+      betLevels: [1, 2, 5],
+      defaultBet: 1.0,
+    });
+  });
+
+  it('/api/session falls back to [betLevel] when the plugin config carries no betLevels', async () => {
+    await bare();
+    await ctx!.plugin(devGame, {
+      root: WEB_ROOT,
+      gamesDir: GAME,
+      gameId: 'first-slot',
+      betLevel: 2,
+      port: 0,
+      previewPort: 0,
+    });
+
+    const res = await fetch(`${preview(ctx!)}/api/session`);
+    expect(await res.json()).toMatchObject({ betLevels: [2], defaultBet: 2 });
+  });
+
   it("forwards a POSTed action/betLevel to session.play, over the plugin's own config defaults — a buy mode or bet ladder the flow names", async () => {
     await bare();
     await ctx!.plugin(devGame, {

@@ -163,6 +163,14 @@ export interface DevGameConfig {
   action?: string;
   /** Default bet level, used when `POST /api/spin`'s body doesn't specify one. */
   betLevel: number;
+  /**
+   * The bet ladder `GET /api/session` answers (`@energy8engine/session-host`'s
+   * `SessionInit.betLevels`) — `game/spec.json`'s whole `betLevels` array,
+   * read by `project-scope.ts`'s `readGameConfig`. Optional only so a
+   * hand-built config (most of this file's own tests) need not supply
+   * one; the route falls back to `[betLevel]` when it's absent.
+   */
+  betLevels?: number[];
   /** Forwarded to `session-dev`; `0` picks a free port. Defaults to `0`. */
   port?: number;
   /** Forwarded to `session-dev` — explicit `e8-server` binary path, mainly for tests. */
@@ -725,6 +733,26 @@ export async function apply(ctx: Context, config: DevGameConfig): Promise<void> 
     // contracts/spin.ts. The browser rebuilds nothing.
     const payload: SpinResult = result;
     res.json(payload);
+  });
+
+  /**
+   * `@energy8engine/session-host`'s `init` (spec §3) — a dev-only wallet
+   * seeded fresh on every load, never `session-dev`'s own math process:
+   * `/api/spin` speaks bet multipliers, nothing on this side of the wire
+   * tracks currency at all. `betLevels` is the one thing worth reading from
+   * the project rather than inventing here — `game/spec.json`'s own ladder,
+   * already read into `config.betLevel` by `project-scope.ts`'s
+   * `readGameConfig`; NOT the compiled `.spin`'s `bet_levels`, a different
+   * (server-side) declaration of the same idea. `balance`/`currency` are
+   * fixed: nothing about this dev host has an opinion on either yet.
+   */
+  preview.get('/api/session', async (_req, res) => {
+    res.json({
+      balance: 1000,
+      currency: { code: 'USD', symbol: '$', decimals: 2, position: 'left' },
+      betLevels: config.betLevels ?? [config.betLevel],
+      defaultBet: config.betLevel,
+    });
   });
 
   /**
