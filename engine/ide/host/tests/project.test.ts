@@ -240,6 +240,11 @@ describe('project.writePatchRow', () => {
         { id: 'scenes1', config: { design: { width: 480, height: 288 } } },
         { id: 'reels1', config: { config: { grid: { cols: 5, rows: 3 } } } },
         { id: 'mechanics1', config: { stages: { base_game: 'classic' } } },
+        { id: 'playloop1', config: { skipEvents: ['ui.skip', 'ui.tap'] } },
+        {
+          id: 'shell1',
+          config: { features: { turbo: 1, autoplay: {}, buyBonus: false }, gameInfo: { sections: [] } },
+        },
       ],
     });
   });
@@ -253,6 +258,11 @@ describe('project.writePatchRow', () => {
         { id: 'scenes1', config: { design: { width: 480, height: 288 } } },
         { id: 'reels1', config: { config: { grid: { cols: 5, rows: 3 } } } },
         { id: 'mechanics1', config: { stages: { base_game: 'reel-step' } } },
+        { id: 'playloop1', config: { skipEvents: ['ui.skip', 'ui.tap'] } },
+        {
+          id: 'shell1',
+          config: { features: { turbo: 1, autoplay: {}, buyBonus: false }, gameInfo: { sections: [] } },
+        },
         { id: 'reelstep1', name: 'reel-step', config: {} },
       ],
     });

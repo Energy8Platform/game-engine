@@ -22,6 +22,17 @@ rows:
     config:
       stages:
         base_game: reel-step
+  - id: playloop1
+    config:
+      skipEvents: [ui.skip, ui.tap]
+  - id: shell1
+    config:
+      features:
+        turbo: 1
+        autoplay: {}
+        buyBonus: false
+      gameInfo:
+        sections: []
   # Inserted by name: `plugins/reel-step/` in this project — README.md.
   - id: reelstep1
     name: reel-step

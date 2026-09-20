@@ -1,24 +1,45 @@
 version: 1
 nodes:
-  - { id: start, kind: boot,    ui: { x: 40,   y: 80 } }
-  - { id: base,  kind: show,    props: { scene: base_game }, ui: { x: 220,  y: 80 } }
-  - { id: idle,  kind: on,      props: { event: ui.spin },   ui: { x: 400,  y: 80 } }
-  - { id: mode,  kind: set,     props: { name: turbo, value: '$event.turbo' }, ui: { x: 490, y: 240 } }
-  - { id: click, kind: sound,   props: { src: assets/spin.wav }, ui: { x: 580,  y: 80 } }
-  - { id: spin,  kind: spin,    ui: { x: 760,  y: 80 } }
-  - { id: draw,  kind: present, ui: { x: 940,  y: 80 } }
-  - { id: show_win, kind: prop, props: { target: base_game/win, prop: text, value: '$result.win' }, ui: { x: 940,  y: 240 } }
-  - { id: done,  kind: if,      props: { when: '$result.roundComplete' }, ui: { x: 1120, y: 80 } }
-  - { id: step,  kind: step,    ui: { x: 1120, y: 240 } }
+  - { id: start,    kind: boot,    ui: { x: 40,   y: 80 } }
+  - { id: base,     kind: show,    props: { scene: base_game }, ui: { x: 220,  y: 80 } }
+  - { id: idle,     kind: on,      props: { event: shell.spin }, ui: { x: 400,  y: 80 } }
+  - { id: autoin,   kind: on,      props: { event: shell.autoplayStart }, ui: { x: 400,  y: 240 } }
+  - { id: busy,     kind: shell,   props: { busy: 'true' }, ui: { x: 580,  y: 80 } }
+  - { id: click,    kind: sound,   props: { src: assets/spin.wav }, ui: { x: 760,  y: 80 } }
+  - { id: spin,     kind: spin,    props: { betLevel: '$shell.bet' }, ui: { x: 940,  y: 80 } }
+  - { id: bal,      kind: shell,   props: { balance: '$result.balance' }, ui: { x: 1120, y: 80 } }
+  - { id: draw,     kind: present, props: { turbo: '$shell.turbo' }, ui: { x: 1300, y: 80 } }
+  - { id: show_win, kind: prop,    props: { target: base_game/win, prop: text, value: '$result.win' }, ui: { x: 1480, y: 80 } }
+  - { id: win,      kind: shell,   props: { win: '$result.totalWinAmount' }, ui: { x: 1660, y: 80 } }
+  - { id: done,     kind: if,      props: { when: '$result.roundComplete' }, ui: { x: 1840, y: 80 } }
+  - { id: step,     kind: step,    ui: { x: 1840, y: 240 } }
+  - { id: ack,      kind: ack,     ui: { x: 2020, y: 80 } }
+  - { id: free,     kind: shell,   props: { busy: 'false' }, ui: { x: 2200, y: 80 } }
+  - { id: auto,     kind: if,      props: { when: '$shell.autoplay.active' }, ui: { x: 2200, y: 240 } }
+  - { id: tick,     kind: shell,   props: { autoplay: tick }, ui: { x: 2200, y: 400 } }
+  - { id: more,     kind: if,      props: { when: '$shell.autoplay.remaining > 0' }, ui: { x: 2020, y: 400 } }
+  - { id: pause,    kind: wait,    props: { ms: 500 }, ui: { x: 1840, y: 400 } }
 edges:
-  - { from: start, to: base }
-  - { from: base,  to: idle }
-  - { from: idle,  to: mode }
-  - { from: mode,  to: click }
-  - { from: click, to: spin }
-  - { from: spin,  to: draw }
-  - { from: draw,  to: show_win }
-  - { from: show_win, to: done }
-  - { from: done,  to: idle, out: 'true' }
-  - { from: done,  to: step, out: 'false' }
-  - { from: step,  to: draw }
+  - { from: start,    to: base }
+  - { from: base,     to: idle }
+  - { from: idle,     to: busy }
+  - { from: autoin,   to: busy }
+  - { from: busy,     to: click }
+  - { from: click,    to: spin }
+  - { from: spin,     to: bal }
+  - { from: spin,     to: free, out: failed }
+  - { from: bal,      to: draw }
+  - { from: draw,     to: show_win }
+  - { from: draw,     to: free, out: failed }
+  - { from: show_win, to: win }
+  - { from: win,      to: done }
+  - { from: done,     to: ack,  out: 'true' }
+  - { from: done,     to: step, out: 'false' }
+  - { from: step,     to: draw }
+  - { from: step,     to: free, out: failed }
+  - { from: ack,      to: free }
+  - { from: free,     to: auto }
+  - { from: auto,     to: tick, out: 'true' }
+  - { from: tick,     to: more }
+  - { from: more,     to: pause, out: 'true' }
+  - { from: pause,    to: busy }

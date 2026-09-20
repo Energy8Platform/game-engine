@@ -6,21 +6,41 @@ one bundle, and `e8.patch.yml` is the delta on top of it.
 ## `flow.yml`
 
 The flow document, and the only thing that drives the game: `boot → show
-base_game → on ui.spin → click → spin → present → done`. `done` (`if
-$result.roundComplete`) sends a complete round back to `on`; an incomplete
-one (free spins, a retrigger) goes to `step`, which posts the open round's
-`roundId` and next `nextActions` entry and loops back to `present` to draw
-the response — dormant on `first-slot`'s own math, where every round
-completes on the first spin. `e8-base`'s
-`flow1` row (`@energy8engine/flow`) reads it from the host (`GET
-/api/flow`), interprets it, and traces every node it enters and leaves;
-`src/main.ts` holds no spin loop any more — its `Spin` button only emits
-`ui.spin` into the bus that row provides, and `#status` is read back off
-the trace. The `#turbo` checkbox rides along on that same emit as `{ turbo
-}`: the `mode` node reads `$event.turbo` into the var `turbo`, which is
-what `present`'s own `turbo` prop defaults to. A second click while the
-flow is busy emits `ui.skip` instead — caught directly by `playloop1`,
-never by a node, since a skip has to land while a run is already going. The IDE's Flow document edits this file (`PUT /api/flow`); node
+base_game → on shell.spin → shell { busy: true } → click → spin { betLevel:
+$shell.bet } → shell { balance } → present { turbo: $shell.turbo } →
+show_win → shell { win } → done → ack → shell { busy: false }`. `done` (`if
+$result.roundComplete`) sends a complete round on to `ack` and the bar's
+release; an incomplete one (free spins, a retrigger) goes to `step`, which
+posts the open round's `roundId` and next `nextActions` entry and loops back
+to `present` to draw the response — dormant on `first-slot`'s own math, where
+every round completes on the first spin. `e8-base`'s `flow1` row
+(`@energy8engine/flow`) reads it from the host (`GET /api/flow`), interprets
+it, and traces every node it enters and leaves; `src/main.ts` holds no spin
+loop any more, and `#status` is read back off the trace.
+
+The shell is a row — `shell1` in `e8.patch.yml` (`@energy8engine/shell-pixi`:
+the bar with Spin, the bet stepper, balance, win, turbo and autoplay, drawn
+over the canvas; its `features`/`gameInfo` are the row's config, the bet
+ladder and balance come from the session row). The flow listens to it (`on
+shell.spin`, `on shell.autoplayStart` — every shell event lands on the bus as
+`shell.<name>`), reads its live state (`$shell.bet`, `$shell.turbo`,
+`$shell.autoplay.*`) and drives its readouts through `shell` nodes (`busy`,
+`balance`, `win`, `autoplay: tick`). Autoplay is the same chain entered twice:
+after `shell { busy: false }`, `if $shell.autoplay.active → shell { autoplay:
+tick } → if $shell.autoplay.remaining > 0 → wait 500 ms → back to shell {
+busy: true }`. A `spin`/`present`/`step` that fails leaves by `failed`
+straight into that same `shell { busy: false }`, so a refused spin never
+leaves the bar disabled. The page's own `Spin` button and `#turbo` checkbox
+(`index.html`) are a dev proxy for the bar's: `src/main.ts` presses the
+shell's Spin and sets its turbo level, and emits `ui.spin` as well, for a flow
+with no shell to listen to. A tap on the canvas during a presentation skips it
+— `playloop1`'s `skipEvents: [ui.skip, ui.tap]` in `e8.patch.yml`; `scenes1`
+emits `ui.tap` off the stage, and a tap on the shell's bar bubbles there too,
+so any tap skips. The page's second click while the flow is busy emits
+`ui.skip`, caught the same way — directly by `playloop1`, never by a node,
+since a skip has to land while a run is already going.
+
+The IDE's Flow document edits this file (`PUT /api/flow`); node
 kinds come from the game's own registry (`ctx.flowNodes`), so a project
 plugin can add one. The bus is `ctx.get('events')` (`ctx.reflect.get('events',
 false)` from a plugin) — not `ctx.events`, which is cordis's own emitter and

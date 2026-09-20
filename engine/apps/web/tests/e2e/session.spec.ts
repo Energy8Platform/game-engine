@@ -2,7 +2,7 @@
  * Sessions and the `step` flow kind, proven in a real browser (Task 5 of
  * "sessions and the spec prelude"): a round that does NOT complete on its
  * first response, driven end to end through `flow.yml`'s already-looped
- * eight nodes (`flow.spec.ts` proves the loop's shape; this proves what
+ * nineteen nodes (`flow.spec.ts` proves the loop's shape; this proves what
  * runs through it when a round actually needs it).
  *
  * `first-slot`'s own math completes every round on the first `spin`, so its
@@ -98,7 +98,7 @@ test('a session opens on the first spin, and Step finishes the round — three s
   await page.goto(`${IDE_URL}#/doc/composition`);
   const frame = await readyFrame(page);
 
-  // `ui.spin` in, the FIRST `present` node's exit out — the round is still
+  // The shell's Spin in, the FIRST `present` node's exit out — the round is still
   // open at this point (`roundComplete: false`, `nextActions: ['free_spin']`
   // — session.test.ts measures it at the host level); the flow's own
   // `done → step → draw → done` loop keeps running past this resolve with

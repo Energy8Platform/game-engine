@@ -114,7 +114,7 @@ interface Spin {
   plan: unknown[];
 }
 const spins = (frame: Frame): Promise<Spin[]> => frame.evaluate(() => (window as any).__e8.spins());
-/** `ui.spin` in, the `present` node's exit out; the spin it recorded. */
+/** The shell's Spin in, the `present` node's exit out; the spin it recorded. */
 async function spinOnce(frame: Frame): Promise<Spin> {
   expect(await frame.evaluate(() => (window as any).__e8.spin())).toEqual({ out: 'next' });
   const all = await spins(frame);
@@ -154,9 +154,11 @@ test("the spin that played is written down — request and the server's own resu
   const recorded = await spinOnce(frame);
   expect(await spins(frame)).toHaveLength(1);
   // What was asked. Not empty any more: the flow's `spin` node now posts
-  // `{ action: 'spin' }` (the schema's own default), and `present` records
-  // that same body — not a placeholder.
-  expect(recorded.request).toEqual({ action: 'spin' });
+  // `{ action: 'spin' }` (the schema's own default) with the shell's bet
+  // (`betLevel: $shell.bet` — `spec.json`'s `betLevels[0]`, the ladder
+  // `GET /api/session` answers, untouched on this page), and `present`
+  // records that same body — not a placeholder.
+  expect(recorded.request).toEqual({ action: 'spin', betLevel: 0.2 });
   // What happened: the server's result, whole — the stage the `present`
   // node then presented, and the 5×3 board it spun to.
   expect(recorded.result.stage).toBe('base_game');

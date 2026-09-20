@@ -11,6 +11,11 @@ import * as sceneEdit from '@energy8engine/scene-edit';
 // The editor page composes the WHOLE bundle, `shell1` included — and the
 // shell would draw its bar over the very canvas being edited. Not here.
 const game = await createGame({ mount: document.getElementById('mount')!, without: ['ui.shell'] });
+// Test hook, the pair of `main.ts`'s `__e8.shell()`: `game-shell.spec.ts`
+// asserts the game page HAS a shell and this page has NONE.
+(window as unknown as { __e8editor: unknown }).__e8editor = {
+  hasShell: () => !!game.ctx.reflect.get('shell', false),
+};
 const params = new URLSearchParams(location.search);
 const parentOrigin = document.referrer ? new URL(document.referrer).origin : '*';
 await game.ctx.plugin(sceneEdit, {

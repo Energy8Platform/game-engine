@@ -4,7 +4,7 @@
  * Explorer then shows) and opens one as a tab; the tab adds a node whose
  * properties appear on the RIGHT and land in the file; clicking a scene
  * pushes it into the running game without a spin; and a spin still
- * presents — through `flow.yml` now (`on ui.spin → spin → present`), on
+ * presents — through `flow.yml` now (`on shell.spin → spin → present`), on
  * the `base_game` its `show` node put up at boot.
  *
  * Same iframe, same readers as `hot-fork.spec.ts`: the composition
@@ -195,7 +195,7 @@ test('a spin still presents, through the flow, on the scene shown at boot', asyn
   const frame = await readyFrame(page);
   await expect.poll(() => scenesVisible(frame), { timeout: 10_000 }).toEqual(['base_game']);
 
-  // `ui.spin` in, the `present` node's exit out; the scene list is unchanged
+  // The shell's Spin in, the `present` node's exit out; the scene list is unchanged
   // — presenting draws on the board `base_game` already holds.
   expect(await frame.evaluate(() => (window as any).__e8.spin())).toEqual({ out: 'next' });
   expect(await scenesVisible(frame)).toEqual(['base_game']);

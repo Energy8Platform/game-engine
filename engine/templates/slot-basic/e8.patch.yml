@@ -22,3 +22,14 @@ rows:
     config:
       stages:
         base_game: classic
+  - id: playloop1
+    config:
+      skipEvents: [ui.skip, ui.tap]
+  - id: shell1
+    config:
+      features:
+        turbo: 1
+        autoplay: {}
+        buyBonus: false
+      gameInfo:
+        sections: []

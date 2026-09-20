@@ -432,17 +432,22 @@ mechanicSelect.addEventListener('change', () => {
 });
 
 /**
- * **The flow drives the game (slice 19).** Everything a click used to do
- * here — `POST /api/spin`, `presentStage` (check-then-present through the
- * bound mechanic, `play.execute` on the live board), the temporary "show
- * the scene named after the stage" rule, and `play.record` — is now this
- * project's `flow.yml`, read by the `flow1` row `e8-base` composes: `boot
- * → show base_game → on ui.spin → spin → present → back to on`. The
- * `spin` and `present` node kinds (`@energy8engine/flow`'s `kinds.ts`)
- * are the two functions that were deleted from this file, one to one.
- * What this page still says is "the button was pressed", by emitting into
- * the bus `flow1` provides — and what it still shows is what the flow's
- * trace says happened.
+ * **The flow drives the game (slice 19), through the shell (slice 26).**
+ * Everything a click used to do here — `POST /api/spin`, `presentStage`
+ * (check-then-present through the bound mechanic, `play.execute` on the
+ * live board), the temporary "show the scene named after the stage" rule,
+ * and `play.record` — is now this project's `flow.yml`, read by the
+ * `flow1` row `e8-base` composes: `boot → show base_game → on shell.spin
+ * → shell { busy } → spin { betLevel: $shell.bet } → present { turbo:
+ * $shell.turbo } → … → shell { busy: false }`. The `spin` and `present`
+ * node kinds (`@energy8engine/flow`'s `kinds.ts`) are the two functions
+ * that were deleted from this file, one to one. The Spin the flow listens
+ * to is the SHELL's: the `shell1` row (`@energy8engine/shell-pixi`, the
+ * bar drawn over the canvas) re-emits every one of its events on the bus
+ * as `shell.<name>`, and its live state is the flow's `$shell.*` root — so
+ * this page's own `#controls` are a dev PROXY for that bar (`pressSpin`
+ * below), not a second UI, and what this page still shows is what the
+ * flow's trace says happened.
  *
  * **NOT `ctx.events`.** That name is cordis's OWN lifecycle emitter — a
  * plain own property every `Context` is born with, which the service
@@ -472,6 +477,39 @@ const currentEvents = () =>
   ctx.reflect.get('events', false) as unknown as EventsService | undefined;
 const currentFlow = () => ctx.reflect.get('flow', false) as FlowService | undefined;
 
+/**
+ * The shell handle the `shell1` row provides (`@energy8engine/shell-pixi`),
+ * typed structurally — as much of it as this page touches — so the page
+ * imports nothing from that package, for the same reason it imports no
+ * row. Read per use and leniently, like `events`/`flow` above: a
+ * composition without `shell1` is a legal one (`editor.ts` composes
+ * `without: ['ui.shell']` on purpose), and the button below still emits
+ * `ui.spin` for a flow with no shell to listen to.
+ */
+interface PageShell {
+  state: Record<string, unknown>;
+  actions: { spin(): void; [name: string]: (...args: any[]) => void };
+  setTurbo(level: number): void;
+}
+const currentShell = () => ctx.reflect.get('shell', false) as PageShell | undefined;
+
+/**
+ * What pressing Spin means, for the button and for `__e8.spin()` alike:
+ * the shell's turbo level follows the checkbox (`1`/`0` — the flow's
+ * `draw` node reads `$shell.turbo`), the SHELL's own Spin is pressed
+ * (`shell.actions.spin()` → `shell.spin` on the bus, which this project's
+ * `flow.yml` listens to), and `ui.spin` goes out as well, for a flow that
+ * listens to that instead — every e2e fixture flow, written before there
+ * was a shell. Exactly one of the two has a listener in any given flow;
+ * the other lands on nobody.
+ */
+function pressSpin(turbo: boolean): void {
+  const shell = currentShell();
+  shell?.setTurbo(turbo ? 1 : 0);
+  shell?.actions.spin();
+  currentEvents()?.emit('ui.spin', { turbo });
+}
+
 /** The kind of the node a trace entry names, off the document the flow is running; `undefined` between documents. */
 const kindOf = (node: string) =>
   currentFlow()
@@ -496,16 +534,17 @@ if (!currentEvents() || !currentFlow()) {
 // other way around: busy here means "hurry the run that's already going",
 // not "not yet".
 //
-// **`ui.spin`'s payload.** `flow.yml`'s `mode` node (`set turbo =
-// $event.turbo`, between `idle` and `click`) reads it off `vars.event` —
-// the flow's `on` node hands its `fire()` the emitted payload UNCHANGED
-// (`@energy8engine/flow`'s `kinds.ts`, the `on` kind: `fire({ event })`
-// with `event` the bus callback's own argument), so `$event` IS the
-// payload emitted here. The `emit` flow node kind agrees: it sends
-// `resolve(p.payload, vars)` as the event itself, with no envelope of its
-// own — a flow-emitted `{ turbo: true }` arrives as `$event.turbo`, so a
-// page that wrapped its own payload would make the two paths disagree.
-// `{ turbo: ... }` it is, here and in `__e8.spin()` below.
+// **`ui.spin`'s payload.** A flow listening to `ui.spin` (every e2e
+// fixture flow) reads it off `vars.event` — the flow's `on` node hands its
+// `fire()` the emitted payload UNCHANGED (`@energy8engine/flow`'s
+// `kinds.ts`, the `on` kind: `fire({ event })` with `event` the bus
+// callback's own argument), so `$event` IS the payload emitted here. The
+// `emit` flow node kind agrees: it sends `resolve(p.payload, vars)` as the
+// event itself, with no envelope of its own — a flow-emitted `{ turbo:
+// true }` arrives as `$event.turbo`, so a page that wrapped its own payload
+// would make the two paths disagree. `{ turbo: ... }` it is, in `pressSpin`
+// above. This project's own `flow.yml` reads neither: it listens to
+// `shell.spin` and takes turbo off `$shell.turbo`.
 spinBtn.addEventListener('click', () => {
   const events = currentEvents();
   if (!events) return;
@@ -515,7 +554,14 @@ spinBtn.addEventListener('click', () => {
     return;
   }
   statusEl.textContent = 'spinning…';
-  events.emit('ui.spin', { turbo: turboCheckbox.checked });
+  pressSpin(turboCheckbox.checked);
+});
+
+// The checkbox on its own, too: ticked, and then the SHELL's Spin pressed
+// rather than this page's, still means turbo — the same level the bar's
+// own turbo button would set.
+turboCheckbox.addEventListener('change', () => {
+  currentShell()?.setTurbo(turboCheckbox.checked ? 1 : 0);
 });
 
 // `#status` after a click, from the trace rather than from a return value
@@ -568,13 +614,11 @@ ctx.inject(['flow'], (c) =>
     return (ctx.reflect.get('diagnostics', false) as DiagnosticsService | undefined)?.list() ?? [];
   },
   /**
-   * Exactly what the button does when the flow is idle — `events.emit(
-   * 'ui.spin', { turbo })` (see the click handler's own comment for why
-   * `$event` in `flow.yml`'s `mode` node is the payload itself, no
-   * envelope) — and then the port the flow's `present` node left by
-   * (`next` or `failed`), or
-   * `failed` from its `spin` node when the host refused. One 20 s budget
-   * for the whole thing; a rejection names which half ran out.
+   * Exactly what the button does when the flow is idle — `pressSpin(turbo)`:
+   * the shell's Spin plus `ui.spin` (see its own doc for why both) — and
+   * then the port the flow's `present` node left by (`next` or `failed`),
+   * or `failed` from its `spin` node when the host refused. One 20 s
+   * budget for the whole thing; a rejection names which half ran out.
    *
    * Unlike the button, it first waits for the flow to be able to hear it:
    * `flow.ready` (the document is armed — `#status` reads `ready` before
@@ -595,13 +639,13 @@ ctx.inject(['flow'], (c) =>
     await flow.ready;
     while (flow.busy()) {
       if (Date.now() >= deadline)
-        throw new Error('the flow stayed busy for 20 s — ui.spin was not emitted');
+        throw new Error('the flow stayed busy for 20 s — Spin was not pressed');
       await new Promise((tick) => setTimeout(tick, 10));
     }
     return new Promise((resolve, reject) => {
       const timer = setTimeout(() => {
         off();
-        reject(new Error('no present node left the flow within 20 s of ui.spin — see the trace'));
+        reject(new Error('no present node left the flow within 20 s of Spin — see the trace'));
       }, deadline - Date.now());
       const off = flow.onTrace((entry) => {
         const kind = kindOf(entry.node);
@@ -612,7 +656,7 @@ ctx.inject(['flow'], (c) =>
         off();
         resolve({ out: entry.out! });
       });
-      events.emit('ui.spin', { turbo: opts?.turbo ?? false });
+      pressSpin(opts?.turbo ?? false);
     });
   },
   /**
@@ -627,6 +671,30 @@ ctx.inject(['flow'], (c) =>
    */
   skip(): void {
     currentEvents()?.emit('ui.skip');
+  },
+  /**
+   * The shell's live state, as a plain copy (`JSON.parse(JSON.stringify(…))`
+   * — Playwright serialises the return value the same way, and a copy taken
+   * here cannot alias a row's own object). `null` with no `shell1` row —
+   * which the editor page's `__e8editor.hasShell()` is the pair of: the
+   * game page HAS a shell, the scene canvas has none.
+   */
+  shell(): { state: Record<string, unknown> } | null {
+    const shell = currentShell();
+    if (!shell) return null;
+    return JSON.parse(JSON.stringify({ state: shell.state })) as { state: Record<string, unknown> };
+  },
+  /**
+   * Presses one of the shell's own controls — `shell.actions[name](...args)`:
+   * `spin`, `stepBet(1)`, `startAutoplay(2)`, … — the way a person's finger
+   * on the bar would, so a test drives the real shell rather than this
+   * page's proxy of it. `false` when there is no shell, or no such action.
+   */
+  shellAction(name: string, ...args: unknown[]): boolean {
+    const action = currentShell()?.actions[name];
+    if (typeof action !== 'function') return false;
+    action(...args);
+    return true;
   },
   /**
    * The `StepOpts` the board's last method actually ran with — `turbo`
