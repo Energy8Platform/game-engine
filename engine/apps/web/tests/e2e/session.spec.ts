@@ -124,9 +124,11 @@ test('a session opens on the first spin, and Step finishes the round — three s
     node: string;
     out: string | null;
   }[];
-  // The `step` node ran twice (one per Step call the session needed) and
-  // left by `result` both times — the `failed` port never taken.
-  expect(trace.filter((e) => e.node === 'step' && e.out === 'result').length).toBeGreaterThanOrEqual(2);
+  // The `step` node ran exactly twice — `session-fixture`'s `spin` always
+  // awards 2 free spins (session.test.ts pins this at the host level), so
+  // the round needs exactly two Steps to close, no more, no fewer — and
+  // left by `result` both times, the `failed` port never taken.
+  expect(trace.filter((e) => e.node === 'step' && e.out === 'result').length).toBe(2);
   // Every draw the loop made presented cleanly — `draw`'s last exit is
   // `next`, the port `present` takes on success (`failed` is the other).
   const draws = trace.filter((e) => e.node === 'draw');

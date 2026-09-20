@@ -20,16 +20,49 @@
  * copy's untouched `e8.patch.yml`/`flow.yml` (still bound `base_game:
  * reel-step`) need no edit at all — only `game/` moves.
  *
+ * **Where a failure of either half actually surfaces — measured, not
+ * assumed (fix round 1).** Neither `readGameConfig`'s `assemble()` refusal
+ * (`plugin: 'spec'`) nor `spinSchema`'s own (`plugin: 'schema'`) reaches
+ * the GAME's own `ctx.diagnostics` — `window.__e8.liveDiagnostics()` reads
+ * that service, browser-side, and neither producer runs inside the
+ * composed game at all: `assemble()`/`readGameConfig` run in the HOST
+ * process, before `dev-game` (which owns the game's own composition) ever
+ * plugs. A `spec` refusal is reported through
+ * `ctx.ideRpc.reportGameDiagnostics('dev-game', …)`
+ * (`project-scope.ts`), which always ships `source: 'host'` on the wire
+ * regardless of the speaker string (`rpc.ts`'s own `reportGameDiagnostics`
+ * stamps it, not the caller) — so it lands in the IDE's
+ * `game-diagnostics` group, never in `GET /api/composition`'s
+ * `diagnostics` (that field is `ctx.project.diagnostics` +
+ * `ctx.spinSchema.diagnostics` only — `runtime-assets.ts`'s `composition`
+ * route — `spec` diagnostics are not part of either array). `schema`'s
+ * own diagnostics run the other way: they ARE part of
+ * `ctx.spinSchema.diagnostics`, so they DO ride `GET /api/composition`,
+ * but never reach the game process either.
+ *
+ * The one place both actually land, side by side, is the IDE's
+ * **Diagnostics panel** (`engine/ide/client/src/screens/DiagnosticsPanel
+ * .tsx`, `data-testid="diagnostics-panel"`, mounted in the app chrome —
+ * see `App.tsx` — so no particular `#/doc/…` route is required to read
+ * it): its `project` rows come from `GET /api/composition`'s own
+ * `diagnostics` (covers `schema`) and its `game` rows come from the
+ * `game-diagnostics` wire (covers `spec`, stamped `source: 'host'`,
+ * rendered with the `speakerLabel` "the host" — see `contract.spec.ts`'s
+ * mask case and `debts.spec.ts`'s `panel()` helper for the same read).
+ * Confirmed by breaking the copy's `spec.json` (`delete spec.maxWin`) in a
+ * scratch run before writing this test: the panel showed exactly one
+ * `data-severity="error"` row reading `game the host error spec ·
+ * game/spec.json: game/spec.json is a GameSpec missing a number the
+ * generated prelude needs: maxWin — give maxWin a number in
+ * game/spec.json` — the panel selector below, `:has(.e8-diagnostic-plugin
+ * :text-is("spec"))`, matches it. Not committed as a test case (the brief
+ * asks only that this be provable, not permanently red-and-green); this
+ * comment is the record.
+ *
  * Same fixture and idioms as `contract.spec.ts`: a private `projectCopy()`,
  * its files edited BEFORE `startDevHost`, the composition document's
  * `Preview` (`iframe[title="game preview"]`) and the game's own
- * `window.__e8`. The diagnostics check follows `contract.spec.ts`'s mask
- * case: `liveDiagnostics()` re-reads the GAME's own service rather than the
- * frozen boot-time snapshot; `GET /api/composition`'s own `diagnostics`
- * (`ctx.project.diagnostics` + `ctx.spinSchema.diagnostics`, per
- * `runtime-assets.ts`'s `composition` route) is the host-side half — where
- * an `assemble()` refusal (`plugin: 'spec'`) or an unparseable `.spin`
- * (`plugin: 'schema'`) would actually show up.
+ * `window.__e8`.
  */
 import { cpSync, rmSync } from 'node:fs';
 import { dirname, join } from 'node:path';
@@ -80,8 +113,21 @@ async function readyFrame(page: Page): Promise<Frame> {
   return frame;
 }
 
-/** The two speakers `assemble()`/`spinSchema` report under, plus the game's own session seam. */
-const PRELUDE_SPEAKERS = new Set(['spec', 'schema', 'session']);
+/**
+ * An `error`-severity row in the Diagnostics panel whose `plugin` is
+ * exactly `spec` or `schema` — the two speakers this task's prelude path
+ * can actually fail through (see the module doc above for where each
+ * lands). `:text-is` rather than `hasText`, so a message that merely
+ * mentions "spec.json" in its text can never false-match.
+ */
+function specOrSchemaError(page: Page) {
+  return page
+    .getByTestId('diagnostics-panel')
+    .locator(
+      '.e8-diagnostic-row[data-severity="error"]:has(.e8-diagnostic-plugin:text-is("spec")), ' +
+        '.e8-diagnostic-row[data-severity="error"]:has(.e8-diagnostic-plugin:text-is("schema"))',
+    );
+}
 
 test('a GameSpec project — spec.json + logic-only script.spin — boots and spins, with no assemble/schema diagnostics', async ({
   page,
@@ -96,16 +142,5 @@ test('a GameSpec project — spec.json + logic-only script.spin — boots and sp
   const outcome = await frame.evaluate(() => (window as any).__e8.spin());
   expect(outcome).toEqual({ out: 'next' });
 
-  const live = (await frame.evaluate(() => (window as any).__e8.liveDiagnostics())) as {
-    severity: string;
-    plugin: string;
-  }[];
-  expect(live.filter((d) => d.severity === 'error' && PRELUDE_SPEAKERS.has(d.plugin))).toEqual([]);
-
-  const composition = (await (
-    await page.request.get(`${host.url}/api/composition`)
-  ).json()) as { diagnostics: { severity: string; plugin: string }[] };
-  expect(
-    composition.diagnostics.filter((d) => d.severity === 'error' && PRELUDE_SPEAKERS.has(d.plugin)),
-  ).toEqual([]);
+  await expect(specOrSchemaError(page)).toHaveCount(0);
 });
