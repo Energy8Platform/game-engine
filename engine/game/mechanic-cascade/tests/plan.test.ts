@@ -130,3 +130,115 @@ describe('cascade', () => {
     expect(expects.fields).toEqual({ grid: 'grid', cascade_history: 'list' });
   });
 });
+
+/**
+ * `options?.tumble` (slice 25 Task 2): each round becomes ONE `tumble` step
+ * instead of `remove` + `refill` — the gravity-slide vocabulary those two
+ * cannot express (see `TumbleStep`'s own doc in `@energy8engine/contracts`).
+ *
+ * `TUMBLE_CHAIN` is a 2×2 board (`Board` is `board[col][row]`) worked by
+ * hand so a `col`/`row` swap in `fresh`'s derivation cannot hide: round 0
+ * clears `(0,1)` — one cell, column 0 — and settles on `[[9,1],[3,4]]`
+ * (col0 = `[9,1]`, col1 = `[3,4]`), so column 0's `fresh` is its OWN
+ * post-collapse board's top ONE cell: `(0,0) → 9`. Round 1 then clears
+ * BOTH cells of column 1 on round 0's own board, settling on
+ * `[[9,1],[7,8]]`, so column 1's `fresh` is its top TWO cells: `(1,0) → 7`,
+ * `(1,1) → 8`.
+ */
+const TUMBLE_CHAIN = {
+  grid: [
+    [1, 2],
+    [3, 4],
+  ],
+  win: 8,
+  base_win: 0,
+  lines: [],
+  cascade_history: [
+    {
+      grid: [
+        [9, 1],
+        [3, 4],
+      ],
+      removed: [{ col: 0, row: 1 }],
+      win: 5,
+    },
+    {
+      grid: [
+        [9, 1],
+        [7, 8],
+      ],
+      removed: [
+        { col: 1, row: 0 },
+        { col: 1, row: 1 },
+      ],
+      win: 3,
+    },
+  ],
+};
+
+describe('cascade — tumble', () => {
+  it('replaces remove+refill with one tumble step per round', () => {
+    expect(plan(TUMBLE_CHAIN, { tumble: true }).map((s) => s.kind)).toEqual([
+      'spinTo',
+      'revealWins',
+      'tumble',
+      'revealWins',
+      'tumble',
+    ]);
+  });
+
+  it('derives fresh as the top k cells of the settled board (k = removed cells in that column), winning mirrors removed, and drops is omitted', () => {
+    const tumbles = plan(TUMBLE_CHAIN, { tumble: true }).filter((s) => s.kind === 'tumble');
+    expect(tumbles).toEqual([
+      {
+        kind: 'tumble',
+        winning: [{ col: 0, row: 1 }],
+        removed: [{ col: 0, row: 1 }],
+        fresh: [{ col: 0, row: 0, symbol: 9 }],
+        settled: TUMBLE_CHAIN.cascade_history[0].grid,
+      },
+      {
+        kind: 'tumble',
+        winning: [
+          { col: 1, row: 0 },
+          { col: 1, row: 1 },
+        ],
+        removed: [
+          { col: 1, row: 0 },
+          { col: 1, row: 1 },
+        ],
+        fresh: [
+          { col: 1, row: 0, symbol: 7 },
+          { col: 1, row: 1, symbol: 8 },
+        ],
+        settled: TUMBLE_CHAIN.cascade_history[1].grid,
+      },
+    ]);
+    expect(tumbles.every((s) => !('drops' in s))).toBe(true);
+  });
+
+  it("still reveals each round's own win — same totals as remove+refill — before its tumble", () => {
+    const reveals = plan(TUMBLE_CHAIN, { tumble: true }).filter((s) => s.kind === 'revealWins') as {
+      total: number;
+    }[];
+    expect(reveals.map((r) => r.total)).toEqual([5, 3]);
+  });
+
+  it('a round that clears without paying still tumbles, but fabricates no revealWins for it', () => {
+    const steps = plan(CLEARS_WITHOUT_PAYING, { tumble: true });
+    expect(steps.map((s) => s.kind)).toEqual(['spinTo', 'tumble']);
+  });
+
+  it('tumble: false, or no options at all, is unchanged — the old remove+refill plan', () => {
+    expect(plan(TUMBLE_CHAIN, { tumble: false })).toEqual(plan(TUMBLE_CHAIN));
+    expect(plan(TUMBLE_CHAIN).map((s) => s.kind)).toEqual([
+      'spinTo',
+      'revealWins',
+      'remove',
+      'refill',
+      'revealWins',
+      'remove',
+      'refill',
+    ]);
+  });
+});

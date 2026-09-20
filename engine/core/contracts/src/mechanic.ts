@@ -93,7 +93,15 @@ export interface SpinMechanic<TStep extends { kind: string } = never> {
    * probably not the one you meant.
    */
   requires: SpinShapeRequirement;
-  present(data: unknown): (KnownPresentationStep | TStep)[];
+  /**
+   * `options.tumble` (slice 25) is additive: it exists for `cascade`, which
+   * reads it to choose `tumble` steps over `remove`+`refill` (see
+   * `@energy8engine/mechanic-cascade`'s own doc). A mechanic that has no use
+   * for it — `classic`, a plugin's own — simply declares one parameter and
+   * ignores the second; nothing calls `present` positionally in a way that
+   * would break by adding it.
+   */
+  present(data: unknown, options?: { tumble?: boolean }): (KnownPresentationStep | TStep)[];
 }
 
 /**

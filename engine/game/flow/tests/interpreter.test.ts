@@ -128,7 +128,9 @@ describe('createFlow', () => {
     f.flow.replace(d);
     await settled(f, ['start.next', 'spin.result', 'draw.next']);
     expect(f.mechanics.present).toHaveBeenCalledWith('base_game', {});
-    expect(f.play.execute).toHaveBeenCalledWith([{ kind: 'x' }], f.board);
+    // `draw` carries no `turbo` prop, so the schema default `'$turbo'`
+    // resolves against a var nobody set — `null`, i.e. not turbo.
+    expect(f.play.execute).toHaveBeenCalledWith([{ kind: 'x' }], f.board, undefined, { turbo: false });
     expect(f.play.record).toHaveBeenCalledWith({
       request: { action: 'spin' },
       result: okBody,

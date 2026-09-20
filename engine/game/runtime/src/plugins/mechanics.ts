@@ -174,14 +174,18 @@ declare module 'cordis' {
 export const name = 'mechanics';
 
 /**
- * No settings, and no config parameter to hold them. There was an empty
- * `MechanicsConfig` here, exported from the package index, with no
+ * `tumble` (slice 25) is this plugin's first real setting. There was an
+ * empty `MechanicsConfig` here, exported from the package index, with no
  * producer and no reader — the shared `diagnostics` array it used to carry
  * went with the bind-time complaint that was the only thing pushing onto
- * it (see `bind`). An empty interface is not a published shape, it is a
- * name; cordis passes a config argument this plugin simply ignores.
+ * it (see `bind`) — but a genuinely empty interface is not a published
+ * shape, so it is gone rather than widened. `tumble` is read once, at
+ * apply time, and threaded through every `present()` call as `{ tumble }`
+ * — a mechanic that doesn't read it (`classic`) ignores it, same as any
+ * other additive option.
  */
-export function apply(ctx: Context) {
+export function apply(ctx: Context, config: { tumble?: boolean } = {}) {
+  const tumble = config.tumble ?? false;
   // Same guarantee `@energy8engine/play-loop`'s `BoardStepRegistry` now
   // gets from the same package, in place of a second hand-rolled `Map` +
   // has-then-set branch + identity-guarded removal — see
@@ -340,7 +344,7 @@ export function apply(ctx: Context) {
       const mechanic = service.forStage(stage)!;
       let plan: unknown;
       try {
-        plan = mechanic.present(data);
+        plan = mechanic.present(data, { tumble });
       } catch (error) {
         // Unlike the branch above, THIS diagnostic is `present`'s own —
         // `check` never produces it — so `present` is the one that writes

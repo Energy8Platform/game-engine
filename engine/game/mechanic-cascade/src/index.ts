@@ -49,10 +49,12 @@
  *     question with the field that question is actually about.
  */
 import type {
+  CascadeRound,
   CascadeStageData,
   PresentationPlan,
   SpinMechanic,
   SpinShapeRequirement,
+  TumbleStep,
 } from '@energy8engine/contracts';
 
 // `CascadeRound` is `@energy8engine/contracts`' own type — re-exported
@@ -75,14 +77,46 @@ export const expects: SpinShapeRequirement = {
 };
 
 /**
- * Spin to the pre-cascade board, then walk the chain: reveal a round's win
- * when it has one, remove what it cleared, and refill with that SAME
- * round's own post-collapse board — stopping at the first round that
- * neither paid nor cleared anything (see the module doc above for why
- * those are two separate gates, and why the refill is the round's own
- * board rather than the next round's).
+ * `TumbleStep.fresh` for one round: what drops in from above, per column.
+ * Gravity drops survivors to the bottom and fills the vacated rows from the
+ * top — `deriveDrops` in `@energy8platform/game-engine`'s `TumbleController`
+ * is the animation built on exactly that assumption (row 0 is the top of a
+ * `Board` column) — so the fresh symbols for a column are the top *k* cells
+ * of `round.grid` (the round's own post-collapse board), where *k* is how
+ * many cells `round.removed` named in that column. A column `removed` never
+ * touched gets no fresh cells at all: nothing dropped there.
  */
-export function plan(data: CascadeSpinData): PresentationPlan {
+function tumbleFresh(round: CascadeRound): TumbleStep['fresh'] {
+  const removedPerCol = new Map<number, number>();
+  for (const cell of round.removed) {
+    removedPerCol.set(cell.col, (removedPerCol.get(cell.col) ?? 0) + 1);
+  }
+  const fresh: TumbleStep['fresh'] = [];
+  for (const [col, count] of removedPerCol) {
+    for (let row = 0; row < count; row++) {
+      fresh.push({ col, row, symbol: round.grid[col][row] });
+    }
+  }
+  return fresh;
+}
+
+/**
+ * Spin to the pre-cascade board, then walk the chain: reveal a round's win
+ * when it has one, and collapse what it cleared — stopping at the first
+ * round that neither paid nor cleared anything (see the module doc above
+ * for why those are two separate gates, and why the refill/settled board is
+ * the round's own rather than the next round's).
+ *
+ * `options?.tumble` swaps HOW a round collapses, not whether: `remove` +
+ * `refill` (two teleports) becomes one `tumble` (the gravity slide `remove`
+ * + `refill` cannot express at all — see `TumbleStep`'s own doc in
+ * `@energy8engine/contracts`). `winning` is the same cells as `removed` —
+ * this mechanic has no separate "cells that merely light up" set, unlike a
+ * collector feature might — and `drops` stays omitted so the board derives
+ * the slide from `removed` by gravity, the ordinary column-collapse case
+ * this mechanic is.
+ */
+export function plan(data: CascadeSpinData, options?: { tumble?: boolean }): PresentationPlan {
   const steps: PresentationPlan = [{ kind: 'spinTo', board: data.grid }];
 
   for (const round of data.cascade_history) {
@@ -92,8 +126,18 @@ export function plan(data: CascadeSpinData): PresentationPlan {
     if (round.win > 0) {
       steps.push({ kind: 'revealWins', total: round.win, lines: [] });
     }
-    steps.push({ kind: 'remove', cells: round.removed });
-    steps.push({ kind: 'refill', board: round.grid });
+    if (options?.tumble) {
+      steps.push({
+        kind: 'tumble',
+        winning: round.removed,
+        removed: round.removed,
+        fresh: tumbleFresh(round),
+        settled: round.grid,
+      });
+    } else {
+      steps.push({ kind: 'remove', cells: round.removed });
+      steps.push({ kind: 'refill', board: round.grid });
+    }
   }
 
   return steps;
@@ -103,5 +147,5 @@ export function plan(data: CascadeSpinData): PresentationPlan {
 export const mechanic: SpinMechanic = {
   id: 'cascade',
   requires: expects,
-  present: (data) => plan(data as CascadeSpinData),
+  present: (data, options) => plan(data as CascadeSpinData, options),
 };

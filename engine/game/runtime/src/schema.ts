@@ -9,4 +9,7 @@ import Schema from 'schemastery';
 
 export const Config = Schema.object({
   stages: Schema.dict(Schema.string()).description('stage id → mechanic id'),
+  tumble: Schema.boolean()
+    .default(false)
+    .description('a cascade presents tumbles (gravity + refill) instead of remove + refill'),
 });

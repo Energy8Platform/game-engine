@@ -257,16 +257,24 @@ const step: FlowNodeKind<{ roundId: string; action: string }> = {
   },
 };
 
-const present: FlowNodeKind = {
+const present: FlowNodeKind<{ turbo: string }> = {
   kind: 'present',
-  schema: none,
+  schema: Schema.object({
+    turbo: Schema.string()
+      .default('$turbo')
+      .description("literal 'true', or a `$path` to a var — hurries the board while this plan plays"),
+  }),
   outs: ['next', 'failed'],
-  async run(_p, { ctx, vars }) {
+  async run(p, { ctx, vars }) {
     const result = vars.result as { stage: string; data: Record<string, unknown> } | undefined;
     if (!result) throw new Error('vars.result is missing — run `spin` first');
     const { plan, diagnostics } = service<MechanicsLike>(ctx, 'mechanics').present(result.stage, result.data);
     const play = service<PlayService>(ctx, 'play');
-    const problems = diagnostics.length ? diagnostics : await play.execute(plan, ctx.reflect.get('board', false));
+    const turbo = resolve(p.turbo, vars);
+    const opts = { turbo: turbo === true || turbo === 'true' };
+    const problems = diagnostics.length
+      ? diagnostics
+      : await play.execute(plan, ctx.reflect.get('board', false), undefined, opts);
     // The spin log: what was drawn — `[]` when the presentation failed.
     play.record({
       request: (vars.request as Record<string, unknown>) ?? {},

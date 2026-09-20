@@ -40,10 +40,12 @@ export const name = 'mechanics';
 export interface MechanicsRowConfig {
   /** stage id → mechanic id, applied to the two mechanics this row always registers (`classic`, `cascade`). */
   stages?: Record<string, string>;
+  /** `cascade` presents tumbles (gravity + refill) instead of remove + refill. Default `false`. */
+  tumble?: boolean;
 }
 
 export function apply(ctx: Context, config: MechanicsRowConfig = {}): void {
-  mechanicsPlugin.apply(ctx);
+  mechanicsPlugin.apply(ctx, { tumble: config.tumble });
 
   ctx.mechanics.register(classicMechanic);
   ctx.mechanics.register(cascadeMechanic);

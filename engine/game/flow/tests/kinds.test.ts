@@ -266,6 +266,43 @@ describe('built-in kinds', () => {
     expect(play.record).toHaveBeenLastCalledWith({ request: {}, result, plan: [] });
   });
 
+  describe('present: turbo', () => {
+    /** Schema-filled props, the way the interpreter always calls `run` — same device `propProps` below uses. */
+    const presentProps = (props: Record<string, unknown> = {}) =>
+      kind('present').schema(props) as { turbo: string };
+
+    it("resolves a literal 'true' to turbo: true", async () => {
+      const mechanics = { present: vi.fn(() => ({ plan: [], diagnostics: [] })) };
+      const play = { execute: vi.fn(async () => []), record: vi.fn() };
+      const result = { stage: 'base_game', data: {} };
+      const { rc } = runCtx({ mechanics, play }, { result });
+
+      await kind('present').run!(presentProps({ turbo: 'true' }), rc);
+      expect(play.execute).toHaveBeenCalledWith([], undefined, undefined, { turbo: true });
+    });
+
+    it('resolves a $path var to turbo: true', async () => {
+      const mechanics = { present: vi.fn(() => ({ plan: [], diagnostics: [] })) };
+      const play = { execute: vi.fn(async () => []), record: vi.fn() };
+      const result = { stage: 'base_game', data: {} };
+      // The schema's own default is '$turbo' — no `turbo` prop needed.
+      const { rc } = runCtx({ mechanics, play }, { result, turbo: true });
+
+      await kind('present').run!(presentProps(), rc);
+      expect(play.execute).toHaveBeenCalledWith([], undefined, undefined, { turbo: true });
+    });
+
+    it('an absent var resolves through null to turbo: false', async () => {
+      const mechanics = { present: vi.fn(() => ({ plan: [], diagnostics: [] })) };
+      const play = { execute: vi.fn(async () => []), record: vi.fn() };
+      const result = { stage: 'base_game', data: {} };
+      const { rc } = runCtx({ mechanics, play }, { result }); // no `turbo` var at all
+
+      await kind('present').run!(presentProps(), rc);
+      expect(play.execute).toHaveBeenCalledWith([], undefined, undefined, { turbo: false });
+    });
+  });
+
   describe('parseTarget', () => {
     it('splits on the first "/"; a node id with its own "/" stays intact; no "/" at all is null', () => {
       expect(parseTarget('a/b')).toEqual({ scene: 'a', node: 'b' });
