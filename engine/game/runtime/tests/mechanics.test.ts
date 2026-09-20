@@ -392,6 +392,44 @@ describe('the mechanics1 row', () => {
       await ctx.fiber.dispose();
     }
   });
+
+  /**
+   * The row's own `config.tumble` (slice 25 Task 2) — not `plugins/
+   * mechanics.ts`'s own `apply(ctx, config)` in isolation (covered above,
+   * in `describe('the mechanic registry', ...)`, by whatever the caller
+   * hands `present()` directly), but the full path from a row's config to
+   * the argument a mechanic's `present` actually receives: `mechanicsRow.
+   * apply` reads `config.tumble`, passes it to `mechanicsPlugin.apply`,
+   * which closes over it and threads `{ tumble }` into every
+   * `mechanic.present(data, ...)` call.
+   */
+  it('config.tumble reaches mechanic.present as a second { tumble } argument — true when set, false by default', async () => {
+    const present = vi.fn((_data: unknown, _options?: { tumble?: boolean }) => []);
+    const FAKE = { id: 'fake', requires: { fields: {} }, present };
+    const thirdPartyRow = {
+      name: 'fake-mechanic',
+      apply(ctx: Context) {
+        ctx.inject(['mechanics'], (scope) => {
+          scope.mechanics.register(FAKE);
+        });
+      },
+    };
+
+    const withTumble = new Context();
+    await withTumble.plugin(thirdPartyRow);
+    await withTumble.plugin(mechanicsRow, { stages: { base_game: 'fake' }, tumble: true });
+    withTumble.mechanics.present('base_game', {});
+    expect(present.mock.calls[0][1]).toEqual({ tumble: true });
+    await withTumble.fiber.dispose();
+
+    present.mockClear();
+    const withoutTumble = new Context();
+    await withoutTumble.plugin(thirdPartyRow);
+    await withoutTumble.plugin(mechanicsRow, { stages: { base_game: 'fake' } });
+    withoutTumble.mechanics.present('base_game', {});
+    expect(present.mock.calls[0][1]).toEqual({ tumble: false });
+    await withoutTumble.fiber.dispose();
+  });
 });
 
 /**
