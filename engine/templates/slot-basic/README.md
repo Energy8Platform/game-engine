@@ -134,6 +134,33 @@ animates through four frames of a spinning disc, from the `media1` row. A
 `win` node after `coin` is a `text` node, empty until the flow's `show_win`
 node (kind `prop`) writes `$result.win` into it after every spin.
 
+## The window, pins and portrait
+
+`renderer1` names no `width`/`height` in `e8.patch.yml`, so the canvas is
+whatever box the page gives `#mount` — `index.html` and `editor.html` both
+make it `position: fixed; inset: 0`, the whole window (or the whole iframe
+the IDE sized). A page's CSS decides, not the composition; give the row both
+numbers back and the canvas is that fixed size again. `scenes1` fits its
+`design` (480×288) into that box minus the shell's bar, `contain`, centred —
+the SAFE rect — and every node still sits at design coordinates. A node with
+a `pin` (`top-left`, `top`, `top-right`, `left`, `center`, `right`,
+`bottom-left`, `bottom`, `bottom-right`) reads its `x`/`y` as OFFSETS from
+that point of the safe rect instead: `base_game`'s `win` is `pin: bottom, x:
+0, y: -24`, 24 design px above the bar at any window size. A pin on a nested
+node is ignored (a diagnostic says so), and a `pin` on a symbol state in
+`symbols.yml` is inert — the reels place their cells. When the safe rect is
+taller than wide the scenes switch to `scenes1.config.portrait` (288×480
+here; absent, the design rotated) and apply the scene file's `portrait:
+nodes:` block over the named top-level nodes — `logo` pins to the top and
+`coin` hides; landscape puts them back. The scene tab's viewport select
+(`design`, `1280×720`, `390×844`, `844×390`, custom) sizes the canvas to that
+viewport, with the bar's band hatched: under a portrait one, every drag and
+every Properties edit writes `portrait.nodes.<id>`, never the node's own
+props (the tree marks such a node `◐`; "clear portrait override" removes the
+entry), while a DROP there still adds a node with its own props — at
+portrait-design coordinates. Under `design` or a landscape preset edits go to
+the node as before, and a drag on a pinned node writes the offset.
+
 ## `e8 build`
 
 `e8 build [--target <name>] [--base <path>] [--out <dir>]` writes a static

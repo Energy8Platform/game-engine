@@ -12,29 +12,49 @@
         color: #e8e8f0;
         font-family: system-ui, sans-serif;
       }
+      /* The canvas fills the window (`#mount` below); the dev toolbar and
+         the log float over it, top and bottom, on a translucent band. */
       #controls {
+        position: fixed;
+        top: 0;
+        left: 0;
+        right: 0;
+        z-index: 2;
         display: flex;
         align-items: center;
         gap: 0.75rem;
         padding: 0.75rem 1rem;
+        background: rgba(16, 18, 26, 0.75);
       }
       /* A built page (`e8 build`) sets `hidden` on the toolbar; the
          `display: flex` above would otherwise outrank the attribute. */
       #controls[hidden] {
         display: none;
       }
+      /* The renderer row follows this box (`renderer1` names no size), so
+         this is what makes the game fill the window. */
       #mount {
+        position: fixed;
+        inset: 0;
         line-height: 0;
       }
       #log {
-        margin: 0 1rem 1rem;
+        position: fixed;
+        bottom: 0;
+        left: 0;
+        right: 0;
+        z-index: 2;
+        margin: 0;
         padding: 0.5rem 0.75rem;
-        background: #1a1d29;
-        border-radius: 6px;
+        background: rgba(26, 29, 41, 0.85);
         font: 12px/1.5 ui-monospace, monospace;
         white-space: pre-wrap;
         max-height: 12rem;
         overflow: auto;
+      }
+      /* Nothing to say: no band over the shell's bar. */
+      #log:empty {
+        display: none;
       }
       button {
         font: inherit;

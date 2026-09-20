@@ -60,8 +60,24 @@ async function spins(frame: Frame): Promise<number> {
   return frame.evaluate(() => (window as any).__e8.spins().length);
 }
 
-/** One click on the game's own button, waited to `done` — the click sets `spinning…` synchronously, so `done` here is this spin's. */
-async function spinOnce(frame: Frame): Promise<void> {
+/**
+ * One click on the game's own button, waited to `done` — the click sets
+ * `spinning…` synchronously, so `done` here is this spin's.
+ *
+ * The preview is brought into view on the IDE's page FIRST. A `fill` on a
+ * row's field below it scrolls the doc pane so the iframe sits well above
+ * the viewport, and Chromium pauses `requestAnimationFrame` in an
+ * offscreen cross-origin iframe — which Playwright's own "stable" check
+ * before a click is built on. Measured 2026-09-20: with the game's canvas
+ * filling the iframe (slice 27 — `#mount` is the window, `renderer1`
+ * names no size) that check never settles (60 s, rAF silent throughout);
+ * with a fixed 480×288 canvas in the same offscreen iframe it settled in
+ * 17 ms. The outer-page scroll is what un-throttles the frame (rAF back
+ * within 40 ms), and it is the IDE's own element, so it is scrolled from
+ * the IDE's side rather than through the frame.
+ */
+async function spinOnce(page: Page, frame: Frame): Promise<void> {
+  await page.locator(PREVIEW).scrollIntoViewIfNeeded();
   await frame.locator('#spin').click();
   await expect.poll(() => status(frame), { timeout: 15_000 }).toBe('done');
 }
@@ -87,7 +103,10 @@ test('game rows: a hot row has a form, a cold row says so, a schemaless row has 
     await expect(page.getByTestId('row-reels1-cold')).toHaveCount(0);
 
     const renderer = page.getByTestId('row-renderer1');
-    await expect(renderer.locator('#field-renderer1-width')).toHaveValue('480');
+    // Empty, not `480`: the fixture's `renderer1` names no size any more —
+    // the canvas follows the page's `#mount` (slice 27) — and the form
+    // shows the absent field as such.
+    await expect(renderer.locator('#field-renderer1-width')).toHaveValue('');
     await expect(renderer.getByTestId('row-renderer1-cold')).toHaveText('cold');
     // The badge on the field is the plugin's own word (`applies: 'restart'`).
     await expect(
@@ -119,7 +138,7 @@ test('a hot edit reaches the live board and keeps the session: same iframe, same
       rows: 3,
     });
 
-    await spinOnce(frame);
+    await spinOnce(page, frame);
     const before = await spins(frame);
     expect(before).toBe(1);
 
@@ -152,7 +171,7 @@ test('a hot edit reaches the live board and keeps the session: same iframe, same
     // A spin on the dead board resolves and gets recorded all the same
     // (measured), so the log growing is not enough — the board on stage
     // has to be the one that changed.
-    await spinOnce(frame);
+    await spinOnce(page, frame);
     expect(await spins(frame)).toBe(before + 1);
     const drawn = await symbols();
     expect(drawn).toHaveLength(4);
@@ -174,7 +193,7 @@ test('a cold edit reloads the preview: a new iframe, a fresh game, an empty log'
     await openComposition(page, host);
     const first = await gameFrame(page);
     await expect.poll(() => status(first), { timeout: 20_000 }).toBe('ready');
-    await spinOnce(first);
+    await spinOnce(page, first);
     expect(await spins(first)).toBe(1);
 
     await page.locator(PREVIEW).evaluate((el) => {

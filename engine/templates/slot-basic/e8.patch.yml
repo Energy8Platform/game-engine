@@ -3,14 +3,15 @@
 rows:
   - id: renderer1
     config:
-      width: 480
-      height: 288
       background: '#10121a'
   - id: scenes1
     config:
       design:
         width: 480
         height: 288
+      portrait:
+        width: 288
+        height: 480
   # The inner `config` is the reel system's own, not a typo — README.md.
   - id: reels1
     config:

@@ -112,9 +112,15 @@ test('a spin records its request — betLevel and action — in the durable spin
 test('the stage scales the design into the renderer — `stageScale()` off `scenes.container`', async ({
   page,
 }) => {
-  // Design stays 480×288 (`scenes1`, untouched); only `renderer1` grows to
-  // 960×576 — exactly double on both axes, so `contain` fit gives a clean
-  // scale of 2 (960/480 = 576/288 = 2), not a number that needs rounding.
+  // Design stays 480×288 (`scenes1`, untouched); `renderer1` is given
+  // 960×576 — exactly double on both axes. Since slice 27 the fixture's
+  // row names no size (the canvas follows `#mount`), so giving it both is
+  // the other half of that contract: the canvas is THAT size, whatever
+  // the preview iframe's. And the scenes fit the design into the canvas
+  // MINUS the shell's bar (the safe rect, spec §4): 92 px wide-layout
+  // (`SAFE_BOTTOM.wide` in the IDE's `SceneDocument.tsx`, measured the
+  // same here), so the fit is height-limited at (576 − 92) / 288 — not
+  // the clean 2 a bare canvas would give.
   const patchFile = join(dir, 'e8.patch.yml');
   const patch = load(readFileSync(patchFile, 'utf8')) as PatchDoc;
   const renderer = patch.rows.find((r) => r.id === 'renderer1')!;
@@ -126,7 +132,14 @@ test('the stage scales the design into the renderer — `stageScale()` off `scen
   const frame = await readyFrame(page);
   await expect
     .poll(() => frame.evaluate(() => (window as any).__e8.stageScale()), { timeout: 10_000 })
-    .toBe(2);
+    .toBeCloseTo((576 - 92) / 288, 5);
+  expect(
+    await frame.evaluate(() => {
+      const c = document.querySelector('#mount canvas') as HTMLCanvasElement;
+      return [c.clientWidth, c.clientHeight, innerWidth === 960 && innerHeight === 576];
+    }),
+    'a sized renderer1 is that size, not the iframe’s',
+  ).toEqual([960, 576, false]);
 
   // The design's own x (240, `scenes/base_game.scene.yml`'s `logo`) is
   // unaffected — the scale lives on the container, not on the node.

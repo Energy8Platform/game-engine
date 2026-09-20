@@ -236,8 +236,14 @@ describe('project.writePatchRow', () => {
       ),
     ).toEqual({
       rows: [
-        { id: 'renderer1', config: { width: 480, height: 288, background: '#10121a' } },
-        { id: 'scenes1', config: { design: { width: 480, height: 288 } } },
+        // No `width`/`height`: the canvas follows `#mount` (the whole
+        // window — `index.html`); `portrait` is the design the scenes fit
+        // when the safe rect is taller than wide (slice 27).
+        { id: 'renderer1', config: { background: '#10121a' } },
+        {
+          id: 'scenes1',
+          config: { design: { width: 480, height: 288 }, portrait: { width: 288, height: 480 } },
+        },
         { id: 'reels1', config: { config: { grid: { cols: 5, rows: 3 } } } },
         { id: 'mechanics1', config: { stages: { base_game: 'classic' } } },
         { id: 'playloop1', config: { skipEvents: ['ui.skip', 'ui.tap'] } },
@@ -254,8 +260,14 @@ describe('project.writePatchRow', () => {
     // the header's prose moved out. The DATA must not have moved with it.
     expect(yaml.load(readFileSync(FIRST_SLOT_PATCH, 'utf8'))).toEqual({
       rows: [
-        { id: 'renderer1', config: { width: 480, height: 288, background: '#10121a' } },
-        { id: 'scenes1', config: { design: { width: 480, height: 288 } } },
+        // No `width`/`height`: the canvas follows `#mount` (the whole
+        // window — `index.html`); `portrait` is the design the scenes fit
+        // when the safe rect is taller than wide (slice 27).
+        { id: 'renderer1', config: { background: '#10121a' } },
+        {
+          id: 'scenes1',
+          config: { design: { width: 480, height: 288 }, portrait: { width: 288, height: 480 } },
+        },
         { id: 'reels1', config: { config: { grid: { cols: 5, rows: 3 } } } },
         { id: 'mechanics1', config: { stages: { base_game: 'reel-step' } } },
         { id: 'playloop1', config: { skipEvents: ['ui.skip', 'ui.tap'] } },

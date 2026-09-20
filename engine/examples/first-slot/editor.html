@@ -12,7 +12,11 @@
         color: #e8e8f0;
         font-family: system-ui, sans-serif;
       }
+      /* The renderer follows this box: the whole iframe, whatever viewport
+         the IDE sized it to. */
       #mount {
+        position: fixed;
+        inset: 0;
         line-height: 0;
       }
     </style>

@@ -915,7 +915,34 @@ ctx.inject(['flow'], (c) =>
         ?.scale.x ?? null
     );
   },
+  /**
+   * The last `resize`'s fit — `scenes.fit()`: the scale, the offset and
+   * the SAFE rect in design units (`viewport.{left,top,right,bottom}` —
+   * what a `pin` measures from, so a test can put a pinned node's
+   * `nodeProps` against the edge it names). A plain copy, not the
+   * runtime's own object; `null` with no `scenes` row or before the first
+   * layout, like `stageScale`.
+   */
+  fit(): PageFit | null {
+    const f = (ctx.reflect.get('scenes', false) as { fit?(): PageFit | null } | undefined)?.fit?.();
+    return f ? (JSON.parse(JSON.stringify(f)) as PageFit) : null;
+  },
+  /** The scenes runtime's verdict on the safe rect — `scenes.orientation()`; `null` with no `scenes` row. */
+  orientation(): 'landscape' | 'portrait' | null {
+    return (
+      (ctx.reflect.get('scenes', false) as { orientation?(): 'landscape' | 'portrait' } | undefined)
+        ?.orientation?.() ?? null
+    );
+  },
 };
+
+/** What `__e8.fit()` answers — `@energy8engine/scenes`'s `Fit`, spelled out so this page imports nothing from that package. */
+interface PageFit {
+  scale: number;
+  x: number;
+  y: number;
+  viewport: { left: number; top: number; right: number; bottom: number };
+}
 
 /** Any pixi display object, for `cellArt`'s walk down to its deepest first descendant. */
 interface ViewNode {

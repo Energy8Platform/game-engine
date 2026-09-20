@@ -87,22 +87,26 @@ import { projectCopy, startDevHost } from './project-fixture';
  *
  * Spelled out in full rather than written as the single removal row
  * alone, because everything else has to stay identical for the test to
- * mean anything. Drop `renderer1`'s size and `scenes1`'s design along with
- * it and the game would change for those reasons too — a screen that went
- * empty could no longer be attributed to the reels row, and the test
- * would be passing through a branch other than the one it names.
+ * mean anything. Drop `renderer1`'s background and `scenes1`'s design along
+ * with it and the game would change for those reasons too — a screen that
+ * went empty could no longer be attributed to the reels row, and the test
+ * would be passing through a branch other than the one it names. (Since
+ * slice 27 the fixture's `renderer1` carries no size — the canvas follows
+ * `#mount` — and `scenes1` carries the portrait design; these copies say
+ * the same.)
  */
 const PATCH_WITHOUT_REELS = `rows:
   - id: renderer1
     config:
-      width: 480
-      height: 288
       background: '#10121a'
   - id: scenes1
     config:
       design:
         width: 480
         height: 288
+      portrait:
+        width: 288
+        height: 480
   - id: reels1
     remove: true
   - id: mechanics1
@@ -127,14 +131,15 @@ const PATCH_WITHOUT_REELS = `rows:
 const PATCH_WITH_MISSPELLED_REELS = `rows:
   - id: renderer1
     config:
-      width: 480
-      height: 288
       background: '#10121a'
   - id: scenes1
     config:
       design:
         width: 480
         height: 288
+      portrait:
+        width: 288
+        height: 480
   - id: reels1
     name: '@energy8engine/reeels'
     config:
@@ -152,14 +157,15 @@ const PATCH_WITH_MISSPELLED_REELS = `rows:
 const PATCH_WITH_NOTHING_BOUND = `rows:
   - id: renderer1
     config:
-      width: 480
-      height: 288
       background: '#10121a'
   - id: scenes1
     config:
       design:
         width: 480
         height: 288
+      portrait:
+        width: 288
+        height: 480
   - id: reels1
     config:
       config:
@@ -183,14 +189,15 @@ const PATCH_WITH_NOTHING_BOUND = `rows:
 const PATCH_WITHOUT_MECHANICS = `rows:
   - id: renderer1
     config:
-      width: 480
-      height: 288
       background: '#10121a'
   - id: scenes1
     config:
       design:
         width: 480
         height: 288
+      portrait:
+        width: 288
+        height: 480
   - id: reels1
     config:
       config:
