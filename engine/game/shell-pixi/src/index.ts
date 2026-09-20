@@ -42,9 +42,15 @@
  * the row adds ONE `Container` it owns to the stage and mounts the shell
  * inside; raising the shell above a freshly (re-)mounted `scenes1` container
  * is then `setChildIndex` on that layer, and tearing down is that layer's
- * own `destroy`. The raise runs once after construction and again whenever
- * `scenes` is provided (`ctx.inject(['scenes'])`): a hot `scenes1` re-apply
- * appends a new root to the stage, above everything, the shell included.
+ * own `destroy`. The layer joins the stage only AFTER `createPixiShell`
+ * returned (the shell mounts into it off-stage first, which `PixiRenderer.
+ * mount` does not mind): a construction that throws — a `Config` a
+ * project's YAML broke, a shell that refused — fails the row with nothing
+ * left behind on the stage, rather than an empty `shell` container nobody
+ * owns. `addChild` appends, so the fresh layer is already on top; the raise
+ * runs whenever `scenes` is provided (`ctx.inject(['scenes'])`, which also
+ * fires at once if it already is): a hot `scenes1` re-apply appends a new
+ * root to the stage, above everything, the shell included.
  *
  * **Teardown.** `removePixiShell()` fades the shell out over 250 ms on the
  * app ticker and only then destroys its root; the row destroys its layer
@@ -92,13 +98,12 @@ export function apply(ctx: Context, config: Parameters<typeof Config>[0] = {}): 
 
   const layer = new Container();
   layer.label = 'shell';
-  app.stage.addChild(layer);
   const shell = createPixiShell({ app, parent: layer, ...toShellConfig(Config(config), init) });
+  app.stage.addChild(layer);
 
   const raise = () => {
     if (layer.parent === app.stage) app.stage.setChildIndex(layer, app.stage.children.length - 1);
   };
-  raise();
   ctx.inject(['scenes'], () => raise());
 
   ctx.effect(

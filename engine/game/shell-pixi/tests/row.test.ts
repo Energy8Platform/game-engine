@@ -142,6 +142,43 @@ describe('shell-pixi — the Pixi shell as a row', () => {
     await ctx.fiber.dispose();
   });
 
+  it('a blank YAML `theme:` (null after validation) reaches createPixiShell as undefined, and the row mounts', async () => {
+    const { ctx, app } = await boot({ config: { theme: null, menu: null } });
+    expect(captured.config).toBeDefined();
+    expect(captured.config!.theme).toBeUndefined();
+    expect(captured.config!.menu).toBeUndefined();
+    expect(app.stage.children.at(-1)).toBe(captured.config!.parent);
+    await ctx.fiber.dispose();
+  });
+
+  it('a createPixiShell that throws fails the row and leaves no layer on the stage', async () => {
+    const { createPixiShell } = await import('@energy8platform/shell/pixi');
+    vi.mocked(createPixiShell).mockImplementationOnce(() => {
+      throw new Error('no shell for you');
+    });
+    const error = vi.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      const ctx = new Context();
+      const app = fakeApp();
+      ctx.provide('renderer', { app: { stage: app.stage } });
+      ctx.provide('session', { init: INIT, play: vi.fn() });
+      // Cordis logs a throwing `apply` and marks the fiber failed; whether
+      // the returned PromiseLike rejects is its business, not this test's.
+      try {
+        await ctx.plugin(shellPixi, {});
+      } catch {
+        /* a rejection is one acceptable answer */
+      }
+      await new Promise((r) => setTimeout(r, 0));
+
+      expect(app.stage.children).toEqual([]);
+      expect(ctx.get('shell')).toBeUndefined();
+      await ctx.fiber.dispose();
+    } finally {
+      error.mockRestore();
+    }
+  });
+
   it('provides `shell` — the very handle createPixiShell returned', async () => {
     const { ctx } = await boot();
     expect(ctx.get('shell')).toBe(captured.shell);

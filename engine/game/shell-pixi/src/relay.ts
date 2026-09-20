@@ -23,6 +23,12 @@ export const SHELL_EVENTS = [
   'settingChange',
 ] as const satisfies readonly (keyof ShellEvents)[];
 
+/** Exhaustive, at the type level: a thirteenth `ShellEvents` entry fails typecheck here until it is listed above. */
+type Assert<T extends true> = T;
+export type ShellEventsAllListed = Assert<
+  [Exclude<keyof ShellEvents, (typeof SHELL_EVENTS)[number]>] extends [never] ? true : false
+>;
+
 /** An object passes as is, `void` becomes `{}`, a scalar becomes `{ value }` — so `$event.value` always names a scalar. */
 export function toObject(payload: unknown): Record<string, unknown> {
   if (payload === undefined) return {};

@@ -7,9 +7,17 @@
  *
  * Lenient on purpose (spec §2, §4): the shell's nested structures —
  * `gameInfo`, `menu`, `buyBonus`, `theme` — are `any` with a description,
- * and the form shows them as YAML. Everything the SESSION decides (the bet
- * ladder, the balance, the currency) is not here at all: `session.init`
- * feeds it at apply time (see `./config`).
+ * and the form shows them as YAML. A key this schema does not name (a
+ * legacy `tiers`, say) survives validation untouched — schemastery keeps
+ * unknown keys, measured — so a project's YAML never fails over one; it
+ * just reaches nothing. Everything the SESSION decides (the bet ladder,
+ * the balance, the currency) is not here at all: `session.init` feeds it
+ * at apply time (see `./config`).
+ *
+ * A blank YAML value (`theme:` with nothing after it) arrives as `null`:
+ * a field WITH a default resolves to that default, a field without one
+ * keeps the `null` — `./config` turns those into `undefined` so the shell
+ * sees "unset", not a value it would dereference.
  */
 import Schema from 'schemastery';
 
@@ -21,7 +29,8 @@ export const Config = Schema.object({
     .default('1.0.0')
     .description('game version shown in the game-info footer'),
   features: Schema.object({
-    turbo: Schema.number()
+    turbo: Schema.natural()
+      .max(3)
       .default(1)
       .description('turbo levels the bar cycles through: 0 (none) to 3'),
     autoplay: Schema.any()
@@ -30,14 +39,11 @@ export const Config = Schema.object({
     buyBonus: Schema.any()
       .default(false)
       .description('buy-bonus options ([{ id, title, cost, … }]) or false for no BUY BONUS button'),
-    hotkeys: Schema.boolean().description('keyboard shortcuts on/off; unset lets the shell decide by device'),
+    hotkeys: Schema.boolean().description(
+      'keyboard shortcuts on/off; unset lets the shell decide by device (a mobile session turns them off regardless)',
+    ),
     spacebar: Schema.boolean().description('spacebar spins in base mode (default on)'),
-  })
-    // Typed as the RESOLVED shape (every key present), but at runtime
-    // schemastery resolves the inner defaults into this `{}` — measured:
-    // `Config({}).features` is `{ turbo: 1, autoplay: {}, buyBonus: false }`.
-    .default({} as never)
-    .description('what the bar offers'),
+  }).description('what the bar offers'),
   gameInfo: Schema.any()
     .default({ sections: [] })
     .description('game-info overlay content: { sections: [...] } (rules, paytable, hotkeys, custom)'),
@@ -45,7 +51,6 @@ export const Config = Schema.object({
   i18n: Schema.any()
     .default({})
     .description('reserved — per-game translations; the Pixi shell has no hook for them yet'),
-  tiers: Schema.any().description('reserved — win tiers; not a shell setting (the legacy host read it)'),
   theme: Schema.any().description('shell theme overrides ({ accent, scheme, … })'),
 });
 
