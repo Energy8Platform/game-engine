@@ -1,7 +1,13 @@
 import { describe, expect, it, vi } from 'vitest';
 import { Context } from 'cordis';
 import { createEvents } from '../src/events';
-import { BUILTIN_KINDS, createFlowNodes, type FlowNodeKind, type RunCtx } from '../src/kinds';
+import {
+  BUILTIN_KINDS,
+  createFlowNodes,
+  parseTarget,
+  type FlowNodeKind,
+  type RunCtx,
+} from '../src/kinds';
 
 const kind = (name: string): FlowNodeKind => BUILTIN_KINDS.find((k) => k.kind === name)!;
 
@@ -260,9 +266,21 @@ describe('built-in kinds', () => {
     expect(play.record).toHaveBeenLastCalledWith({ request: {}, result, plan: [] });
   });
 
+  describe('parseTarget', () => {
+    it('splits on the first "/"; a node id with its own "/" stays intact; no "/" at all is null', () => {
+      expect(parseTarget('a/b')).toEqual({ scene: 'a', node: 'b' });
+      expect(parseTarget('a/b/c')).toEqual({ scene: 'a', node: 'b/c' });
+      expect(parseTarget('nope')).toBeNull();
+      expect(parseTarget('')).toBeNull();
+    });
+  });
+
   describe('prop', () => {
-    /** A fake `ScenesService.nodeSchema` — only `.dict[prop].type` is read, so a plain object stands in for a real `Schema`. */
+    /** A fake `ScenesService.nodeSchema` — only `.dict` is read (a prop's `.type`, and prop-name membership), so a plain object stands in for a real `Schema`. */
     const nodeSchema = (dict: Record<string, { type: string }>) => vi.fn(() => ({ dict }));
+    /** Schema-filled props, the way the interpreter always calls `run` (`kind.schema(node.props ?? {})`) — same pattern as `spinProps`/`stepProps` above. */
+    const propProps = (props: Record<string, unknown> = {}) =>
+      kind('prop').schema(props) as { target: string; prop: string; value: string };
 
     it('no `scenes` service in the composition: reports and leaves by next, without throwing', async () => {
       const { rc } = runCtx();
@@ -324,6 +342,89 @@ describe('built-in kinds', () => {
       expect(await kind('prop').run!({ target: 'a/b', prop: 'x', value: '5' }, rc)).toEqual({ out: 'next' });
       expect(setProps).toHaveBeenCalledWith({ scene: 'a', node: 'b' }, { x: 5 });
       expect(rc.report).toHaveBeenCalledWith(`could not set 'x' on "a/b"`);
+    });
+
+    it("a bare node (no `value` in props): the schema defaults it to '' — a number prop gets 0, a string prop gets '', not a dropped key", async () => {
+      const setProps = vi.fn(() => true);
+      const scenes = {
+        setProps,
+        nodeSchema: nodeSchema({ x: { type: 'number' }, label: { type: 'string' } }),
+      };
+      const { rc } = runCtx({ scenes });
+
+      expect(await kind('prop').run!(propProps({ target: 'a/b', prop: 'x' }), rc)).toEqual({
+        out: 'next',
+      });
+      expect(setProps).toHaveBeenLastCalledWith({ scene: 'a', node: 'b' }, { x: 0 });
+      expect(rc.report).not.toHaveBeenCalled();
+
+      expect(await kind('prop').run!(propProps({ target: 'a/b', prop: 'label' }), rc)).toEqual({
+        out: 'next',
+      });
+      expect(setProps).toHaveBeenLastCalledWith({ scene: 'a', node: 'b' }, { label: '' });
+    });
+
+    it('waits for scenes.ready before touching nodeSchema/setProps (the boot race with GET /api/scenes), same as show/hide', async () => {
+      let resolveReady!: () => void;
+      const ready = new Promise<void>((resolve) => {
+        resolveReady = resolve;
+      });
+      const setProps = vi.fn(() => true);
+      const scenes = { ready, setProps, nodeSchema: nodeSchema({ x: { type: 'number' } }) };
+      const { rc } = runCtx({ scenes });
+      const pending = kind('prop').run!(propProps({ target: 'a/b', prop: 'x', value: '5' }), rc);
+      await new Promise((r) => setTimeout(r, 0));
+      expect(setProps).not.toHaveBeenCalled();
+      resolveReady();
+      expect(await pending).toEqual({ out: 'next' });
+      expect(setProps).toHaveBeenCalledWith({ scene: 'a', node: 'b' }, { x: 5 });
+
+      // A rejected `ready` (the GET failed) does not block: `prop` still runs.
+      const down = {
+        ready: Promise.reject(new Error('down')),
+        setProps,
+        nodeSchema: nodeSchema({ x: { type: 'number' } }),
+      };
+      expect(
+        await kind('prop').run!(
+          propProps({ target: 'a/b', prop: 'x', value: '5' }),
+          runCtx({ scenes: down }).rc,
+        ),
+      ).toEqual({ out: 'next' });
+    });
+
+    it('a prop name absent from the node schema reports and never reaches setProps (schemastery would otherwise pass it through unvalidated)', async () => {
+      const setProps = vi.fn(() => true);
+      const scenes = { setProps, nodeSchema: nodeSchema({ x: { type: 'number' } }) };
+      const { rc } = runCtx({ scenes });
+      expect(
+        await kind('prop').run!(propProps({ target: 'a/b', prop: 'nope', value: '1' }), rc),
+      ).toEqual({ out: 'next' });
+      expect(rc.report).toHaveBeenCalledWith(`node "a/b" has no prop "nope"`);
+      expect(setProps).not.toHaveBeenCalled();
+
+      // A missing NODE (no schema at all) is a different case — that's the
+      // "missing node" test above, and does not trip this check.
+    });
+
+    it('a target with no "/" reports and never reaches nodeSchema/setProps', async () => {
+      const setProps = vi.fn(() => true);
+      const nodeSchemaFn = vi.fn();
+      const scenes = { setProps, nodeSchema: nodeSchemaFn };
+      const { rc } = runCtx({ scenes });
+      expect(
+        await kind('prop').run!(propProps({ target: 'nope', prop: 'x', value: '1' }), rc),
+      ).toEqual({ out: 'next' });
+      expect(rc.report).toHaveBeenCalledWith('target must be <scene>/<node>');
+      expect(nodeSchemaFn).not.toHaveBeenCalled();
+      expect(setProps).not.toHaveBeenCalled();
+
+      // Same for a `$path` target that resolves to a slash-less string.
+      const { rc: rc2 } = runCtx({ scenes }, { ref: 'nope' });
+      expect(
+        await kind('prop').run!(propProps({ target: '$ref', prop: 'x', value: '1' }), rc2),
+      ).toEqual({ out: 'next' });
+      expect(rc2.report).toHaveBeenCalledWith('target must be <scene>/<node>');
     });
   });
 

@@ -5,15 +5,18 @@
  * animates with, no GSAP.
  *
  * `target` is `<scene>/<node>` (a `SceneRef` packed into one string, the
- * way a flow prop has to be); `scenes.view()` answers the live pixi
- * `Container` for it (Task 1's nested-node lookup included). A target not
+ * way a flow prop has to be) — parsed by `@energy8engine/flow`'s
+ * `parseTarget` (shared with the `prop` kind, which packs a target the
+ * same way): `null` (no `/` at all) reports and leaves by `next` without
+ * touching `scenes`. `scenes.view()` answers the live pixi `Container`
+ * for a valid ref (Task 1's nested-node lookup included). A target not
  * currently on stage is not thrown — it is a diagnostic on the node
  * (`report`), same as a flow that names a service nothing provides.
  */
 import { Easing, Tween } from '@energy8platform/game-engine/animation';
 import Schema from 'schemastery';
 import type { ScenesService } from '@energy8engine/scenes';
-import type { FlowNodeKind } from '@energy8engine/flow';
+import { parseTarget, type FlowNodeKind } from '@energy8engine/flow';
 
 export interface TweenProps {
   /** `<scene>/<node>` — the node to animate. */
@@ -62,12 +65,12 @@ export function createTween(deps: TweenDeps = {}): FlowNodeKind<TweenProps> {
     }) as Schema<TweenProps>,
     outs: ['next'],
     async run(p, { ctx, signal, report }) {
-      const [scene, ...rest] = p.target.split('/');
-      const node = rest.join('/');
-      const view = (ctx.reflect.get('scenes', false) as ScenesService | undefined)?.view({
-        scene,
-        node,
-      });
+      const ref = parseTarget(p.target);
+      if (!ref) {
+        report('target must be <scene>/<node>');
+        return { out: 'next' };
+      }
+      const view = (ctx.reflect.get('scenes', false) as ScenesService | undefined)?.view(ref);
       if (!view) {
         report(`node ${p.target} is not on stage`);
         return { out: 'next' };

@@ -383,17 +383,16 @@ const emit: FlowNodeKind<{ event: string; payload?: unknown }> = {
 };
 
 /**
- * Splits a `target` prop (`<scene>/<node>`, already resolved off `$path`
- * where it was one) into a `SceneRef` on the first `/`. No `/` at all puts
- * the whole string in `node` with an empty `scene` — `setProps` then just
- * fails to find it mounted and reports, same as any other bad ref; no
- * separate malformed-target diagnostic is worth its own message.
+ * Splits a `<scene>/<node>` string into a `SceneRef` on the FIRST `/`
+ * (`scene` up to it, `node` the rest — a node id containing its own `/`
+ * stays intact). `null` when there's no `/` at all: not a ref with an
+ * empty scene, just not a ref. Shared with flow-fx's `tween`, which packs
+ * a target the same way (`ctx.reflect.get('scenes')?.view(ref)`).
  */
-function parseTarget(target: string): SceneRef {
+export function parseTarget(target: string): SceneRef | null {
   const i = target.indexOf('/');
-  return i < 0
-    ? { scene: '', node: target }
-    : { scene: target.slice(0, i), node: target.slice(i + 1) };
+  if (i < 0) return null;
+  return { scene: target.slice(0, i), node: target.slice(i + 1) };
 }
 
 /**
@@ -401,12 +400,24 @@ function parseTarget(target: string): SceneRef {
  * literal or `$path` (`resolve`); a literal `value` is coerced by the
  * node's OWN schema type (`scenes.nodeSchema`) — `'number'` via `Number()`
  * (NaN reports and does nothing further), `'boolean'` by `=== 'true'`,
- * anything else left as the string. `setProps` already reports its own
- * diagnostic (to the scenes plugin) for a missing node or a refused value
- * — this only needs to add the flow node's own diagnostic and move on;
- * nothing here ever fails the branch.
+ * anything else left as the string. `value` defaults to `''` (not left
+ * undefined) so a bare node still sets SOMETHING rather than silently
+ * dropping the key — `Number('')` is `0`, matching a fresh numeric field.
+ *
+ * Waits for `scenes.ready` (the boot GET, same race `show`/`hide` guard
+ * against) before touching `nodeSchema`/`setProps` — but only once a
+ * `scenes` service exists at all; a missing one still reports and leaves
+ * by `next` without waiting on anything.
+ *
+ * A `prop` name the node's merged schema doesn't have is its own
+ * diagnostic: schemastery's `object` schema passes unknown keys through
+ * unvalidated, so without this check a typo'd prop would make `setProps`
+ * silently "succeed" at setting nothing real. `setProps` itself already
+ * reports its own diagnostic (to the scenes plugin) for a missing node or
+ * a refused value — this only needs to add the flow node's own
+ * diagnostic and move on; nothing here ever fails the branch.
  */
-const prop: FlowNodeKind<{ target: string; prop: string; value?: string }> = {
+const prop: FlowNodeKind<{ target: string; prop: string; value: string }> = {
   kind: 'prop',
   schema: Schema.object({
     target: Schema.string()
@@ -414,9 +425,11 @@ const prop: FlowNodeKind<{ target: string; prop: string; value?: string }> = {
       .extra('pick', 'node')
       .description('`<scene>/<node>` (a literal), or `$path` to read a var'),
     prop: Schema.string().required().description('prop name'),
-    value: Schema.string().description(
-      "literal, coerced by the prop's schema type (number/boolean/string), or `$path` to read a var",
-    ),
+    value: Schema.string()
+      .default('')
+      .description(
+        "literal, coerced by the prop's schema type (number/boolean/string), or `$path` to read a var",
+      ),
   }),
   outs: ['next'],
   async run(p, { ctx, vars, report }) {
@@ -425,13 +438,25 @@ const prop: FlowNodeKind<{ target: string; prop: string; value?: string }> = {
       report(`no 'scenes' service in this composition`);
       return { out: 'next' };
     }
+    await scenes.ready?.catch(() => {});
+
     const ref = parseTarget(String(resolve(p.target, vars) ?? ''));
+    if (!ref) {
+      report('target must be <scene>/<node>');
+      return { out: 'next' };
+    }
+
+    const dict = scenes.nodeSchema(ref)?.dict;
+    if (dict && !(p.prop in dict)) {
+      report(`node "${ref.scene}/${ref.node}" has no prop "${p.prop}"`);
+      return { out: 'next' };
+    }
 
     let value: unknown;
     if (typeof p.value === 'string' && p.value.startsWith('$')) {
       value = resolve(p.value, vars);
     } else {
-      const type = scenes.nodeSchema(ref)?.dict?.[p.prop]?.type;
+      const type = dict?.[p.prop]?.type;
       if (type === 'number') {
         value = Number(p.value);
         if (Number.isNaN(value)) {

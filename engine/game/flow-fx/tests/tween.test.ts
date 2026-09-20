@@ -36,6 +36,21 @@ describe('createTween', () => {
     expect((kind.schema.dict!.target.meta as { pick?: string }).pick).toBe('node');
   });
 
+  it('a target with no "/" reports and leaves by next, without touching `scenes` or `to`', async () => {
+    const to = vi.fn();
+    const kind = createTween({ to, kill: vi.fn() });
+    const scenes = { view: vi.fn(() => undefined) };
+    const { rc } = runCtx({ scenes });
+    const result = await kind.run!(
+      { target: 'nope', ms: 100, easing: 'linear', wait: true },
+      rc,
+    );
+    expect(result).toEqual({ out: 'next' });
+    expect(rc.report).toHaveBeenCalledWith('target must be <scene>/<node>');
+    expect(scenes.view).not.toHaveBeenCalled();
+    expect(to).not.toHaveBeenCalled();
+  });
+
   it('a target not on stage reports and leaves by next, without touching `to`', async () => {
     const to = vi.fn();
     const kind = createTween({ to, kill: vi.fn() });
