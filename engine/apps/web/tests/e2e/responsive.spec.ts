@@ -14,13 +14,18 @@
  *
  * Numbers, measured 2026-09-20 on the checked-in fixture (Playwright's
  * Chromium): at 1280×720 the shell's bar leaves a 1280×628 safe rect, the
- * 480×288 design fits it at 2.1806 and the safe rect in design units is
- * −53.5..533.5 × 0..288; at 800×450 the scale is 1.2724 and the rect
- * −74.4..554.4 × 0..288 — height-limited both times, so `win`
- * (`pin: bottom, y: −24`) reads y 264 at both while the SCALE differs.
- * At 390×844 the rect is portrait, the 288×480 portrait design fits it
- * at 1.3542, width-limited: 0..288 × −23.3..503.3; `logo` (`pin: top,
- * y: 40`) reads y 16.7 against its landscape 40.
+ * 480×288 design fits it at 2.1806, height-limited, and the safe rect in
+ * design units is −53.5..533.5 × 0..288 — so `win` (`pin: bottom, y:
+ * −24`) reads y 264, the design's own bottom minus 24. At 800×600 the
+ * fit is WIDTH-limited (1.6667) and the rect 0..480 × −10.9..298.9: the
+ * safe rect's bottom is past the design's, and `win` reads 274.9 — the
+ * reading a design-box pin could not give, which is why the second size
+ * is not another 16:9. At 390×844 the rect is portrait, the 288×480
+ * portrait design fits it at 1.3542, width-limited: 0..288 × −23.3..503.3;
+ * `logo` (`pin: top, y: 40`) reads y 16.7 against its landscape 40, and
+ * the board (`pin: top, x: −112, y: 115, scale: 0.55`) sits at (32, 91.7)
+ * — its grid, 277×165, from x 5.6 to 282.8 and from y 65.3 down, 16.6
+ * under the logo's bottom edge (48.7).
  */
 import { readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -92,7 +97,7 @@ async function layout(page: Page, expectScale: (scale: number) => boolean) {
   });
 }
 
-test('the canvas follows the window; `win` stays pinned above the bar at either size', async ({
+test('the canvas follows the window; `win` stays pinned to the safe rect’s bottom at either size', async ({
   page,
 }) => {
   dir = projectCopy();
@@ -111,25 +116,33 @@ test('the canvas follows the window; `win` stays pinned above the bar at either 
   });
   expect(wide.orientation).toBe('landscape');
 
-  await page.setViewportSize({ width: 800, height: 450 });
-  const small = await layout(page, (s) => s < 1.5);
+  // 4:3, not another 16:9: a 16:9 window fits the 16:9 design
+  // height-limited, and the safe rect's bottom is then the design's own
+  // (288) — a `win` pinned to the DESIGN's bottom would read the same
+  // 264. Width-limited, the safe rect runs past the design (bottom ≈
+  // 298.9) and only a pin to the SAFE rect follows it.
+  await page.setViewportSize({ width: 800, height: 600 });
+  const tall = await layout(page, (s) => s < 1.8);
   expect(await page.locator('#mount canvas').boundingBox()).toMatchObject({
     width: 800,
-    height: 450,
+    height: 600,
   });
-  expect(small.scale).not.toBe(wide.scale);
+  expect(tall.scale).not.toBe(wide.scale);
+  expect(tall.fit.viewport.bottom).toBeGreaterThan(288);
 
   // `win` is `pin: bottom, x: 0, y: -24, anchor: 0.5`: its centre sits on
-  // the safe rect's bottom edge — the design's bottom minus the shell's
-  // bar — 24 design px up, at either size; and on that edge's CENTRE,
-  // which is not the design's centre when the rect is wider than it.
-  for (const { win, fit } of [wide, small]) {
+  // the safe rect's bottom edge — the viewport's bottom minus the shell's
+  // bar — 24 design px up, at either size, so its y DIFFERS between the
+  // two; and on that edge's CENTRE, which is not the design's centre when
+  // the rect is wider than it.
+  expect(tall.win.y).not.toBe(wide.win.y);
+  for (const { win, fit } of [wide, tall]) {
     expect(Math.abs(win.y - (fit.viewport.bottom - 24))).toBeLessThan(0.5);
     expect(Math.abs(win.x - (fit.viewport.left + fit.viewport.right) / 2)).toBeLessThan(0.5);
   }
 });
 
-test('turned to portrait the logo rises above the reels and the coin hides; back to landscape restores', async ({
+test('turned to portrait the board and the logo pin to the top, the coin hides, a spin still plays; back to landscape restores', async ({
   page,
 }) => {
   dir = projectCopy();
@@ -146,23 +159,41 @@ test('turned to portrait the logo rises above the reels and the coin hides; back
   expect(tall.orientation).toBe('portrait');
   // `portrait.nodes.logo` is `{ pin: top, x: 0, y: 40 }`: the logo hangs
   // 40 design px under the safe rect's top edge (negative here — the
-  // 288×480 portrait design is letterboxed in a 390×702 rect), which is
-  // higher than its landscape (240, 40). The reels node did not move (its
-  // view's y is 0 either way; its bounds run 48 px above that), so the
-  // logo's rise is a rise relative to the reels — the literal "logo y <
-  // board y" the spec sketches cannot hold against a view whose y is 0.
+  // 288×480 portrait design is letterboxed in a 390×702 rect), on the
+  // 288-wide design's centre line.
   expect(Math.abs(tall.logo.y - (tall.fit.viewport.top + 40))).toBeLessThan(0.5);
-  expect(tall.logo.y).toBeLessThan(wide.logo.y);
-  expect(tall.board.y).toBe(wide.board.y);
-  expect(tall.coin).toBe(false);
-  // The portrait design is 288 wide: the top pin's centre is 144.
   expect(Math.abs(tall.logo.x - 144)).toBeLessThan(0.5);
+  expect(tall.coin).toBe(false);
+
+  // `portrait.nodes.board` is `{ pin: top, x: -112, y: 115, scale: 0.55 }`
+  // — common props only, so the reels node takes the common pass and is
+  // not remounted. The reels view's ORIGIN is reel 0's column centre and
+  // row 0's centre (local bounds −48..456 × −48..252 at cell 96, gap 6),
+  // so the grid's edges are `48·scale` and `456·scale`/`252·scale` off
+  // the view's position — never `width/2`. What the numbers were chosen
+  // for: the grid's top at least 16 design px under the logo's bottom
+  // edge, the whole grid inside the 288-wide design, `win` under it.
+  const cell = 48 * 0.55;
+  expect(tall.board.y).not.toBe(wide.board.y);
+  expect(tall.board.y - cell).toBeGreaterThanOrEqual(tall.logo.y + tall.logo.height / 2 + 16);
+  expect(tall.board.x - cell).toBeGreaterThanOrEqual(0);
+  expect(tall.board.x + 456 * 0.55).toBeLessThanOrEqual(288);
+  expect(tall.win.y).toBeGreaterThan(tall.board.y + 252 * 0.55);
+
+  // The board still PLAYS after the flip: a spin presents on the same
+  // reels (the shell's Spin, the `present` node's exit, the grid read back).
+  expect(await page.evaluate(() => (window as any).__e8.spin())).toEqual({ out: 'next' });
+  const symbols = (await page.evaluate(() => (window as any).__e8.symbols())) as string[][];
+  expect(symbols).toHaveLength(5);
+  expect(symbols.flat()).toHaveLength(15);
+  expect(symbols.flat().every((s) => typeof s === 'string')).toBe(true);
 
   await page.setViewportSize({ width: 1280, height: 720 });
   const back = await layout(page, (s) => s > 2);
   expect(back.orientation).toBe('landscape');
   expect(back.coin).toBe(true);
   expect(back.logo).toEqual(wide.logo);
+  expect(back.board).toEqual(wide.board);
 });
 
 // ---- the scene editor (`canvas.spec.ts`'s readers and gestures) ----
@@ -184,6 +215,14 @@ async function frameOf(page: Page, selector: string): Promise<Frame> {
   const frame = await handle?.contentFrame();
   if (!frame) throw new Error(`${selector} has no content frame`);
   return frame;
+}
+
+/** The `safeBottom` the IDE put in the canvas iframe's URL — its own number for the preset just picked. */
+async function safeBottomOf(page: Page): Promise<number> {
+  const src = (await page.locator(CANVAS).getAttribute('src')) ?? '';
+  const m = /safeBottom=(\d+)/.exec(src);
+  if (!m) throw new Error(`no safeBottom in the canvas src: ${src}`);
+  return Number(m[1]);
 }
 
 /**
@@ -272,10 +311,12 @@ test('portrait edits land in portrait.nodes, design edits in the node; a pinned 
   await readyCanvas(page, 0);
 
   // (3a) The phone portrait preset: the canvas is 390×844 with the mobile
-  // bar's band, the scenes fit the portrait design, and the page says so.
+  // bar's band (whatever `safeBottom` the IDE put in the URL — the
+  // preset's own number, read back rather than assumed), the scenes fit
+  // the portrait design, and the page says so.
   await page.getByTestId('canvas-viewport').selectOption('phone-portrait');
   await expect(page.locator(CANVAS)).toHaveAttribute('width', '390');
-  let frame = await readyCanvas(page, 142);
+  let frame = await readyCanvas(page, await safeBottomOf(page));
   await expect
     .poll(() => frame.evaluate(() => (window as any).__e8edit.orientation()))
     .toBe('portrait');
@@ -304,7 +345,7 @@ test('portrait edits land in portrait.nodes, design edits in the node; a pinned 
   // props, and the override stays as it was written.
   await page.getByTestId('canvas-viewport').selectOption('design');
   await expect(page.locator(CANVAS)).toHaveAttribute('width', '480');
-  frame = await readyCanvas(page, 0);
+  frame = await readyCanvas(page, await safeBottomOf(page));
   await expect
     .poll(() => frame.evaluate(() => (window as any).__e8edit.orientation()))
     .toBe('landscape');

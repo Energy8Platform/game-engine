@@ -13,7 +13,8 @@
         font-family: system-ui, sans-serif;
       }
       /* The canvas fills the window (`#mount` below); the dev toolbar and
-         the log float over it, top and bottom, on a translucent band. */
+         the log float over it, both at the top, on a translucent band —
+         never over the shell's bar at the bottom. */
       #controls {
         position: fixed;
         top: 0;
@@ -38,9 +39,11 @@
         inset: 0;
         line-height: 0;
       }
+      /* Docked under the toolbar (its height: 0.75rem padding twice around
+         a button line), not at the bottom, where the shell's bar is. */
       #log {
         position: fixed;
-        bottom: 0;
+        top: 3.75rem;
         left: 0;
         right: 0;
         z-index: 2;
@@ -49,10 +52,10 @@
         background: rgba(26, 29, 41, 0.85);
         font: 12px/1.5 ui-monospace, monospace;
         white-space: pre-wrap;
-        max-height: 12rem;
+        max-height: 6rem;
         overflow: auto;
       }
-      /* Nothing to say: no band over the shell's bar. */
+      /* Nothing to say: no band at all. */
       #log:empty {
         display: none;
       }

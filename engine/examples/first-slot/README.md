@@ -157,7 +157,10 @@ node is ignored (a diagnostic says so), and a `pin` on a symbol state in
 `symbols.yml` is inert — the reels place their cells. When the safe rect is
 taller than wide the scenes switch to `scenes1.config.portrait` (288×480
 here; absent, the design rotated) and apply the scene file's `portrait:
-nodes:` block over the named top-level nodes — `logo` pins to the top and
+nodes:` block over the named top-level nodes — `logo` pins to the top,
+`board` pins under it at `scale: 0.55` (the 5×3 grid, 277 design px wide,
+fits the narrow design; its `x`/`y` are offsets of the reels view's ORIGIN,
+reel 0's column centre and row 0's centre, not of the grid's corner) and
 `coin` hides; landscape puts them back. The scene tab's viewport select
 (`design`, `1280×720`, `390×844`, `844×390`, custom) sizes the canvas to that
 viewport, with the bar's band hatched: under a portrait one, every drag and

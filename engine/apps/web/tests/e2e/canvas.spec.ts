@@ -20,6 +20,7 @@
 import { readFileSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { expect, test, type Frame, type Locator, type Page } from '@playwright/test';
+import { load } from 'js-yaml';
 import { projectCopy, startDevHost, type DevHost } from './project-fixture';
 
 const IDE_URL = 'http://127.0.0.1:5680/';
@@ -159,10 +160,15 @@ test('a corner drag scales, ] moves it forward', async ({ page }) => {
     at(logo.x + logo.w, logo.y + logo.h),
     at(logo.x + logo.w + 32, logo.y + logo.h + 32),
   );
-  await expect
-    .poll(() => /scale: ([\d.]+)/.exec(sceneFile())?.[1], { timeout: 10_000 })
-    .toBeDefined();
-  expect(Number(/scale: ([\d.]+)/.exec(sceneFile())![1])).toBeCloseTo(1.5, 1);
+  // The LOGO's own `scale`, parsed — not the file's first `scale:`, which
+  // since slice 27 is the board's portrait override (`portrait.nodes.board
+  // .scale: 0.55`), there before any drag.
+  const logoScale = () =>
+    (load(sceneFile()) as { nodes: { id: string; props: { scale?: number } }[] }).nodes.find(
+      (n) => n.id === 'logo',
+    )?.props.scale;
+  await expect.poll(logoScale, { timeout: 10_000 }).toBeDefined();
+  expect(logoScale()).toBeCloseTo(1.5, 1);
   await expect.poll(() => snapshot(frame).then((s) => Math.round(s.bounds.logo.w))).toBe(96);
 
   // The press on the handle focused the iframe, so the key lands in the editor page.
