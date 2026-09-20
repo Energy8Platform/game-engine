@@ -213,6 +213,79 @@ function isInside(root: string, file: string): boolean {
   return file === root || file.startsWith(root + sep);
 }
 
+/** Virtual id for the `/@vite/client` stub below — never a real path, so nothing else can collide with it. */
+const VITE_CLIENT_STUB_ID = '\0e8:vite-client-stub';
+
+/**
+ * Stands in for vite's real `/@vite/client` (`node_modules/vite/dist/
+ * client/client.mjs`) — same exports, none of the websocket transport. See
+ * the `resolveId`/`load` pair below (in `apply`) for why this exists at
+ * all: a composed row's dynamic `import()` needs `injectQuery` for real,
+ * and there is no way to stop that import from reaching the real client
+ * without also breaking row loading — so this is what it reaches instead.
+ *
+ * `injectQuery` is vite's own implementation, copied verbatim
+ * (client.mjs:1125-1132) — it is the one export anything here actually
+ * calls, so it has to behave exactly like the original (relative/absolute
+ * urls, an existing `?query`, a `#hash`). `createHotContext`,
+ * `updateStyle`/`removeStyle` and `ErrorOverlay` are never called by
+ * anything in this codebase (no `import.meta.hot` anywhere under
+ * `engine/game/*`, no `.css` import in this fixture — both checked with a
+ * repo-wide grep, not assumed) — kept as inert, same-shaped stand-ins
+ * only so that a module vite transforms WOULD be able to call them
+ * without throwing, if one ever does.
+ */
+const VITE_CLIENT_STUB_SOURCE = `
+class ErrorOverlay extends HTMLElement {}
+
+function createHotContext() {
+  return {
+    data: {},
+    accept() {},
+    acceptExports() {},
+    dispose() {},
+    prune() {},
+    invalidate() {},
+    on() {},
+    off() {},
+    send() {},
+  };
+}
+
+function injectQuery(url, queryToInject) {
+  if (url[0] !== '.' && url[0] !== '/') return url;
+  const pathname = url.replace(/[?#].*$/, '');
+  const { search, hash } = new URL(url, 'http://vite.dev');
+  return \`\${pathname}?\${queryToInject}\${search ? '&' + search.slice(1) : ''}\${hash || ''}\`;
+}
+
+const sheetsMap = new Map();
+
+function updateStyle(id, content) {
+  let style = sheetsMap.get(id);
+  if (!style) {
+    style = document.createElement('style');
+    style.setAttribute('type', 'text/css');
+    style.setAttribute('data-vite-dev-id', id);
+    style.textContent = content;
+    document.head.appendChild(style);
+  } else {
+    style.textContent = content;
+  }
+  sheetsMap.set(id, style);
+}
+
+function removeStyle(id) {
+  const style = sheetsMap.get(id);
+  if (style) {
+    document.head.removeChild(style);
+    sheetsMap.delete(id);
+  }
+}
+
+export { ErrorOverlay, createHotContext, injectQuery, removeStyle, updateStyle };
+`;
+
 export async function apply(ctx: Context, config: DevGameConfig): Promise<void> {
   // The game's own server (spec §6, see the module doc). `isolate('server')`
   // gives this child context its own `server` binding so the root's stays
@@ -466,14 +539,10 @@ export async function apply(ctx: Context, config: DevGameConfig): Promise<void> 
     // by vite's own HTML transform) — harmless on its own (a clean refusal,
     // swallowed silently) UNLESS something else on the machine happens to
     // be listening on the port it targets, in which case the handshake
-    // gets a real, wrong response and the page logs it. Stripped instead of
-    // worked around: `e8 dev` has no live-reload (point 5 above), so there
-    // is nothing this script does for this page that matters, and the game
-    // fixture pulls in no `.css` (grep confirms: none of `first-slot`'s
-    // `src`/`plugins`/`game` import one) — the one other thing `/@vite/
-    // client` is for. `order: 'post'` runs after vite's own html transform
-    // already injected the tag, so the removal always has something to
-    // remove.
+    // gets a real, wrong response and the page logs it. The tag is
+    // stripped below (`order: 'post'`, after vite's own html transform
+    // injected it) — a small, free win against the html-parser-initiated
+    // fetch, kept even though it alone is not enough (next paragraph).
     //
     // NOT sufficient on its own, measured: `@energy8engine/loader`'s
     // `composeFromProject` calls `import(/* @vite-ignore */ url)` on a
@@ -482,22 +551,50 @@ export async function apply(ctx: Context, config: DevGameConfig): Promise<void> 
     // this one fixture) — vite's import-analysis rewrites any dynamic
     // import whose specifier is not a string literal to
     // `__vite__injectQuery(url, 'import')` and, independently of the HTML
-    // tag above or of `hasHMR`, prepends `import { injectQuery as
+    // tag or of `hasHMR`, prepends `import { injectQuery as
     // __vite__injectQuery } from "/@vite/client"` to that module
-    // (dep-Dm0c1Wj2.js's `needQueryInjectHelper` branch). That import pulls
-    // in the WHOLE client module — ES modules have no partial execution —
-    // so its top-level websocket-connect code still runs and still logs on
-    // failure, tag stripped or not. Left in (removing it is still a net
-    // improvement against the HTML-parser-initiated fetch) — see the
-    // report for why this residual is not closed and needs a call this
-    // file's own edit did not make unilaterally.
+    // (dep-Dm0c1Wj2.js's `needQueryInjectHelper` branch, ~line 40823) —
+    // load-bearing, not optional: without it a composed row's dynamic
+    // import never gets vite's cache-busting query and can 404 or serve
+    // stale. ES modules have no partial execution, so importing ANYTHING
+    // from `/@vite/client`, for any reason, still runs its top-level
+    // websocket-connect code and still logs on failure — the real client
+    // always dials `__HMR_PORT__` (24678 by default under
+    // `middlewareMode`, `hmr: false` or not — vite's own
+    // `clientInjectionsPlugin` doesn't check it) and a second `e8 dev` on
+    // the same machine answers for real, wrong protocol, logged.
+    //
+    // So `/@vite/client` is stubbed below rather than reached around:
+    // `resolveId`/`load` intercept the id vite's own built-in
+    // `clientAlias` rewrites `/@vite/client` to (`/@fs/<real path to
+    // vite's client.mjs>` — dep-Dm0c1Wj2.js:48802-48811 — checked directly
+    // against a live server rather than assumed: the LITERAL `/@vite/client`
+    // id never reaches a user plugin's `resolveId` at all, the alias
+    // plugin already rewrote it by then) and serve a same-shaped module
+    // instead — mirroring vite 6.4.3's own export list exactly
+    // (`export { ErrorOverlay, createHotContext, injectQuery, removeStyle,
+    // updateStyle }`, node_modules/vite/dist/client/client.mjs:1134) so
+    // every real caller (namely `injectQuery`, the only one anything here
+    // actually calls) keeps working, with none of the transport: no
+    // socket ever opens, so nothing is ever there to fail or log.
     plugins: [
       {
         name: 'e8:no-vite-client',
+        enforce: 'pre',
         transformIndexHtml: {
           order: 'post',
           handler: (html) =>
             html.replace(/\s*<script type="module" src="\/@vite\/client"><\/script>/, ''),
+        },
+        resolveId(id) {
+          if (id === '/@vite/client' || id.endsWith('/vite/dist/client/client.mjs')) {
+            return VITE_CLIENT_STUB_ID;
+          }
+        },
+        load(id) {
+          if (id === VITE_CLIENT_STUB_ID) {
+            return VITE_CLIENT_STUB_SOURCE;
+          }
         },
       },
     ],
