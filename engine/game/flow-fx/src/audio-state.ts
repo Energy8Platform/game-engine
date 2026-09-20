@@ -122,7 +122,16 @@ export function createAudioState(deps: AudioStateDeps = {}): AudioState {
     track(category, base, instance) {
       const entry: Live = { category, base, instance };
       live.add(entry);
-      const remove = () => live.delete(entry);
+      // An instance that ends (or is hard-stopped) is done being written to —
+      // any ramp still targeting it must stop too, or its `clock.tick` loop
+      // keeps ticking `.volume` on a dead object for the rest of `ms`. Pixi
+      // pools instances on `'end'`/`'stop'` (`Sound._pool`), so a stray ramp
+      // left running doesn't just no-op: it can land on a DIFFERENT, live
+      // sound the pool hands the same object back to, corrupting its volume.
+      const remove = () => {
+        live.delete(entry);
+        cancelRamp(instance, false);
+      };
       instance.on?.('end', remove);
       instance.on?.('stop', remove);
       return remove;
