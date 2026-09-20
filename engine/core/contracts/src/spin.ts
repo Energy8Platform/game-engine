@@ -27,6 +27,16 @@ export interface SpinRequest {
   betLevel: number;
   /** JSON-serializable action params, forwarded to the script as `params_json`. */
   params?: Record<string, unknown>;
+  /**
+   * An OPEN round to step, rather than a new one to start. A round on
+   * e8-server is `StartRound` then `Step(round_id, action)` until it answers
+   * `roundComplete: true`; absent this, every call starts a fresh round and a
+   * game with a session stage (free spins) can never be played past its first
+   * response. Pass back the `roundId` of a result whose `roundComplete` was
+   * `false`, with one of the `nextActions` it named. An id the server does not
+   * know is an error, not a new round.
+   */
+  roundId?: string;
 }
 
 /**
@@ -162,8 +172,7 @@ export interface SpinResult {
   /** the bet this round was started with (RoundResponse.bet). e8-server
    *  echoes it back rather than requiring the caller to remember it — the
    *  case that matters is a `Step` call on a round this handle did not
-   *  itself start (not implemented by `session-dev`'s `play()`, which
-   *  always starts a fresh round). */
+   *  itself start — `SpinRequest.roundId` reaches exactly that. */
   bet: number;
   /** the SpinData enum's tag for this response (lifted from `data.stage`). */
   stage: string;
@@ -179,6 +188,7 @@ export interface SpinResult {
   spinsPlayed: number;
   /** sha256 of the compiled .spin bytes the server is running. */
   scriptSha256: string;
-  /** the round id this response belongs to (useful for a future `Step` call). */
+  /** the round id this response belongs to. While `roundComplete` is
+   *  `false`, pass it back as `SpinRequest.roundId` to step the round. */
   roundId: string;
 }

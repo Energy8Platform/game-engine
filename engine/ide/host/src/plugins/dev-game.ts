@@ -615,9 +615,9 @@ export async function apply(ctx: Context, config: DevGameConfig): Promise<void> 
   }, 'dev-game:vite');
 
   preview.post('/api/spin', async (req, res) => {
-    let body: { action?: string; betLevel?: number } = {};
+    let body: { action?: string; betLevel?: number; roundId?: string } = {};
     try {
-      body = (await req.json()) as { action?: string; betLevel?: number };
+      body = (await req.json()) as { action?: string; betLevel?: number; roundId?: string };
     } catch {
       // An empty or absent body is fine — falls back to config.action/betLevel.
     }
@@ -626,6 +626,11 @@ export async function apply(ctx: Context, config: DevGameConfig): Promise<void> 
       gameId: config.gameId,
       action: body.action ?? config.action ?? 'spin',
       betLevel: body.betLevel ?? config.betLevel,
+      // No config fallback, unlike action/betLevel, and deliberately none:
+      // a round id is never a default. It is the page handing back the
+      // `roundId` of a result whose `roundComplete` was `false`, to step
+      // that round; absent, session-dev starts a fresh round.
+      roundId: body.roundId,
     });
 
     // This route runs in the HOST process, not the browser, so nothing on

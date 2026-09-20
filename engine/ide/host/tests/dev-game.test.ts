@@ -547,6 +547,26 @@ describe('dev-game — the spin route', () => {
     // An empty body falls back to the plugin's own config, unchanged.
     expect((await fetch(`${preview(ctx!)}/api/spin`, { method: 'POST' })).status).toBe(200);
     expect(play).toHaveBeenLastCalledWith({ gameId: 'first-slot', action: 'spin', betLevel: 1.0 });
+
+    // A round id is the other half of a round: the page hands back the
+    // `roundId` of a result that was not `roundComplete`, with one of the
+    // `nextActions` it named, and session-dev steps that round instead of
+    // starting a new one. It has no config default — see the route.
+    expect(
+      (
+        await fetch(`${preview(ctx!)}/api/spin`, {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ action: 'free_spin', roundId: 'r-7' }),
+        })
+      ).status,
+    ).toBe(200);
+    expect(play).toHaveBeenLastCalledWith({
+      gameId: 'first-slot',
+      action: 'free_spin',
+      betLevel: 1.0,
+      roundId: 'r-7',
+    });
   });
 
   it('reports a spin against a session that never started as diagnostics, not a crash', async () => {

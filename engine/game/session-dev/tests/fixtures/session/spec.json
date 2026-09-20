@@ -1,0 +1,19 @@
+{
+  "id": "session-fixture",
+  "description": "The smallest game whose round does NOT complete on the first response: `spin` always awards 2 free spins, so e8-server answers roundComplete:false / nextActions:['free_spin'] / spinsRemaining:2 and the round needs two `Step` calls to finish. Exists so the Step half of a round is drivable at all — `first-slot` completes every round on its first response.",
+  "scriptPath": "script.spin",
+  "grid": { "cols": 5, "rows": 3 },
+  "betLevels": [1.0],
+  "maxWin": 100.0,
+  "symbols": [
+    { "id": 1, "name": "sym-1", "weight": 10 },
+    { "id": 2, "name": "sym-2", "weight": 20 },
+    { "id": 3, "name": "sym-3", "weight": 30 }
+  ],
+  "actions": {
+    "spin": { "stage": "base_game", "cost": 1.0, "opens": "free_spin" },
+    "free_spin": { "stage": "free_spins", "cost": 1.0, "session": true }
+  },
+  "mechanics": ["classic", "reel-step"],
+  "note": "Not read by e8-server or session-dev's tests — --games-dir loads .spin files directly. Descriptive metadata, same convention as engine/examples/first-slot/game/spec.json."
+}

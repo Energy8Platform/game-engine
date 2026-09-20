@@ -20,7 +20,8 @@ import type { E8Handle, SpinRequest, SpinResult, StartE8ServerOptions } from './
 // e8-server's gRPC contract. Source of truth: casino_platform/e8/crates/
 // e8-server/proto/engine.proto (a sibling repo, not vendored here) — this is
 // a synced copy, same convention spinPlugin.ts uses. We only call the RPCs a
-// single play() needs: ListGames (readiness probe) and StartRound (play).
+// play() needs: ListGames (readiness probe), StartRound (open a round) and
+// Step (carry an open one forward — see play()'s own `roundId` branch).
 const ENGINE_PROTO = `
 syntax = "proto3";
 package e8;
@@ -343,21 +344,44 @@ export async function startE8Server(opts: StartE8ServerOptions): Promise<E8Handl
 
   async function play(reqBody: SpinRequest): Promise<SpinResult> {
     if (stopped) throw new Error('[session-dev] play() called after stop()');
+    // `roundCounter` counts CALLS, not rounds, and still does now that a
+    // call can be a Step: it is what makes `request_id` unique, and a Step
+    // needs one as much as a StartRound does. Only `round_id`/`nonce`
+    // belong to a round, and a Step supplies neither — it names a round
+    // that already has both.
     roundCounter += 1;
-    const roundId = `session-dev-${roundCounter}`;
-    const r: any = await call(client, 'StartRound', {
-      game_id: reqBody.gameId,
-      player_id: 'session-dev',
-      round_id: roundId,
-      server_seed: serverSeed,
-      client_seed: 'session-dev',
-      nonce: roundCounter,
-      action: reqBody.action,
-      bet: reqBody.betLevel,
-      params_json: reqBody.params ? JSON.stringify(reqBody.params) : '',
-      request_id: `session-dev-req-${roundCounter}`,
-      recording: true,
-    });
+    const params_json = reqBody.params ? JSON.stringify(reqBody.params) : '';
+    const request_id = `session-dev-req-${roundCounter}`;
+
+    // A round is `StartRound` then `Step` until `round_complete`. Without
+    // the second half, a game whose spin opens a session (free spins) could
+    // only ever be played one response deep — every call started a NEW
+    // round, so `nextActions`/`spinsRemaining` described a round nothing
+    // could reach. `roundId` on the request is the caller saying "step the
+    // round I already have"; an id the server does not know comes back as
+    // its error below, which is the point (a silent fresh round would hide
+    // exactly the bug worth catching).
+    const roundId = reqBody.roundId ?? `session-dev-${roundCounter}`;
+    const r: any = reqBody.roundId
+      ? await call(client, 'Step', {
+          round_id: reqBody.roundId,
+          action: reqBody.action,
+          params_json,
+          request_id,
+        })
+      : await call(client, 'StartRound', {
+          game_id: reqBody.gameId,
+          player_id: 'session-dev',
+          round_id: roundId,
+          server_seed: serverSeed,
+          client_seed: 'session-dev',
+          nonce: roundCounter,
+          action: reqBody.action,
+          bet: reqBody.betLevel,
+          params_json,
+          request_id,
+          recording: true,
+        });
     if (r.error) throw new Error(`[session-dev] e8-server: ${r.error}`);
 
     const data = r.data_json ? JSON.parse(r.data_json) : {};
