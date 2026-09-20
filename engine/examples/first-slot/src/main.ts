@@ -80,7 +80,12 @@
 import { createGame } from '@energy8engine/game-runtime';
 import * as ideBridge from '@energy8engine/ide-bridge';
 import { reportAll, type DiagnosticsService } from '@energy8engine/diagnostics';
-import { diagnostic, type Diagnostic, type FlowTraceEntry } from '@energy8engine/contracts';
+import {
+  diagnostic,
+  type Diagnostic,
+  type FlowTraceEntry,
+  type StepOpts,
+} from '@energy8engine/contracts';
 import type { EventsService, FlowService } from '@energy8engine/flow';
 // Type-only, and fully erased: this module is what DECLARES the
 // `ctx.board` service this page reads off the composed context. Importing
@@ -99,6 +104,7 @@ const mount = document.getElementById('mount')!;
 const logEl = document.getElementById('log')!;
 const statusEl = document.getElementById('status')!;
 const spinBtn = document.getElementById('spin') as HTMLButtonElement;
+const turboCheckbox = document.getElementById('turbo') as HTMLInputElement;
 const mechanicSelect = document.getElementById('mechanic') as HTMLSelectElement;
 
 const game = await createGame({ mount });
@@ -480,11 +486,35 @@ if (!currentEvents() || !currentFlow()) {
 // a run is live (`busy: ignore`, its default), which is the same click
 // swallowed one layer down — and a button this page disabled would stay
 // so for good under a document with no `present` node to re-enable it on.
+//
+// **A second click, while busy, skips instead of spinning.** `ui.skip` is
+// not a flow node (a skip has to land DURING a run, which an `on` trigger
+// with `busy: ignore` cannot) — it is caught directly by `play-loop`'s own
+// bus subscription (see that row's module doc), so emitting it here does
+// not wait on `flow1` the way a `present`/`spin` node would. `flow.busy()`
+// is the same read `__e8.spin()` below polls before firing, just used the
+// other way around: busy here means "hurry the run that's already going",
+// not "not yet".
+//
+// **`ui.spin`'s payload.** `flow.yml`'s `mode` node (`set turbo =
+// $event.payload.turbo`, between `idle` and `click`) reads it off `vars.
+// event` — what the flow's `on` node hands its `fire()` is the emitted
+// payload UNCHANGED (`@energy8engine/flow`'s `kinds.ts`, the `on` kind:
+// `fire({ event })` with `event` the bus callback's own argument) — so for
+// `$event.payload.turbo` to resolve to the checkbox's own value, the
+// payload emitted here has to BE `{ payload: { turbo } }`, not a bare
+// `{ turbo }`. `__e8.spin()` below mirrors the exact same shape, for the
+// same reason.
 spinBtn.addEventListener('click', () => {
   const events = currentEvents();
   if (!events) return;
+  if (currentFlow()?.busy()) {
+    statusEl.textContent = 'skipping…';
+    events.emit('ui.skip');
+    return;
+  }
   statusEl.textContent = 'spinning…';
-  events.emit('ui.spin');
+  events.emit('ui.spin', { payload: { turbo: turboCheckbox.checked } });
 });
 
 // `#status` after a click, from the trace rather than from a return value
@@ -537,7 +567,9 @@ ctx.inject(['flow'], (c) =>
     return (ctx.reflect.get('diagnostics', false) as DiagnosticsService | undefined)?.list() ?? [];
   },
   /**
-   * Exactly what the button does — `events.emit('ui.spin')` — and then the
+   * Exactly what the button does when the flow is idle — `events.emit(
+   * 'ui.spin', { payload: { turbo } })` (see the click handler's own
+   * comment for why the payload has to be wrapped that way) — and then the
    * port the flow's `present` node left by (`next` or `failed`), or
    * `failed` from its `spin` node when the host refused. One 20 s budget
    * for the whole thing; a rejection names which half ran out.
@@ -549,9 +581,11 @@ ctx.inject(['flow'], (c) =>
    * its way to `on`, or the previous spin's last branches unwinding, which
    * they still are on the microtask a resolve of this promise lands on. A
    * button pressed then is simply swallowed; a test awaiting a spin that
-   * never started would sit out the full 20 s instead.
+   * never started would sit out the full 20 s instead. `opts.turbo`
+   * defaults to `false`, same as the flow's own `present.turbo` schema
+   * default resolves an absent var to.
    */
-  async spin(): Promise<{ out: string }> {
+  async spin(opts?: { turbo?: boolean }): Promise<{ out: string }> {
     const events = currentEvents();
     const flow = currentFlow();
     if (!events || !flow) throw new Error('no flow row in this composition');
@@ -576,8 +610,30 @@ ctx.inject(['flow'], (c) =>
         off();
         resolve({ out: entry.out! });
       });
-      events.emit('ui.spin');
+      events.emit('ui.spin', { payload: { turbo: opts?.turbo ?? false } });
     });
+  },
+  /**
+   * A second tap of Spin, without the tap: `events.emit('ui.skip')` — the
+   * same bus `ui.spin` rides, but caught directly by `play-loop`'s own
+   * subscription (`@energy8engine/play-loop`'s `runtime.ts`), never by a
+   * flow node — a skip has to land WHILE a run is busy, which is the one
+   * moment a flow `on` trigger (`busy: ignore`) cannot fire. Fire-and-
+   * forget, exactly like the click handler's own `ui.skip`: what it
+   * collapses is the run a `spin()` call above is already waiting on, so
+   * there is nothing further here to wait for.
+   */
+  skip(): void {
+    currentEvents()?.emit('ui.skip');
+  },
+  /**
+   * The `StepOpts` the board's last method actually ran with — `turbo`
+   * included — off `currentBoard()`, the same lazy per-use read every
+   * other board hook here takes (`board` is a page need; see its own
+   * doc). `undefined` before the first spin, or with no board at all.
+   */
+  lastStepOpts(): StepOpts | undefined {
+    return currentBoard()?.lastOpts;
   },
   /** The interpreter's trace of the current/last run (`FlowTraceEntry`s, capped at 500); `[]` with no flow row. */
   flowTrace(): readonly FlowTraceEntry[] {

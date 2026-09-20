@@ -88,6 +88,37 @@ describe('engine/templates/slot-basic', () => {
     expect(entries).toEqual([{ id: 'bridge1', name: '@energy8engine/ide-bridge', config: {} }]);
   });
 
+  /**
+   * `index.html` was never in the byte-identical list above, and Task 4 of
+   * "tempo" (2026-09-20) pins it here rather than there for a reason: the
+   * two copies are NOT byte-identical, even with `{{id}}` substituted —
+   * `1b341dc` ("Offer only the mechanics the template ships") deliberately
+   * gave `first-slot` a third `<option value="reel-step">` (and a comment
+   * naming it) that `slot-basic` does not carry, because the template
+   * ships no `reel-step` mechanic to bind it to — the exact thing the
+   * `e8.patch.yml` test right below this one already pins from the other
+   * side. So this test strips the ONE block both changes live in (the
+   * `<select id="mechanic">` `<label>`, comment included) from both
+   * copies before comparing — catching drift anywhere else in the file
+   * (the turbo checkbox this task adds among it) while leaving that one,
+   * already-settled divergence alone rather than silently re-allowing it
+   * everywhere.
+   */
+  it('index.html matches first-slot byte-for-byte, aside from {{id}} and the mechanic <select> (first-slot ships a third, project-only mechanic — 1b341dc)', () => {
+    const stripMechanicLabel = (html: string) =>
+      html.replace(/ {6}<label>\n {8}mechanic:\n[\s\S]*?<\/select>\n {6}<\/label>\n/, '');
+    const template = stripMechanicLabel(
+      readFileSync(join(TEMPLATE, 'index.html'), 'utf8').replace('{{id}}', 'first-slot'),
+    );
+    const example = stripMechanicLabel(readFileSync(join(EXAMPLE, 'index.html'), 'utf8'));
+    // Fails loudly rather than vacuously if the regex above ever stops
+    // matching (an edit reshapes the `<select>` block) — an empty-string
+    // `toEqual` on both sides would otherwise pass having stripped
+    // everything.
+    expect(template).not.toBe('');
+    expect(template).toEqual(example);
+  });
+
   it('e8.patch.yml binds base_game to classic and ships no reel-step row', () => {
     const patch = yaml.load(readFileSync(join(TEMPLATE, 'e8.patch.yml'), 'utf8')) as {
       rows: Array<{ id: string; name?: string; config?: { stages?: { base_game?: string } } }>;

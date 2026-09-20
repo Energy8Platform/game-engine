@@ -35,6 +35,20 @@
  * board, or a composition with no art, ends up as one readable line on the
  * failure screen instead of a frozen animation. Nothing throws out of
  * `apply` — see `./index.ts`.
+ *
+ * **Tempo (slice 25).** `run` now takes the `opts?: StepOpts` `executePlan`
+ * already hands every `StepHandler` (Task 1 of "tempo"), forwarded to
+ * `controller.step(..., opts)` — the legacy `ReelStepController` already
+ * reads `opts.turbo` to halve its own highlight/scroll timings, this
+ * handler had simply never passed it through — and to `board.refill(step,
+ * opts)`. The second forward matters beyond turbo: `board.refill` is one
+ * of `@energy8engine/reels`' own TRACKED methods (it records what it was
+ * last called with, for `ReelsBoard.lastOpts` — a page's `__e8.
+ * lastStepOpts()` reads it), and calling it with no `opts` at all used to
+ * overwrite whatever `spinTo` had just recorded with `undefined` at the
+ * end of every winning round — found by Task 4's own e2e proof of
+ * `lastStepOpts()`, not by anything in this package's own tests, which
+ * fake `refill` and never asserted on its second argument.
  */
 import {
   DEFAULT_REEL_CONFIG,
@@ -46,7 +60,7 @@ import {
   type WinConfig,
 } from '@energy8platform/game-engine/slot';
 import { cellData } from '@energy8engine/contracts';
-import type { Board, PresentationStep } from '@energy8engine/contracts';
+import type { Board, PresentationStep, StepOpts } from '@energy8engine/contracts';
 import type { StepHandler } from '@energy8engine/play-loop';
 import type { ReelStepStep } from './mechanic';
 
@@ -62,7 +76,7 @@ interface ReelStepBoard {
   /** Declared as the real thing; `isReelStepBoard` is what actually checks it. */
   grid: ReelGrid;
   /** The one built-in step this handler reuses — see `run` for why. */
-  refill(step: { kind: 'refill'; board: Board }): Promise<void>;
+  refill(step: { kind: 'refill'; board: Board }, opts?: StepOpts): Promise<void>;
 }
 
 /** Each `Board` cell — a number, a name, or a record — through the shared `cellData()` mapping. */
@@ -115,7 +129,7 @@ export function createReelStepHandler(options: {
   return {
     kind: 'reelStep',
 
-    async run(step: PresentationStep, board: unknown): Promise<void> {
+    async run(step: PresentationStep, board: unknown, opts?: StepOpts): Promise<void> {
       // The documented double cast — see `ReelStepStep`'s doc in
       // `./mechanic.ts` and `StepHandler`'s in `@energy8engine/play-loop`.
       const reelStep = step as unknown as ReelStepStep;
@@ -148,6 +162,7 @@ export function createReelStepHandler(options: {
           settledGrid: toCellBoard(reelStep.settled),
         },
         reelStep.index,
+        opts,
       );
 
       // The controller settles the board by calling `grid.setGrid(...)`,
@@ -160,7 +175,7 @@ export function createReelStepHandler(options: {
       // already showing is synchronous and idempotent, so it costs nothing
       // visually — and without it `ctx.board` would keep reporting the
       // pre-scroll symbols to everything that reads it.
-      await board.refill({ kind: 'refill', board: reelStep.settled });
+      await board.refill({ kind: 'refill', board: reelStep.settled }, opts);
     },
   };
 }
