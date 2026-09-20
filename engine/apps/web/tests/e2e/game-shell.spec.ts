@@ -11,8 +11,8 @@
  *  3. `stepBet(1)` then a spin — the request's `betLevel` is the NEW bet:
  *     the flow's `spin` node reads `$shell.bet` live, at spin time.
  *  4. `startAutoplay(2)` — two spins in one run (`autoin → busy → … →
- *     free → auto → tick → more → pause → busy → …`), then the readout is
- *     `{ active: false, remaining: 0 }`.
+ *     free → auto → tick → more → pause → again → busy → …`), then the
+ *     readout is `{ active: false, remaining: 0 }`.
  *  5. A tap on the canvas during `present` skips it (`playloop1`'s
  *     `skipEvents: [ui.skip, ui.tap]` in `e8.patch.yml`).
  *  6. The scene editor page (`editor.html`, `without: ['ui.shell']`) has no
@@ -53,7 +53,7 @@ interface ShellState {
 /** One spin-log entry — `request` as the flow posted it, `result` as `session-host` answered. */
 interface Spin {
   request: { action: string; betLevel?: number };
-  result: { balance?: number; totalWinAmount?: number };
+  result: { balance?: number; winAmount?: number; totalWinAmount?: number };
 }
 
 let dir: string;
@@ -137,10 +137,12 @@ test('the shell’s Spin runs the flow: busy during, released after, win and bal
   const result = (await spins(page)).at(-1)!.result;
   expect(state.busy).toBe(false);
   expect(state.win).toBe(result.totalWinAmount);
-  // `session-host`'s dev wallet: charged the bet at the spin, credited the
-  // win on the answer, echoed on the result the `bal` node then showed.
+  // `session-host`'s dev wallet: charged the bet at the spin, credited
+  // `winAmount` on the answer (the row's own arithmetic — `totalWinAmount`
+  // happens to equal it on a one-spin round, but is not what it adds),
+  // echoed on the result the `bal` node then showed.
   expect(state.balance).toBe(result.balance);
-  expect(state.balance).toBeCloseTo(1000 - betLevels[0] + result.totalWinAmount!, 6);
+  expect(state.balance).toBeCloseTo(1000 - betLevels[0] + result.winAmount!, 6);
 });
 
 test('stepBet(1) then Spin: the request carries the new bet — $shell.bet is read live', async ({
@@ -174,21 +176,29 @@ test('startAutoplay(2): two spins in one run, then the readout is off', async ({
 
 /**
  * Case 5, measured the way `tempo.spec.ts`'s own skip case measures: the
- * press left un-awaited, 150 ms of real time (the flow has left `idle` and
- * the board's spin animation is under way), then a click on the canvas —
- * `ui.tap`, emitted by the `scenes1` row off the stage's `pointerdown`,
- * one of `playloop1`'s two `skipEvents`. The `draw` node's exit within 1 s
- * of the click is the proof. Measured on 2026-09-20 (Apple M4 Max, the
- * checked-in `first-slot` under `reel-step`): `draw` leaves 45–62 ms after
- * the tap (173–196 ms in all); a played-out `draw` on the same fixture is
- * 1828–1859 ms, i.e. ~1.7 s after this tap — the bound tells the two apart.
+ * press left un-awaited, a bounded poll for the run's `draw:null` (the
+ * `present` node entered — it starts `play.execute` synchronously on
+ * entry, so by the time the entry is readable from outside the board's
+ * spin is under way and `play.skip`'s "no run in flight" guard is past),
+ * then a click on the canvas — `ui.tap`, emitted by the `scenes1` row off
+ * the stage's `pointerdown`, one of `playloop1`'s two `skipEvents`. The
+ * `draw` node's exit within 1 s of the click is the proof. Measured on
+ * 2026-09-20 (Apple M4 Max, the checked-in `first-slot` under
+ * `reel-step`, five runs): `draw` leaves 10–83 ms after the tap as this
+ * test's 25 ms poll sees it (27–57 ms in all); a played-out `draw` on the
+ * same fixture is 1828–1859 ms — the bound tells the two apart.
  */
 test('a tap on the canvas during present skips it — draw leaves within 1 s of the tap', async ({
   page,
 }) => {
   await readyPage(page);
   expect(await press(page, 'spin')).toBe(true);
-  await new Promise((r) => setTimeout(r, 150));
+  await expect
+    .poll(async () => lastRun(await flowTrace(page)).includes('draw:null'), {
+      timeout: 10_000,
+      intervals: [10],
+    })
+    .toBe(true);
 
   const box = await page.locator('#mount canvas').first().boundingBox();
   if (!box) throw new Error('the mount has no canvas');

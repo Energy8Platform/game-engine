@@ -3,8 +3,8 @@
  * browser (spec §9, Task 4 of the text-and-props slice):
  *
  *  1. The example's own `win` node (`scenes/base_game.scene.yml`) and its
- *     `show_win` flow node (`flow.yml`: `draw → show_win → win → done`, kind
- *     `prop`, `target: base_game/win`, `prop: text`, `value: $result.win`)
+ *     `show_win` flow node (`flow.yml`: `draw → show_win → win → bal → done`,
+ *     kind `prop`, `target: base_game/win`, `prop: text`, `value: $result.win`)
  *     — empty at boot, the last spin's credited amount after one.
  *  2. `ui.tap` reaching a flow: a `wait { event: ui.tap }` node holds until
  *     a click on the preview canvas, then a `prop` node with a LITERAL

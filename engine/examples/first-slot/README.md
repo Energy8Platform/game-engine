@@ -7,8 +7,9 @@ one bundle, and `e8.patch.yml` is the delta on top of it.
 
 The flow document, and the only thing that drives the game: `boot → show
 base_game → on shell.spin → shell { busy: true } → click → spin { betLevel:
-$shell.bet } → shell { balance } → present { turbo: $shell.turbo } →
-show_win → shell { win } → done → ack → shell { busy: false }`. `done` (`if
+$shell.bet } → present { turbo: $shell.turbo } → show_win → shell { win } →
+shell { balance } → done → ack → shell { busy: false }` — the win and the
+balance land after the reels do, not before. `done` (`if
 $result.roundComplete`) sends a complete round on to `ack` and the bar's
 release; an incomplete one (free spins, a retrigger) goes to `step`, which
 posts the open round's `roundId` and next `nextActions` entry and loops back
@@ -27,11 +28,14 @@ shell.spin`, `on shell.autoplayStart` — every shell event lands on the bus as
 `$shell.autoplay.*`) and drives its readouts through `shell` nodes (`busy`,
 `balance`, `win`, `autoplay: tick`). Autoplay is the same chain entered twice:
 after `shell { busy: false }`, `if $shell.autoplay.active → shell { autoplay:
-tick } → if $shell.autoplay.remaining > 0 → wait 500 ms → back to shell {
-busy: true }`. A `spin`/`present`/`step` that fails leaves by `failed`
-straight into that same `shell { busy: false }`, so a refused spin never
-leaves the bar disabled. The page's own `Spin` button and `#turbo` checkbox
-(`index.html`) are a dev proxy for the bar's: `src/main.ts` presses the
+tick } → if $shell.autoplay.remaining > 0 → wait 500 ms → if
+$shell.autoplay.active → back to shell { busy: true }` (the second gate is
+for a Stop pressed during the wait). A `spin`/`present`/`step` that fails
+leaves by `failed` into `shell { autoplay: stop }` and then that same `shell
+{ busy: false }`: a failure ends an autoplay rather than retrying against a
+dead host, and never leaves the bar disabled. The page's own `Spin` button
+and `#turbo` checkbox (`index.html`) are a dev proxy for the bar's:
+`src/main.ts` presses the
 shell's Spin and sets its turbo level, and emits `ui.spin` as well, for a flow
 with no shell to listen to. A tap on the canvas during a presentation skips it
 — `playloop1`'s `skipEvents: [ui.skip, ui.tap]` in `e8.patch.yml`; `scenes1`
