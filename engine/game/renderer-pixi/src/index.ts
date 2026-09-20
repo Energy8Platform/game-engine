@@ -20,19 +20,50 @@ import { Application, type ApplicationOptions } from 'pixi.js';
 export interface PixiRenderer {
   /** The live pixi Application this seam provides — `stage` mounts onto `app.stage`. */
   readonly app: Application;
+  /** True when no fixed size was given and the canvas is following `mount`'s box instead. */
+  readonly follows: boolean;
   destroy(): void;
 }
 
 export type PixiRendererOptions = Partial<ApplicationOptions>;
 
 /** Builds and initialises a pixi `Application`. Rejects if `Application.init()` does — this
- *  function adds no error handling of its own, since none was measured to be needed here. */
-export async function createPixiRenderer(options: PixiRendererOptions = {}): Promise<PixiRenderer> {
+ *  function adds no error handling of its own, since none was measured to be needed here.
+ *
+ *  With both `width`/`height` absent and a `mount` given, the canvas follows the mount's box
+ *  instead of a fixed size (§3 of the design spec): `resizeTo: mount`, `autoDensity: true`,
+ *  `devicePixelRatio` resolution, and a `ResizeObserver` on `mount` re-firing `app.resize()` —
+ *  disposed by `destroy()`. `ResizeObserver` is guarded (`typeof` check): not every DOM this
+ *  runs in has one, and this function does not treat that as an error. Give either dimension,
+ *  or no `mount`, and behaviour is unchanged from before — a fixed size, or pixi's own default. */
+export async function createPixiRenderer(
+  options: PixiRendererOptions = {},
+  mount?: HTMLElement,
+): Promise<PixiRenderer> {
+  const follows = options.width === undefined && options.height === undefined && !!mount;
   const app = new Application();
-  await app.init(options);
+  let ro: ResizeObserver | undefined;
+
+  if (follows) {
+    await app.init({
+      ...options,
+      resizeTo: mount,
+      autoDensity: true,
+      resolution: globalThis.devicePixelRatio ?? 1,
+    });
+    if (typeof ResizeObserver !== 'undefined') {
+      ro = new ResizeObserver(() => app.resize());
+      ro.observe(mount);
+    }
+  } else {
+    await app.init(options);
+  }
+
   return {
     app,
+    follows,
     destroy() {
+      ro?.disconnect();
       app.destroy(true, { children: true });
     },
   };

@@ -41,6 +41,8 @@
  * provided one.
  */
 import type { Context } from 'cordis';
+import { diagnostic } from '@energy8engine/contracts';
+import type { DiagnosticsService } from '@energy8engine/diagnostics';
 import { createPixiRenderer, type PixiRenderer, type PixiRendererOptions } from './index';
 
 declare module 'cordis' {
@@ -55,10 +57,34 @@ export const name = 'renderer-pixi';
 
 /** `config` is passed straight to pixi's `Application.init()` — width/height/background/... */
 export async function apply(ctx: Context, config: PixiRendererOptions = {}): Promise<void> {
-  const renderer = await createPixiRenderer(config);
+  // Read before the renderer is built — `createPixiRenderer` needs it to
+  // decide whether to follow the mount's box (see its own doc comment).
+  const mount = ctx.reflect.get('mount', false) as HTMLElement | undefined;
+
+  // Exactly one of width/height is a config nothing downstream can act on:
+  // pixi has no notion of "half a fixed size". `createPixiRenderer` has no
+  // way to report that, so this row checks first, reports leniently (a
+  // missing `diagnostics` service just means no one is watching yet — same
+  // lenient read `session-host` uses), and strips the lone value so what
+  // reaches `createPixiRenderer` reads as "absent" — following the mount.
+  let options = config;
+  if ((config.width === undefined) !== (config.height === undefined)) {
+    (ctx.reflect.get('diagnostics', false) as DiagnosticsService | undefined)?.report(
+      diagnostic(
+        'warning',
+        'renderer-pixi',
+        'config',
+        'width and height come together — following the mount instead',
+        'set both, or neither',
+      ),
+    );
+    const { width: _width, height: _height, ...rest } = config;
+    options = rest;
+  }
+
+  const renderer = await createPixiRenderer(options, mount);
   ctx.effect(() => () => renderer.destroy(), 'renderer-pixi:app');
 
-  const mount = ctx.reflect.get('mount', false) as HTMLElement | undefined;
   if (mount) {
     mount.appendChild(renderer.app.canvas);
     // Reversible with the rest of the plugin: `renderer.destroy()` above

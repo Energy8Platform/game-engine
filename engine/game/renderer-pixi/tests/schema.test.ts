@@ -23,6 +23,12 @@ describe('@energy8engine/renderer-pixi/schema', () => {
     expect(node.dict!.width.meta.extra?.applies).toBe('restart');
   });
 
+  it("width and height's descriptions mention the mount they leave empty", () => {
+    const node = new Schema(Config.toJSON()) as Schema;
+    expect(node.dict!.width.meta.description).toContain('mount');
+    expect(node.dict!.height.meta.description).toContain('mount');
+  });
+
   it('imports only schemastery', () => {
     const source = readFileSync(join(__dirname, '..', 'src', 'schema.ts'), 'utf8');
     const specifiers = [...source.matchAll(/^import\b[^'"]*['"]([^'"]+)['"]/gm)].map((m) => m[1]);

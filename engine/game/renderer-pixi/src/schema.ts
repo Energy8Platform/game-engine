@@ -11,7 +11,11 @@ import Schema from 'schemastery';
 const restart = { applies: 'restart' };
 
 export const Config = Schema.object({
-  width: Schema.natural().description('canvas width, px').extra('extra', restart),
-  height: Schema.natural().description('canvas height, px').extra('extra', restart),
+  width: Schema.natural()
+    .description('canvas width, px — leave width and height empty to fill the mount')
+    .extra('extra', restart),
+  height: Schema.natural()
+    .description('canvas height, px — leave width and height empty to fill the mount')
+    .extra('extra', restart),
   background: Schema.string().description('canvas background colour').extra('extra', restart),
 });

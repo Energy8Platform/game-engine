@@ -49,4 +49,27 @@ describe('createPixiRenderer', () => {
     renderer.destroy();
     expect(destroy).toHaveBeenCalledWith(true, { children: true });
   });
+
+  describe('follows', () => {
+    it('is true with no fixed size and a mount', async () => {
+      const mount = {} as HTMLElement;
+      const renderer = await createPixiRenderer({}, mount);
+      expect(renderer.follows).toBe(true);
+      expect(init).toHaveBeenLastCalledWith(
+        expect.objectContaining({ resizeTo: mount, autoDensity: true }),
+      );
+    });
+
+    it('is false with a fixed size, even with a mount', async () => {
+      const mount = {} as HTMLElement;
+      const renderer = await createPixiRenderer({ width: 800, height: 600 }, mount);
+      expect(renderer.follows).toBe(false);
+      expect(init).toHaveBeenLastCalledWith({ width: 800, height: 600 });
+    });
+
+    it('is false with no mount at all', async () => {
+      const renderer = await createPixiRenderer();
+      expect(renderer.follows).toBe(false);
+    });
+  });
 });
