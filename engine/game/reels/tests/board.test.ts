@@ -47,9 +47,11 @@ function fakeReelSystem(initialBoard: LegacyReelSystem['board'] = []) {
     board = target;
   });
   // Faithful to the real facade (measured in `ReelSystem.cascade`): it assigns
-  // `board = steps[i].settledGrid` as each step settles, so — unlike `setData`
-  // or `grid.setGrid` — a cascade DOES leave `reelSystem.board` in step. That
-  // is why `tumble` needs no `remove`-style re-sync.
+  // `board = steps[i].settledGrid` as each step settles, so a cascade leaves
+  // `reelSystem.board` in step. The CELLS are another matter — the real
+  // `TumbleController` seats them with its own `setGrid(settledGrid)`, which
+  // its `_dead` guard skips once the round was skipped; that is why `tumble`
+  // re-seats them with a `setBoard` of its own.
   const cascade = vi.fn(
     async (steps: { settledGrid: LegacyReelSystem['board'] }[], opts?: unknown) => {
       calls.push(['cascade', steps, opts]);
@@ -575,7 +577,7 @@ describe('boardFromReelSystem: tumble', () => {
   });
 
   it('leaves reelSystem.board reading the settled grid, and binds every cell after', async () => {
-    const { reelSystem, bindAt, setBoard } = fakeReelSystem([[{ symbol: 'x' }, { symbol: 'y' }]]);
+    const { reelSystem, bindAt } = fakeReelSystem([[{ symbol: 'x' }, { symbol: 'y' }]]);
     const board = boardFromReelSystem(reelSystem);
 
     await board.tumble(step());
@@ -584,11 +586,31 @@ describe('boardFromReelSystem: tumble', () => {
       [{ symbol: 'ORB', multiplier: 5 }, { symbol: 'b' }],
       [{ symbol: 'c' }, { symbol: '2' }],
     ]);
-    // `cascade` settles the board itself (unlike `setData`/`setGrid`), so no
-    // `remove`-style re-sync is needed — and none is made.
-    expect(setBoard).not.toHaveBeenCalled();
     expect(bindAt(0, 0)).toHaveBeenCalledWith({ symbol: 'ORB', multiplier: 5 });
     expect(bindAt(1, 1)).toHaveBeenCalledWith({ symbol: '2' });
+  });
+
+  // A SKIPPED round never reaches `TumbleController`'s own
+  // `setGrid(settledGrid)` (`_dead` returns first), so the cells would keep
+  // the pre-tumble symbols while `reelSystem.board` reports `settled` — and
+  // the `bindAll()` that follows would bind that stale data. The re-seat is
+  // the board's, after the cascade lands and before anything binds.
+  it('re-seats the settled grid after the cascade resolves and before bindAll', async () => {
+    const { reelSystem, cascade, setBoard, bindAt } = fakeReelSystem([
+      [{ symbol: 'x' }, { symbol: 'y' }],
+    ]);
+    const board = boardFromReelSystem(reelSystem);
+
+    await board.tumble(step());
+
+    expect(setBoard).toHaveBeenCalledTimes(1);
+    expect(setBoard).toHaveBeenCalledWith([
+      [{ symbol: 'ORB', multiplier: 5 }, { symbol: 'b' }],
+      [{ symbol: 'c' }, { symbol: '2' }],
+    ]);
+    const [reseat] = setBoard.mock.invocationCallOrder;
+    expect(reseat).toBeGreaterThan(cascade.mock.invocationCallOrder[0]);
+    expect(reseat).toBeLessThan(bindAt(0, 0).mock.invocationCallOrder[0]);
   });
 
   it('a repaint asked for mid-tumble is deferred until it lands, like a spin', async () => {
@@ -609,7 +631,8 @@ describe('boardFromReelSystem: tumble', () => {
 
     land();
     await tumbling;
-    expect(setBoard).toHaveBeenCalledTimes(1);
+    // Two: the tumble's own re-seat of `settled`, then the deferred repaint.
+    expect(setBoard).toHaveBeenCalledTimes(2);
   });
 });
 

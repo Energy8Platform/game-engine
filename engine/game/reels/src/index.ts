@@ -229,12 +229,18 @@ export function boardFromReelSystem(
     // (`cascade` is generic over the step and loops; handing it one step per
     // call is what keeps `executePlan`'s one-step-at-a-time contract intact.)
     //
-    // No `remove`-style re-sync afterwards, deliberately: unlike `setData` and
-    // `grid.setGrid`, which repaint cells without reaching the ReelSystem's own
-    // `board` closure, the facade's `cascade` assigns `board = settledGrid`
-    // itself as each step lands. A `setBoard` on top would be a redundant
-    // re-resolve of every view the tumble just seated.
+    // A `remove`-style re-sync afterwards, and it is not redundant with the
+    // `board = settledGrid` the facade's `cascade` assigns as each step lands.
+    // That assignment updates the ReelSystem's own closure only; the CELLS are
+    // seated by `TumbleController`'s own `setGrid(settledGrid)`, which its
+    // `_dead` guard skips entirely once the round was SKIPPED (or the grid
+    // destroyed). Left alone, a skipped tumble leaves the visible grid on the
+    // pre-tumble board while `reelSystem.board` — and `ctx.board` with it —
+    // reports `settled`, and the `bindAll()` below re-binds that stale data.
+    // `setBoard` is `setData` per cell (via `grid.setGrid`), so on the clean
+    // path this is an idempotent re-seat of what the tumble just landed.
     tumble: tracked(async (step: TumbleStep, opts?: StepOpts) => {
+      const settled = toCellBoard(step.settled);
       await reelSystem.cascade(
         [
           {
@@ -257,11 +263,12 @@ export function boardFromReelSystem(
               row,
               symbol: cellData(symbol).symbol as string,
             })),
-            settledGrid: toCellBoard(step.settled),
+            settledGrid: settled,
           },
         ],
         { turbo: opts?.turbo },
       );
+      reelSystem.setBoard(settled);
       bindAll();
     }),
 
