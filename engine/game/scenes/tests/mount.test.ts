@@ -913,6 +913,47 @@ describe('live props', () => {
     expect(onScreen.text).toBe('x99');
     expect(standalone.text).toBe('x99');
   });
+
+  it('a copy whose `update` throws leaves NO copy remembering the patch', async () => {
+    const seen: number[] = [];
+    let bad: Container | null = null;
+    const { scenes, nodeTypes, report } = boot();
+    nodeTypes.register({
+      type: 'probe',
+      schema: Schema.object({ v: Schema.number().default(0) }),
+      mount: () => new Container(),
+      update: (view, p) => {
+        seen.push((p as { v: number }).v);
+        if (view === bad) throw new Error('no');
+      },
+    });
+    scenes.replace([
+      { id: 'big_win', nodes: [{ id: 'banner', type: 'probe', props: { v: 1 } }] },
+      {
+        id: 'base_game',
+        nodes: [{ id: 'bw', type: 'scene', props: { scene: 'big_win', visible: false } }],
+      },
+    ]);
+    await scenes.show('base_game');
+    await scenes.show('big_win');
+    // The SECOND copy the apply loop reaches — `entriesOf` answers the
+    // standalone mount first (it was replaced first), the embedded one after.
+    bad = scenes.sceneView('base_game')!.getChildByLabel('banner', true);
+    report.mockClear();
+    seen.length = 0;
+
+    expect(scenes.setProps({ scene: 'big_win', node: 'banner' }, { v: 5 })).toBe(false);
+    expect(report).toHaveBeenCalledTimes(1);
+    expect(report).toHaveBeenCalledWith(expect.objectContaining({ where: 'big_win/banner' }));
+
+    // Neither copy kept it — not even the one whose `update` came back
+    // clean before the throw: a following no-op patch re-applies the
+    // DOCUMENT's `v`, which it could not do if `live` had been committed.
+    bad = null;
+    seen.length = 0;
+    expect(scenes.setProps({ scene: 'big_win', node: 'banner' }, {})).toBe(true);
+    expect(seen).toEqual([1, 1]);
+  });
 });
 
 describe('nodeSchema', () => {

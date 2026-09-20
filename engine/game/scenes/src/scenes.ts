@@ -679,8 +679,15 @@ export function createScenes(options: CreateScenesOptions): ScenesService {
           error(e.where, `${offending(err, patch)}: ${why(err)}`, 'fix the value');
           return false;
         }
-        // Only a patch that actually landed is remembered — a refused one
-        // must not poison the next `refresh()` (or the next patch's merge).
+      }
+      // Only a patch that actually landed is remembered — a refused one
+      // must not poison the next `refresh()` (or the next patch's merge).
+      // Committed in a pass of its OWN, after every copy's apply came back
+      // clean: a throw on the LAST copy would otherwise leave the earlier
+      // ones remembering a patch this call goes on to answer `false` for,
+      // and `refresh()` re-applying it forever. The throwing copy's view
+      // may still have moved — the single-copy caveat above, unchanged.
+      for (const { e, props } of plan) {
         e.live = { ...e.live, ...patch };
         e.props = props;
         e.failed = false;
