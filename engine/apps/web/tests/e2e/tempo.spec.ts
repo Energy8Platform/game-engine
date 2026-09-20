@@ -326,11 +326,13 @@ test('a skip mid-tumble-chain collapses the rest of it and lands on the last set
   }
 
   // The whole run — the tumble rounds the skip collapsed included — inside
-  // 1.5 s of the skip. A played-out round takes longer than that on its own.
+  // 700 ms of the skip. Measured: ~28 ms with the latch; a single played-out
+  // round is ~1.1 s plus ~300 ms of `revealWins`, so a bound at 1.5 s would
+  // have passed with the latch reverted on the common one-round chain.
   expect(
     found.elapsedMs,
     `${found.plan.filter((s) => s.kind === 'tumble').length} tumble rounds`,
-  ).toBeLessThan(1500);
+  ).toBeLessThan(700);
 
   const settled = (found.plan.filter((s) => s.kind === 'tumble').at(-1) as { settled: unknown[][] })
     .settled;
