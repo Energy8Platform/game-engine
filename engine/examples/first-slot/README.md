@@ -6,7 +6,12 @@ one bundle, and `e8.patch.yml` is the delta on top of it.
 ## `flow.yml`
 
 The flow document, and the only thing that drives the game: `boot → show
-base_game → on ui.spin → click → spin → present → back to on`. `e8-base`'s
+base_game → on ui.spin → click → spin → present → done`. `done` (`if
+$result.roundComplete`) sends a complete round back to `on`; an incomplete
+one (free spins, a retrigger) goes to `step`, which posts the open round's
+`roundId` and next `nextActions` entry and loops back to `present` to draw
+the response — dormant on `first-slot`'s own math, where every round
+completes on the first spin. `e8-base`'s
 `flow1` row (`@energy8engine/flow`) reads it from the host (`GET
 /api/flow`), interprets it, and traces every node it enters and leaves;
 `src/main.ts` holds no spin loop any more — its `Spin` button only emits

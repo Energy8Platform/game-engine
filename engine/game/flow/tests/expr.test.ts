@@ -32,4 +32,10 @@ describe('evaluate', () => {
 
   it('readPath returns null (not undefined) through a missing branch', () =>
     expect(readPath('missing.deep', vars)).toBeNull());
+
+  it('readPath indexes a numeric segment into an array', () =>
+    expect(readPath('$a.0', { a: ['x'] })).toBe('x'));
+
+  it('readPath reads a non-array object the same as before — `$a.b` is unchanged', () =>
+    expect(readPath('$a.b', { a: { b: 'y' } })).toBe('y'));
 });

@@ -20,9 +20,20 @@ describe('flow row', () => {
     await fiber;
     expect(ctx.get('events')).toBeDefined();
     expect(ctx.get('events')!.on).toBeTypeOf('function');
-    expect(ctx.get('flowNodes')!.list().map((k) => k.kind).sort()).toEqual(
-      ['boot', 'emit', 'hide', 'if', 'merge', 'on', 'present', 'set', 'show', 'spin', 'wait'],
-    );
+    expect(ctx.get('flowNodes')!.list().map((k) => k.kind).sort()).toEqual([
+      'boot',
+      'emit',
+      'hide',
+      'if',
+      'merge',
+      'on',
+      'present',
+      'set',
+      'show',
+      'spin',
+      'step',
+      'wait',
+    ]);
     await ctx.get('flow')!.ready;
     expect(ctx.get('flow')!.doc()).toEqual(doc);
   });

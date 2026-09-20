@@ -6,7 +6,7 @@ import yaml from 'js-yaml';
 import { WebSocket } from 'ws';
 import { afterEach, describe, expect, it } from 'vitest';
 import type { FlowDoc, FlowKindInfo, FlowResponse, ServerMessage } from '@energy8engine/contracts';
-import { BUILTIN_KINDS } from '@energy8engine/flow';
+import { BUILTIN_KINDS, validateFlow, type KindShape } from '@energy8engine/flow';
 import { createIdeHost, type IdeHost } from '../src/index';
 
 /** A fixture copied to a temp dir with the repo's packages linked in — see `scenes.test.ts`. */
@@ -65,7 +65,7 @@ const KINDS: FlowKindInfo[] = [
   kind('set'),
 ];
 
-/** What the host answers as `kinds` before any game has spoken: the eleven built-ins, by name. */
+/** What the host answers as `kinds` before any game has spoken: the twelve built-ins, by name. */
 const BUILTIN_NAMES = BUILTIN_KINDS.map((k) => k.kind);
 const builtins = () =>
   expect.arrayContaining(BUILTIN_NAMES.map((kind) => expect.objectContaining({ kind })));
@@ -90,11 +90,11 @@ const flowFrames = (frames: ServerMessage[]) =>
   frames.filter((f): f is Extract<ServerMessage, { type: 'flow' }> => f.type === 'flow');
 
 describe('/api/flow', () => {
-  it('GET answers the parsed document, clean, with the eleven built-in kinds until the game speaks; no flow.yml is doc: null', async () => {
+  it('GET answers the parsed document, clean, with the twelve built-in kinds until the game speaks; no flow.yml is doc: null', async () => {
     host = await createIdeHost({ root: flowWorkspace(), port: 0 });
     const body = await get(host.url);
     expect(body).toEqual({ doc: LOOP, diagnostics: [], kinds: builtins() });
-    expect(body.kinds).toHaveLength(11);
+    expect(body.kinds).toHaveLength(12);
     // As the game would report them: outs, trigger, and a JSON schema the editor can rebuild.
     expect(body.kinds.find((k) => k.kind === 'spin')).toEqual({
       kind: 'spin',
@@ -452,5 +452,28 @@ describe('flow across a project switch', () => {
     expect(await host.ctx.workspace.open('two')).toEqual([]);
     await expect.poll(() => flowFrames(frames.slice(seen)).some((f) => f.doc === null)).toBe(true);
     close();
+  });
+});
+
+describe('the example flow.yml', () => {
+  /**
+   * `engine/examples/first-slot/flow.yml` (≡ `engine/templates/slot-basic/
+   * flow.yml`, pinned by `template.test.ts`) parsed straight off disk —
+   * the one place this suite reads the REAL example rather than the
+   * `project-flow` fixture's own five-node stand-in (`LOOP`, above). Its
+   * `click` node is kind `sound`, a `@energy8engine/flow-fx` row the
+   * built-in registry doesn't carry — `validateFlow`'s kind checks are
+   * fed the built-ins plus that one extra shape rather than `null`, so
+   * this test still catches a typo'd kind name or an out port the doc
+   * gets wrong, the thing a static read of the file can actually prove.
+   */
+  it('parses and validates with no diagnostics', () => {
+    const text = readFileSync(
+      join(__dirname, '..', '..', '..', 'examples', 'first-slot', 'flow.yml'),
+      'utf8',
+    );
+    const doc = yaml.load(text) as FlowDoc;
+    const kinds: KindShape[] = [...BUILTIN_KINDS, { kind: 'sound', outs: ['next'] }];
+    expect(validateFlow(doc, kinds, null)).toEqual([]);
   });
 });

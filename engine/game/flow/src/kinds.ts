@@ -1,5 +1,5 @@
 /**
- * The flow node-kind registry (`ctx.flowNodes`) and the eleven built-in
+ * The flow node-kind registry (`ctx.flowNodes`) and the twelve built-in
  * kinds. Last-wins like the scene node-type registry, so a project plugin
  * (or a hot re-apply) can replace a built-in; subscribers hear every change.
  *
@@ -146,12 +146,63 @@ const on: FlowNodeKind<{ event: string; busy: 'ignore' | 'queue' }> = {
   },
 };
 
+/**
+ * POSTs a spin/step request body to `/api/spin` and turns the answer into
+ * the `spin`/`step` kinds' own `run` result. Shared: both kinds build the
+ * same `{ out: 'result', vars: { result, request } }` /
+ * `{ out: 'failed', vars: { error } }` shape from the same endpoint, only
+ * the request body they build differs.
+ */
+async function postSpin(
+  body: Record<string, unknown>,
+  fetchFn: typeof fetch,
+): Promise<{ out: string; vars?: Record<string, unknown> }> {
+  try {
+    const res = await fetchFn('/api/spin', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    if (!res.ok) throw new Error(`POST /api/spin → ${res.status}`);
+    const result: unknown = await res.json();
+    return { out: 'result', vars: { result, request: body } };
+  } catch (e) {
+    return { out: 'failed', vars: { error: e instanceof Error ? e.message : String(e) } };
+  }
+}
+
+/**
+ * Resolves a `betLevel` prop (a numeric literal or `$path`) into
+ * `request.betLevel`, converting a literal string with `Number()` and
+ * reporting + omitting one that isn't a number. Shared by `spin` and `step`
+ * — both take `betLevel` the same way.
+ */
+function applyBetLevel(
+  betLevelProp: string | undefined,
+  vars: Record<string, unknown>,
+  request: Record<string, unknown>,
+  report: (message: string, severity?: Severity) => void,
+): void {
+  const betLevelRaw = resolve(betLevelProp, vars);
+  if (betLevelRaw === undefined) return;
+  if (typeof betLevelRaw === 'number') {
+    request.betLevel = betLevelRaw;
+    return;
+  }
+  const betLevel = Number(betLevelRaw);
+  if (typeof betLevelRaw !== 'string' || betLevelRaw.trim() === '' || Number.isNaN(betLevel)) {
+    report(`betLevel "${betLevelRaw}" is not a number`);
+  } else {
+    request.betLevel = betLevel;
+  }
+}
+
 const spin: FlowNodeKind<{ action: string; betLevel?: string }> = {
   kind: 'spin',
   schema: Schema.object({
     action: Schema.string().default('spin').description('action name, or `$path` to read a var'),
     // A string, not a number: the IDE's number field cannot hold a `$path` —
-    // `run` below converts a literal with `Number()`.
+    // `applyBetLevel` converts a literal with `Number()`.
     betLevel: Schema.string().description('bet level (a number), or `$path` to read a var'),
   }),
   outs: ['result', 'failed'],
@@ -159,31 +210,47 @@ const spin: FlowNodeKind<{ action: string; betLevel?: string }> = {
     const request: Record<string, unknown> = {};
     const action = resolve(p.action, vars);
     if (action !== undefined) request.action = action;
-    const betLevelRaw = resolve(p.betLevel, vars);
-    if (betLevelRaw !== undefined) {
-      if (typeof betLevelRaw === 'number') {
-        request.betLevel = betLevelRaw;
-      } else {
-        const betLevel = Number(betLevelRaw);
-        if (typeof betLevelRaw !== 'string' || betLevelRaw.trim() === '' || Number.isNaN(betLevel)) {
-          report(`betLevel "${betLevelRaw}" is not a number`);
-        } else {
-          request.betLevel = betLevel;
-        }
-      }
+    applyBetLevel(p.betLevel, vars, request, report);
+    return postSpin(request, fetchFn);
+  },
+};
+
+/**
+ * Steps an open round to its next response: unlike `spin` (which always
+ * starts a fresh round), `step` carries the `roundId` a prior `result`
+ * named and the `action` it offered in `nextActions` — the loop a `result.
+ * roundComplete === false` puts the flow into. Both default to reading the
+ * PREVIOUS response off `vars.result` (`readPath` follows the numeric
+ * `nextActions.0` segment into the array), so a bare node needs no props;
+ * either can still be a literal or a different `$path` for a flow that
+ * wants to choose the next action itself (a bonus pick, say).
+ */
+const step: FlowNodeKind<{ roundId: string; action: string; betLevel?: string }> = {
+  kind: 'step',
+  schema: Schema.object({
+    roundId: Schema.string()
+      .default('$result.roundId')
+      .description('the open round id (a literal), or `$path` to read a var'),
+    action: Schema.string()
+      .default('$result.nextActions.0')
+      .description('next action name (a literal), or `$path` to read a var'),
+    betLevel: Schema.string().description('bet level (a number), or `$path` to read a var'),
+  }),
+  outs: ['result', 'failed'],
+  async run(p, { vars, fetchFn, report }) {
+    const roundId = resolve(p.roundId, vars);
+    if (roundId == null || roundId === '') {
+      report(`'step' has no roundId to send (resolved from '${p.roundId}')`);
+      return { out: 'failed', vars: { error: "'step' has no roundId" } };
     }
-    try {
-      const res = await fetchFn('/api/spin', {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify(request),
-      });
-      if (!res.ok) throw new Error(`POST /api/spin → ${res.status}`);
-      const result: unknown = await res.json();
-      return { out: 'result', vars: { result, request } };
-    } catch (e) {
-      return { out: 'failed', vars: { error: e instanceof Error ? e.message : String(e) } };
+    const action = resolve(p.action, vars);
+    if (action == null || action === '') {
+      report(`'step' has no action to send (resolved from '${p.action}')`);
+      return { out: 'failed', vars: { error: "'step' has no action" } };
     }
+    const request: Record<string, unknown> = { action, roundId };
+    applyBetLevel(p.betLevel, vars, request, report);
+    return postSpin(request, fetchFn);
   },
 };
 
@@ -315,4 +382,17 @@ const emit: FlowNodeKind<{ event: string; payload?: unknown }> = {
 /** Special-cased by the interpreter: passes once every incoming edge has arrived this run. */
 const merge: FlowNodeKind = { kind: 'merge', schema: none, outs: ['next'] };
 
-export const BUILTIN_KINDS: FlowNodeKind<any>[] = [boot, on, spin, present, show, hide, wait, ifKind, set, emit, merge];
+export const BUILTIN_KINDS: FlowNodeKind<any>[] = [
+  boot,
+  on,
+  spin,
+  step,
+  present,
+  show,
+  hide,
+  wait,
+  ifKind,
+  set,
+  emit,
+  merge,
+];

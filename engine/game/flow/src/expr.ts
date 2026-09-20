@@ -198,15 +198,21 @@ function compare(op: string, a: unknown, b: unknown, pos: number): boolean {
 
 /**
  * Reads a dotted path out of `vars` (`'result.stage'` → `vars.result?.stage`).
- * A leading `$` is stripped, so `'$x'` and `'x'` read the same value. Any
- * missing branch of the path reads as `null` (never `undefined`), so a
+ * A leading `$` is stripped, so `'$x'` and `'x'` read the same value. A
+ * segment that lands on an array indexes it numerically (`'result.
+ * nextActions.0'` → `vars.result.nextActions[0]`) rather than reading an
+ * own-property named `'0'` (which would work too, only by accident — a
+ * string subscript on an array is untyped in plain JS but is exactly what
+ * `Array.prototype[key]` already does; the explicit branch just says so).
+ * Any missing branch of the path reads as `null` (never `undefined`), so a
  * missing value compares equal to a literal `null` under `evaluate`.
  */
 export function readPath(path: string, vars: Record<string, unknown>): unknown {
   const clean = path.startsWith('$') ? path.slice(1) : path;
-  const value = clean
-    .split('.')
-    .reduce<unknown>((acc, key) => (acc == null ? undefined : (acc as Record<string, unknown>)[key]), vars);
+  const value = clean.split('.').reduce<unknown>((acc, key) => {
+    if (acc == null) return undefined;
+    return Array.isArray(acc) ? acc[Number(key)] : (acc as Record<string, unknown>)[key];
+  }, vars);
   return value ?? null;
 }
 

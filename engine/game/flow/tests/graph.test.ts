@@ -9,6 +9,7 @@ const kinds: KindShape[] = [
   { kind: 'if', outs: ['true', 'false'] },
   { kind: 'wait', outs: ['next'] },
   { kind: 'spin', outs: ['result', 'failed'] },
+  { kind: 'step', outs: ['result', 'failed'] },
 ];
 
 const doc = (nodes: FlowDoc['nodes'], edges: FlowDoc['edges']): FlowDoc => ({ version: 1, nodes, edges });
@@ -98,7 +99,29 @@ describe('validateFlow', () => {
     ]);
   });
 
-  it('a cycle with no on/wait is an error naming the cycle', () => {
+  it('a cycle through `step` alone (no on/wait) is silent — `step` yields on its own POST', () => {
+    const out = validateFlow(
+      doc(
+        [
+          { id: 'a', kind: 'boot' },
+          { id: 'b', kind: 'show', props: { scene: 's' } },
+          { id: 'c', kind: 'if', props: { when: 'x' } },
+          { id: 'd', kind: 'step' },
+        ],
+        [
+          { from: 'a', to: 'b' },
+          { from: 'b', to: 'c' },
+          { from: 'c', out: 'false', to: 'd' },
+          { from: 'd', to: 'b' },
+        ],
+      ),
+      kinds,
+      ['s'],
+    );
+    expect(out.filter((d) => d.message.includes('cycle without a wait'))).toEqual([]);
+  });
+
+  it('a cycle with no on/wait/step is an error naming the cycle', () => {
     const out = validateFlow(
       doc(
         [
