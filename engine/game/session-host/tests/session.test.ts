@@ -135,6 +135,26 @@ describe('session-host', () => {
     await ctx.fiber.dispose();
   });
 
+  it('charges the wallet even when the play fails — the spec says every play, not only a successful one', async () => {
+    const ctx = new Context();
+    const provideRoot = vi.fn((_name: string, _getter: () => unknown) => () => {});
+    ctx.provide('flow', { provideRoot });
+    const failure = [diagnostic('error', 'session-dev', 'session', 'the math engine is not running')];
+    await ctx.plugin(sessionHost, {
+      fetchFn: fakeFetch({ spin: () => fail(502, { diagnostics: failure }) }),
+    });
+    const getter = provideRoot.mock.calls[0][1];
+    expect(getter()).toMatchObject({ balance: 1000 });
+
+    const { result, diagnostics } = await ctx.get('session')!.play({ action: 'spin', betLevel: 1 });
+    expect(result).toBeUndefined();
+    expect(diagnostics).toEqual(failure);
+    // No win to credit, but the bet was still spent — 1000 − 1.
+    expect(getter()).toMatchObject({ balance: 999 });
+
+    await ctx.fiber.dispose();
+  });
+
   it('a 500 with no JSON body is one error diagnostic naming the status', async () => {
     const ctx = await boot(fakeFetch({ spin: () => failNoBody(500) }));
 

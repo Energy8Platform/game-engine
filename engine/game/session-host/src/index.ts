@@ -29,6 +29,14 @@
  * spec for where a real one (`session-sdk`, a platform's own ledger) picks
  * this up instead.
  *
+ * **Why every diagnostic here names `'session-host'`, not `'session'`.**
+ * `session` is the cordis *service key* both candidates behind this seam
+ * provide — `session-sdk` (Task 4) answers to the exact same name, on a
+ * different composition. A diagnostic's `plugin` field is how a reader
+ * tells who is speaking (see `@energy8engine/contracts`'s `diagnostic.ts`);
+ * naming the seam instead of the row would make every failure look like it
+ * came from whichever provider the reader assumed was composed.
+ *
  * **Why `play()` RETURNS diagnostics instead of reporting them.** The flow
  * kind that calls `play()` — `playThrough` in `@energy8engine/flow`'s
  * `kinds.ts` — already re-reports whatever comes back, at the severity the

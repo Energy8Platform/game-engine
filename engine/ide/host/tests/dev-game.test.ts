@@ -509,13 +509,15 @@ describe('dev-game — the spin route', () => {
     expect(Array.isArray(result.data.grid)).toBe(true);
   });
 
-  it("answers /api/session with the project's own bet ladder (@energy8engine/session-host's init)", async () => {
+  it("answers /api/session with the project's own bet ladder (@energy8engine/session-host's init) — defaultBet is betLevels[0], not a second read of config.betLevel", async () => {
     await bare();
     await ctx!.plugin(devGame, {
       root: WEB_ROOT,
       gamesDir: GAME,
       gameId: 'first-slot',
-      betLevel: 1.0,
+      // Deliberately NOT betLevels[0] — proves defaultBet is derived from
+      // the ladder, not from this field.
+      betLevel: 5,
       betLevels: [1, 2, 5],
       port: 0,
       previewPort: 0,
@@ -527,7 +529,7 @@ describe('dev-game — the spin route', () => {
       balance: 1000,
       currency: { code: 'USD', symbol: '$', decimals: 2, position: 'left' },
       betLevels: [1, 2, 5],
-      defaultBet: 1.0,
+      defaultBet: 1,
     });
   });
 

@@ -150,6 +150,22 @@ describe('project-scope: the game', () => {
     return cwd;
   }
 
+  /**
+   * `gameProject()`, with `game/spec.json`'s `betLevels` replaced —
+   * everything else (the required `id` in particular) stays `first-slot`'s
+   * own. `betLevels` is never read by e8-server itself (see the fixture's
+   * own `spec.json` "note"), so a shape that would be nonsense as a real
+   * bet ladder is still safe to boot a real project with.
+   */
+  function gameProjectWithBetLevels(betLevels: unknown): string {
+    const cwd = gameProject();
+    const specPath = join(cwd, 'game', 'spec.json');
+    const spec = JSON.parse(readFileSync(specPath, 'utf8')) as Record<string, unknown>;
+    spec.betLevels = betLevels;
+    writeFileSync(specPath, JSON.stringify(spec));
+    return cwd;
+  }
+
   /** `scriptSha256` is the sha256 of the file e8-server loaded — which file, provable. */
   const sha256 = (file: string) => createHash('sha256').update(readFileSync(file)).digest('hex');
   async function spinSha(previewUrl: string): Promise<unknown> {
@@ -324,6 +340,32 @@ describe('project-scope: the game', () => {
         diagnostics: [expect.objectContaining({ plugin: 'dev-game', where: 'game/spec.json' })],
       }),
     ]);
+  });
+
+  describe('readGameConfig: /api/session\'s bet ladder, through the real plugin', () => {
+    it('a good ladder is the array, and betLevel/defaultBet is its first entry', async () => {
+      const c = await root();
+      const handle = await bootProjectScope(c, gameProjectWithBetLevels([2, 5, 10]), 0);
+      const res = await fetch(`${handle.previewUrl}/api/session`);
+      expect(await res.json()).toMatchObject({ betLevels: [2, 5, 10], defaultBet: 2 });
+    }, 15_000);
+
+    it('a non-numeric entry anywhere in the array falls back to [betLevel] — not a hardcoded [1]', async () => {
+      const c = await root();
+      // The first entry (3) IS a number, so `betLevel` itself still reads
+      // it — the fallback ladder is `[3]`, proving it reuses that value
+      // rather than always landing on 1.
+      const handle = await bootProjectScope(c, gameProjectWithBetLevels([3, 'bad', 7]), 0);
+      const res = await fetch(`${handle.previewUrl}/api/session`);
+      expect(await res.json()).toMatchObject({ betLevels: [3], defaultBet: 3 });
+    }, 15_000);
+
+    it('an empty array falls back to [1], not an empty ladder', async () => {
+      const c = await root();
+      const handle = await bootProjectScope(c, gameProjectWithBetLevels([]), 0);
+      const res = await fetch(`${handle.previewUrl}/api/session`);
+      expect(await res.json()).toMatchObject({ betLevels: [1], defaultBet: 1 });
+    }, 15_000);
   });
 });
 

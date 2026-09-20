@@ -747,11 +747,16 @@ export async function apply(ctx: Context, config: DevGameConfig): Promise<void> 
    * fixed: nothing about this dev host has an opinion on either yet.
    */
   preview.get('/api/session', async (_req, res) => {
+    // One source for both fields: `defaultBet` is `betLevels[0]`, never a
+    // second read of `config.betLevel` that could name a bet the ladder
+    // itself doesn't have — see `project-scope.ts`'s `readGameConfig`,
+    // which already keeps the two in step for a real project either way.
+    const betLevels = config.betLevels ?? [config.betLevel];
     res.json({
       balance: 1000,
       currency: { code: 'USD', symbol: '$', decimals: 2, position: 'left' },
-      betLevels: config.betLevels ?? [config.betLevel],
-      defaultBet: config.betLevel,
+      betLevels,
+      defaultBet: betLevels[0],
     });
   });
 

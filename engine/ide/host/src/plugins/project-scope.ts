@@ -154,9 +154,14 @@ async function readGameConfig(
   // `betLevels`, the same source `betLevel` above already reads its first
   // entry from (never the compiled `.spin`'s `bet_levels`, a server-side
   // declaration of the same idea). Falls back to the single `betLevel`
-  // above when the spec's own array isn't one of numbers.
+  // above when the spec's own array isn't one of numbers, OR is empty —
+  // `[].every(...)` is vacuously `true`, and an empty ladder is worse than
+  // a one-entry one: a shell with nothing to select is not a fallback,
+  // it's a broken bet stepper.
   const betLevels: number[] =
-    Array.isArray(spec.betLevels) && spec.betLevels.every((n) => typeof n === 'number')
+    Array.isArray(spec.betLevels) &&
+    spec.betLevels.length > 0 &&
+    spec.betLevels.every((n) => typeof n === 'number')
       ? (spec.betLevels as number[])
       : [betLevel];
   // A `GameSpec` game's `game/script.spin` is logic only and does not
