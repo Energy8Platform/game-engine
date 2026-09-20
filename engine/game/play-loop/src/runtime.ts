@@ -40,9 +40,10 @@
  * **Slice 25 adds a fourth thing: tempo.** `execute` carries `StepOpts`
  * through to the board, and `ctx.play.skip()` collapses whatever is
  * presenting — reachable from a page directly, and from the flow bus's
- * `ui.skip`, which this row subscribes to leniently (see `apply`). A skip
- * is not a flow node: it has to land WHILE the flow is busy, which is the
- * one moment a flow node cannot run.
+ * `ui.skip`, which this row subscribes to through `ctx.inject(['events'])`
+ * (see `apply` for why that, and not a read at apply time). A skip is not a
+ * flow node: it has to land WHILE the flow is busy, which is the one moment
+ * a flow node cannot run.
  *
  * **The precedence rule is untouched.** `executePlan` gives the board first
  * refusal on every kind and reaches a registry only for kinds the board has
@@ -192,34 +193,34 @@ export function apply(ctx: Context): void {
 
   // The flow bus is the only channel a skip can arrive on DURING a run: a
   // flow `on` node cannot fire while the flow is busy (`busy: ignore`),
-  // which is exactly when a skip means anything. Read leniently, because
-  // `events` is `flow1`'s and this row does not depend on it.
+  // which is exactly when a skip means anything.
   //
-  // Armed TWICE on purpose. In `e8-base` `playloop1` is listed BEFORE
-  // `flow1`, so at apply time there is usually no bus yet and the lookup
-  // below answers `undefined` — the second arming, on the first `execute`,
-  // is what actually catches it (by then a flow node is what called us).
-  // A composition that provides the bus first is caught by the first.
-  let offSkip: (() => void) | undefined;
-  const armSkip = () => {
-    if (offSkip) return;
-    offSkip = (ctx.reflect.get('events', false) as FlowBus | undefined)?.on('ui.skip', () =>
-      skip(),
+  // `ctx.inject`, not a lenient read at apply time, and not this row's own
+  // `inject` field — the same device `ide-bridge` uses for `mechanics`. Two
+  // measured facts make it the only correct one:
+  //
+  //  - `events` is `flow1`'s, and in `e8-base` `playloop1` is listed BEFORE
+  //    `flow1`, so at apply time there is nothing to subscribe to. (There is
+  //    no ambiguity with cordis's own `ctx.events` emitter here:
+  //    `reflect.get('events', false)` on a bare context is `undefined`, and
+  //    this callback fires exactly when something calls
+  //    `ctx.provide('events', …)`.)
+  //  - `flow` is `hot: true`. A re-applied flow row un-provides its bus and
+  //    provides a NEW one; this callback runs again against it, and the
+  //    effect below is disposed with the old bus on the way out. A
+  //    subscription captured once would have gone on holding a dead bus,
+  //    silently, for the rest of the page's life.
+  ctx.inject(['events'], (c) => {
+    c.effect(
+      () => (c.get('events') as unknown as FlowBus).on('ui.skip', () => skip()),
+      'play-loop:ui-skip',
     );
-  };
-  ctx.effect(() => {
-    armSkip();
-    return () => {
-      offSkip?.();
-      offSkip = undefined;
-    };
-  }, 'play:ui-skip');
+  });
 
   ctx.provide('play', {
     async execute(plan, board, registry = steps, opts) {
       lastBoard = board;
       lastRegistry = registry;
-      armSkip();
       const problems = await executePlan(plan, board, registry, opts);
       // This row IS `executePlan`'s caller — the nearest point that both
       // knows a plan just ran and can reach the composition's shared

@@ -75,9 +75,25 @@ describe('createReelsBoard — after destroy()', () => {
       () => board.revealWins({ kind: 'revealWins', total: 0, lines: [] }),
       () => board.remove({ kind: 'remove', cells: [] }),
       () => board.refill({ kind: 'refill', board: [[1]] }),
+      () =>
+        board.tumble({
+          kind: 'tumble',
+          winning: [],
+          removed: [],
+          fresh: [],
+          settled: [[1]],
+        }),
     ]) {
       await expect(call()).rejects.toThrow('board destroyed — reels1 was re-applied; spin again');
     }
+  });
+
+  // `skip` joins `repaint` on the other side of that rule: there is no spin
+  // result a stale skip could misreport, so it is a no-op, not a throw.
+  it('skip() after destroy is a quiet no-op, not a refusal', () => {
+    const board = createReelsBoard({ resolve, config: { grid: { cols: 1, rows: 1 } } });
+    board.destroy();
+    expect(() => board.skip()).not.toThrow();
   });
 
   it('a plan run against it is a play-loop diagnostic, not a throw and not a silent "done"', async () => {

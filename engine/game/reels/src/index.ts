@@ -244,10 +244,18 @@ export function boardFromReelSystem(
             // The legacy `newCells.symbol` is a bare string: a record's extras
             // cannot ride here. They do not need to — `settledGrid` below is
             // what each cell takes its data from once the drop lands.
+            //
+            // The cast is for an EMPTY fresh cell. `cellData` answers `null`
+            // there, and `null` is exactly what the controller's
+            // `cell.setData({ symbol })` means by "no symbol" — the same value
+            // `remove()` above hands it. The legacy field is typed `string`
+            // only because nothing had given it an empty one before; `?? ''`
+            // would be strictly worse, since `resolve('')` is a symbol lookup
+            // that cannot succeed.
             newCells: step.fresh.map(({ col, row, symbol }) => ({
               col,
               row,
-              symbol: cellData(symbol).symbol ?? '',
+              symbol: cellData(symbol).symbol as string,
             })),
             settledGrid: toCellBoard(step.settled),
           },
@@ -260,6 +268,13 @@ export function boardFromReelSystem(
     // Collapse whatever is animating — the legacy `ReelSystem.skip()` forwards
     // to the live spin/tumble/reel-step controllers. Synchronous: the op's own
     // promise resolves a moment later, on its own.
+    //
+    // It is not only the in-flight ops: that same call unconditionally kills
+    // every tween on the `fx` overlay layer and then removes and destroys its
+    // children — so a bespoke ring, label or sprite a game drew there is gone
+    // after a skip, whether or not anything was animating. Nothing here can
+    // narrow that without reaching past the facade; a game that draws into
+    // `fx` redraws it after a skip.
     skip() {
       reelSystem.skip();
     },

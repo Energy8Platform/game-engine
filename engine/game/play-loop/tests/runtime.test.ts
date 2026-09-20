@@ -337,12 +337,53 @@ describe('play-loop runtime half: reporting to the diagnostics service', () => {
  * now — the board's own `skip` (the legacy `ReelSystem.skip()`, one level
  * down) plus every registered handler's optional one.
  *
- * The `ui.skip` subscription is lenient on purpose and armed twice: a skip
- * has to land DURING a run, which a flow `on` node cannot do (`busy:
- * ignore`), so the row subscribes to the flow bus itself — and in `e8-base`
- * `playloop1` composes BEFORE `flow1`, so at apply time there is no bus to
- * subscribe to yet. Hence the second arming, on the first `execute`.
+ * The `ui.skip` subscription rides `ctx.inject(['events'])`: a skip has to
+ * land DURING a run, which a flow `on` node cannot do (`busy: ignore`), so
+ * the row subscribes to the flow bus itself. `inject` and not a read at
+ * apply time, for two reasons each with a test below — `playloop1` composes
+ * BEFORE `flow1` in `e8-base` (nothing to read yet), and `flow` is
+ * `hot: true` (a re-applied flow row hands out a NEW bus, and a
+ * subscription captured once would go on holding the dead one).
  */
+/** A stand-in for `@energy8engine/flow`'s `createEvents()` — the same two methods. */
+function fakeBus() {
+  const listeners = new Map<string, Set<(payload: unknown) => void>>();
+  return {
+    service: {
+      emit: (name: string, payload?: unknown) => {
+        for (const fn of [...(listeners.get(name) ?? [])]) fn(payload);
+      },
+      on: (name: string, fn: (payload: unknown) => void) => {
+        const set = listeners.get(name) ?? new Set();
+        listeners.set(name, set);
+        set.add(fn);
+        return () => set.delete(fn);
+      },
+    },
+    emit(name: string) {
+      for (const fn of [...(listeners.get(name) ?? [])]) fn(undefined);
+    },
+  };
+}
+
+/** A row that provides a bus the way `flow1` does, so it can be disposed again. */
+const busPlugin = (bus: ReturnType<typeof fakeBus>) => ({
+  name: 'fake-flow',
+  apply(ctx: Context) {
+    ctx.provide('events', bus.service);
+  },
+});
+
+/** Runs one plan so the row has a board to aim `skip()` at; returns that board's spy. */
+async function armedBoard(ctx: Context) {
+  const boardSkip = vi.fn();
+  await ctx.play.execute([{ kind: 'spinTo', board: [[1]] }], {
+    spinTo: async () => {},
+    skip: boardSkip,
+  } as unknown as BoardApi);
+  return boardSkip;
+}
+
 describe('play-loop runtime half: turbo and skip', () => {
   it('execute forwards StepOpts to the board', async () => {
     const ctx = new Context();
@@ -409,49 +450,61 @@ describe('play-loop runtime half: turbo and skip', () => {
 
   it('a `ui.skip` on the flow bus skips — bus composed before this row', async () => {
     const ctx = new Context();
-    const listeners = new Map<string, (payload: unknown) => void>();
-    ctx.provide('events', {
-      emit: (name: string, payload?: unknown) => listeners.get(name)?.(payload),
-      on: (name: string, fn: (payload: unknown) => void) => {
-        listeners.set(name, fn);
-        return () => listeners.delete(name);
-      },
-    });
+    const bus = fakeBus();
+    ctx.provide('events', bus.service);
     await ctx.plugin(runtime);
 
-    const boardSkip = vi.fn();
-    await ctx.play.execute([{ kind: 'spinTo', board: [[1]] }], {
-      spinTo: async () => {},
-      skip: boardSkip,
-    } as unknown as BoardApi);
-    (ctx.reflect.get('events', false) as { emit(n: string): void }).emit('ui.skip');
+    const boardSkip = await armedBoard(ctx);
+    bus.emit('ui.skip');
 
     expect(boardSkip).toHaveBeenCalledTimes(1);
 
     await ctx.fiber.dispose();
   });
 
-  it('…and when the bus lands AFTER this row — the e8-base order — the first execute arms it', async () => {
+  it('…and when the bus lands AFTER this row — the e8-base order — inject arms it then', async () => {
     const ctx = new Context();
     await ctx.plugin(runtime);
 
-    const listeners = new Map<string, (payload: unknown) => void>();
-    ctx.provide('events', {
-      emit: (name: string, payload?: unknown) => listeners.get(name)?.(payload),
-      on: (name: string, fn: (payload: unknown) => void) => {
-        listeners.set(name, fn);
-        return () => listeners.delete(name);
-      },
-    });
-
-    const boardSkip = vi.fn();
-    await ctx.play.execute([{ kind: 'spinTo', board: [[1]] }], {
-      spinTo: async () => {},
-      skip: boardSkip,
-    } as unknown as BoardApi);
-    (ctx.reflect.get('events', false) as { emit(n: string): void }).emit('ui.skip');
+    const bus = fakeBus();
+    ctx.provide('events', bus.service);
+    // `inject` fires on a later tick (measured), which the `execute` below
+    // gives it; the assertion is that it fires at all, unprompted.
+    const boardSkip = await armedBoard(ctx);
+    bus.emit('ui.skip');
 
     expect(boardSkip).toHaveBeenCalledTimes(1);
+
+    await ctx.fiber.dispose();
+  });
+
+  /**
+   * `flow` is `hot: true`: an edited flow row is disposed and re-applied,
+   * un-providing its bus and providing a fresh one. A subscription captured
+   * once — the shape this started as — would still be holding the dead bus,
+   * and `ui.skip` would silently stop working for the rest of the page's
+   * life, with nothing on screen to say why.
+   */
+  it('re-arms when the flow row is re-applied with a new bus, and lets the old one go', async () => {
+    const ctx = new Context();
+    await ctx.plugin(runtime);
+
+    const first = fakeBus();
+    const firstRow = await ctx.plugin(busPlugin(first));
+    const boardSkip = await armedBoard(ctx);
+    first.emit('ui.skip');
+    expect(boardSkip).toHaveBeenCalledTimes(1);
+
+    await firstRow.dispose();
+    const second = fakeBus();
+    await ctx.plugin(busPlugin(second));
+    await new Promise((r) => setTimeout(r, 0));
+
+    second.emit('ui.skip');
+    expect(boardSkip).toHaveBeenCalledTimes(2);
+    // the old bus was let go on the way out — a stale emit reaches nothing
+    first.emit('ui.skip');
+    expect(boardSkip).toHaveBeenCalledTimes(2);
 
     await ctx.fiber.dispose();
   });

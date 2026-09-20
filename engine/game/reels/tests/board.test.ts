@@ -537,6 +537,22 @@ describe('boardFromReelSystem: tumble', () => {
     ]);
   });
 
+  // An empty fresh cell lands EMPTY: `null` is what the legacy
+  // `SymbolCell.setData` means by "no symbol" (and what `remove()` hands it).
+  // `''` would send `resolve('')` looking for a symbol that cannot exist.
+  it('an empty fresh cell carries null through, not an empty symbol name', async () => {
+    const { reelSystem, cascade } = fakeReelSystem();
+    const board = boardFromReelSystem(reelSystem);
+
+    await board.tumble({
+      ...step(),
+      fresh: [{ col: 0, row: 0, symbol: { symbol: null } }],
+    });
+
+    const [[[sent]]] = cascade.mock.calls as unknown as [[{ newCells: unknown[] }[]]];
+    expect(sent.newCells).toEqual([{ col: 0, row: 0, symbol: null }]);
+  });
+
   it('a tumble with no drops passes none — the controller derives gravity', async () => {
     const { reelSystem, cascade } = fakeReelSystem();
     const board = boardFromReelSystem(reelSystem);
