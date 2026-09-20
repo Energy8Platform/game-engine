@@ -478,6 +478,29 @@ label {
   background: var(--e8-hover);
   color: var(--e8-fg);
 }
+/* The tree's `◐` — a node with a portrait override; the mark is the clear button. */
+.e8-explorer-variant {
+  flex: 0 0 auto;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--e8-radius-sm);
+  background: transparent;
+  color: var(--e8-fg-muted);
+  font-size: 12px;
+  line-height: 1;
+}
+.e8-explorer-variant:hover {
+  background: var(--e8-hover);
+  color: var(--e8-fg);
+}
+.e8-canvas-viewport-size {
+  width: 76px;
+  height: 22px;
+  padding: 0 4px;
+  font-size: var(--e8-size-label);
+}
 .e8-explorer-confirm {
   display: inline-flex;
   align-items: center;

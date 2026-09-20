@@ -12,15 +12,16 @@ import { useScenes } from '../plugins/scenes';
 import { useWorkspace } from '../plugins/workspace';
 import { useGameComposition } from '../plugins/game-composition';
 import { activateOnKey } from './activate';
-import { createCanvasRpc, type CanvasRpc } from './canvas-rpc';
-import { CanvasToolbar, clampZoom, type GridState } from './CanvasToolbar';
+import { createCanvasRpc, type CanvasRpc, type EditPayload } from './canvas-rpc';
+import { CanvasToolbar, clampZoom, type GridState, type Viewport } from './CanvasToolbar';
 
 /**
  * A scene opened as a tab: the canvas. Three regions — the toolbar
  * (`CanvasToolbar`), the node tree (left pane, collapsible; the slice-17
  * tree, unchanged inside: Explorer rows, hover `×`, drag) and the stage,
- * holding the editor page (`${previewUrl}/editor.html?scene=<id>`) in an
- * iframe sized to the design and scaled with a CSS transform. This view
+ * holding the editor page (`${previewUrl}/editor.html?scene=<id>&safeBottom=<px>`)
+ * in an iframe sized to the toolbar's VIEWPORT preset (the design box by
+ * default) and scaled with a CSS transform. This view
  * holds no draft: every edit — from the tree or from the canvas — is one
  * `ctx.scenes.update(next)` and both redraw from `docs()` (the write's
  * answer, or the host's `scenes` frame). A refusal, or the canvas'
@@ -40,9 +41,17 @@ import { CanvasToolbar, clampZoom, type GridState } from './CanvasToolbar';
  * same rule `PreviewWall` uses: a host `reload` verdict, or another
  * project on the same address.
  *
+ * The viewport preset is also the EDIT TARGET (spec §7): while its safe
+ * rect is portrait, a canvas edit (`variant: 'portrait'` on the event)
+ * lands in `portrait.nodes[<id>]` through `patchVariant`, never in the
+ * node's own props, and the same fact is published as
+ * `ctx.scenes.setVariant` for the Properties form. The tree marks a node
+ * with an override `◐`; that mark is the "clear portrait override" button.
+ *
  * The pure helpers below are what the tests pin: `nextId`, `addNode`,
- * `removeNode`, `moveNode`, `shiftNode`. None mutate; each returns a new
- * document (or the same one when there is nothing to do).
+ * `removeNode`, `moveNode`, `shiftNode`, `patchVariant`, `clearVariant`.
+ * None mutate; each returns a new document (or the same one when there
+ * is nothing to do).
  */
 
 /** The type an internal drag carries: the dragged node's id. */
@@ -181,6 +190,33 @@ function patchNode(doc: SceneDoc, id: string, props: Record<string, unknown>): S
   };
 }
 
+/** `portrait.nodes[id]` with `props` merged over it (creating the block); a nested or unknown id is not a root and is left alone. */
+export function patchVariant(doc: SceneDoc, id: string, props: Record<string, unknown>): SceneDoc {
+  if (!doc.nodes.some((n) => n.id === id)) return doc;
+  const nodes = doc.portrait?.nodes ?? {};
+  return { ...doc, portrait: { nodes: { ...nodes, [id]: { ...nodes[id], ...props } } } };
+}
+
+/** Drops `portrait.nodes[id]`, and the block with it when that was its last entry. */
+export function clearVariant(doc: SceneDoc, id: string): SceneDoc {
+  if (!doc.portrait?.nodes?.[id]) return doc;
+  const { [id]: _gone, ...rest } = doc.portrait.nodes;
+  const { portrait: _block, ...bare } = doc;
+  return Object.keys(rest).length ? { ...bare, portrait: { nodes: rest } } : bare;
+}
+
+/**
+ * The bottom inset the Pixi shell's bar takes, per layout, as the editor
+ * page is told (`?safeBottom=`) for a viewport preset: the bar's NOMINAL
+ * heights, `packages/shell/src/ui/pixi/components/BottomBar.ts` —
+ * `WIDE_BAR_H = WIDE_PAD_BOTTOM (8) + SPIN (84)` at `:42`, and
+ * `MOBILE_BAR_H = M_PAD_BOTTOM (8) + SPIN (84) + M_GAP (10) + M_INFO_H (40)`
+ * at `:55`. The shell picks `mobile` when the screen is taller than wide
+ * (`ShellController.ts:120`), and so does the canvas. Not imported: the
+ * client has no dependency on `packages/*`.
+ */
+export const SAFE_BOTTOM = { wide: 92, mobile: 142 } as const;
+
 /** What the canvas measures is a float (`279.99998474121094`); the file reads `280` — positions AND sizes whole (both are design px), scale to 0.01, rotation to 0.0001. */
 const DECIMALS: Record<string, number> = {
   x: 1,
@@ -244,6 +280,14 @@ export function SceneDocument({ ctx, path }: ViewerProps) {
 
   const [treeOpen, setTreeOpen] = useState(true);
   const [grid, setGrid] = useState(DEFAULT_GRID);
+  // The toolbar's viewport preset: what the iframe is sized to; `null` = the design box.
+  const [viewport, setViewport] = useState<Viewport | null>(null);
+  const vw = viewport?.width ?? design.width;
+  const vh = viewport?.height ?? design.height;
+  // The design box has no bar; a preset gets the shell's, per its layout.
+  const safeBottom = viewport ? SAFE_BOTTOM[vh > vw ? 'mobile' : 'wide'] : 0;
+  // The scenes runtime's own rule: the SAFE rect (the viewport minus the band) taller than wide.
+  const variant = vh - safeBottom > vw ? 'portrait' : null;
   // `null` = fit automatically (recomputed as the stage resizes); a number = the user's zoom.
   const [zoom, setZoom] = useState<number | null>(null);
   const [fit, setFit] = useState(1);
@@ -369,9 +413,10 @@ export function SceneDocument({ ctx, path }: ViewerProps) {
       if (liveNode() !== node) ctx.scenes.select({ scene: id, node });
     });
     rpc.on('edit', (payload) => {
-      const { node, props } = payload as { node: string; props: Record<string, unknown> };
+      const { node, props, variant: layer } = payload as EditPayload;
       const current = liveDoc();
-      commit(current && patchNode(current, node, roundProps(props)));
+      const write = layer === 'portrait' ? patchVariant : patchNode;
+      commit(current && write(current, node, roundProps(props)));
     });
     rpc.on('remove', (payload) => remove((payload as { node: string }).node));
     rpc.on('zorder', (payload) => {
@@ -408,6 +453,15 @@ export function SceneDocument({ ctx, path }: ViewerProps) {
 
   const mirrored = selected?.scene === id ? selected.node : null;
   useEffect(() => tell('select', { node: mirrored }), [mirrored]);
+  // The inspector writes where the canvas does; a closed tab leaves no
+  // variant behind. The service is held, not re-read: a tab can unmount
+  // after its context was disposed (the tests do), and there is no
+  // `ctx.scenes` then.
+  useEffect(() => {
+    const { scenes } = ctx;
+    scenes.setVariant(variant);
+    return () => scenes.setVariant(null);
+  }, [ctx, variant]);
   useEffect(() => tell('grid', grid), [grid]);
   // The canvas composes no `ide-bridge` (see `scene-edit`), so every change
   // to the set — this tab's own edits answered, Properties, the host's
@@ -424,18 +478,14 @@ export function SceneDocument({ ctx, path }: ViewerProps) {
       // A degenerate measurement (mid-load, a pane not laid out yet) would
       // collapse the frame to a few percent — leave the fit alone until there is a real box.
       if (box.width < 50 || box.height < 50) return;
-      setFit(
-        clampZoom(
-          Math.min((box.width - FIT_PAD) / design.width, (box.height - FIT_PAD) / design.height),
-        ),
-      );
+      setFit(clampZoom(Math.min((box.width - FIT_PAD) / vw, (box.height - FIT_PAD) / vh)));
     };
     const observer = new ResizeObserver(measure);
     observer.observe(stage);
     measure();
     return () => observer.disconnect();
     // `doc === undefined`: the stage is not there until the scene is (a tab opened ahead of the boot GET).
-  }, [design.width, design.height, previewUrl, doc === undefined]);
+  }, [vw, vh, previewUrl, doc === undefined]);
 
   if (!doc) {
     return (
@@ -496,6 +546,8 @@ export function SceneDocument({ ctx, path }: ViewerProps) {
         onGrid={setGrid}
         treeOpen={treeOpen}
         onTreeToggle={() => setTreeOpen((v) => !v)}
+        viewport={viewport}
+        onViewport={setViewport}
       />
 
       {error !== null ? (
@@ -584,6 +636,21 @@ export function SceneDocument({ ctx, path }: ViewerProps) {
                 <span className="e8-explorer-name">
                   {node.type} {node.id}
                 </span>
+                {doc.portrait?.nodes?.[node.id] ? (
+                  <button
+                    type="button"
+                    className="e8-explorer-variant"
+                    data-testid={`scene-node-${node.id}-variant`}
+                    aria-label={`clear portrait override for ${node.id}`}
+                    title="has a portrait override — click to clear it"
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      commit(clearVariant(doc, node.id));
+                    }}
+                  >
+                    ◐
+                  </button>
+                ) : null}
                 <button
                   type="button"
                   className="e8-explorer-delete"
@@ -617,17 +684,15 @@ export function SceneDocument({ ctx, path }: ViewerProps) {
             canvas unavailable: no project open
           </p>
         ) : (
-          <div
-            className="e8-canvas-frame"
-            style={{ width: design.width * scale, height: design.height * scale }}
-          >
+          <div className="e8-canvas-frame" style={{ width: vw * scale, height: vh * scale }}>
+            {/* A preset change re-sizes the iframe in place; a `safeBottom` change is a new `src`, so the page reloads (the canvas re-sends `ready`, and the set/selection/grid follow). */}
             <iframe
               key={`${reloads}:${workspace.active}:${previewUrl}`}
               ref={attachIframe}
               title="scene canvas"
-              src={`${previewUrl}/editor.html?scene=${encodeURIComponent(id)}`}
-              width={design.width}
-              height={design.height}
+              src={`${previewUrl}/editor.html?scene=${encodeURIComponent(id)}&safeBottom=${safeBottom}`}
+              width={vw}
+              height={vh}
               style={{ transform: `scale(${scale})` }}
             />
           </div>

@@ -110,6 +110,8 @@ function scenesStub(docs: readonly SceneDoc[], types: readonly NodeTypeInfo[]): 
     update: async () => [],
     preview: async () => [],
     open: () => {},
+    variant: () => null,
+    setVariant: () => {},
     subscribe(fn) {
       listeners.add(fn);
       return () => listeners.delete(fn);

@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
 import { CanvasToolbar } from '../src/shell/CanvasToolbar';
@@ -16,6 +16,8 @@ function mount(over: Partial<Parameters<typeof CanvasToolbar>[0]> = {}) {
     onGrid: vi.fn(),
     treeOpen: true,
     onTreeToggle: vi.fn(),
+    viewport: null,
+    onViewport: vi.fn(),
     ...over,
   };
   render(<CanvasToolbar {...props} />);
@@ -51,6 +53,61 @@ describe('CanvasToolbar', () => {
     expect([...step.options].map((o) => o.value)).toEqual(['8', '16', '32']);
     await userEvent.selectOptions(step, '32');
     expect(props.onGrid).toHaveBeenLastCalledWith({ on: false, step: 32 });
+  });
+
+  it('the viewport select offers the design box and three device presets; a preset reports its size, design reports null', async () => {
+    const props = mount();
+    const select = screen.getByTestId('canvas-viewport') as HTMLSelectElement;
+    expect([...select.options].map((o) => o.value)).toEqual([
+      'design',
+      'landscape',
+      'phone-portrait',
+      'phone-landscape',
+      'custom',
+    ]);
+    expect(select.value).toBe('design');
+    expect(screen.queryByTestId('canvas-viewport-size')).toBeNull();
+    await userEvent.selectOptions(select, 'phone-portrait');
+    expect(props.onViewport).toHaveBeenLastCalledWith({ width: 390, height: 844 });
+    await userEvent.selectOptions(select, 'landscape');
+    expect(props.onViewport).toHaveBeenLastCalledWith({ width: 1280, height: 720 });
+    await userEvent.selectOptions(select, 'phone-landscape');
+    expect(props.onViewport).toHaveBeenLastCalledWith({ width: 844, height: 390 });
+    await userEvent.selectOptions(select, 'design');
+    expect(props.onViewport).toHaveBeenLastCalledWith(null);
+  });
+
+  it('a given viewport selects its preset; an unlisted one reads as custom with the field showing it', () => {
+    mount({ viewport: { width: 844, height: 390 } });
+    expect((screen.getByTestId('canvas-viewport') as HTMLSelectElement).value).toBe(
+      'phone-landscape',
+    );
+    cleanup();
+    mount({ viewport: { width: 500, height: 500 } });
+    expect((screen.getByTestId('canvas-viewport') as HTMLSelectElement).value).toBe('custom');
+    expect(screen.getByTestId('canvas-viewport-size')).toBeTruthy();
+  });
+
+  it('custom… reveals a W×H field: Enter or blur with a size reports it (x, × or * between), a bad value keeps the last', async () => {
+    const props = mount({ viewport: { width: 1280, height: 720 } });
+    const select = screen.getByTestId('canvas-viewport') as HTMLSelectElement;
+    await userEvent.selectOptions(select, 'custom');
+    expect(props.onViewport).not.toHaveBeenCalled();
+    const field = screen.getByTestId('canvas-viewport-size') as HTMLInputElement;
+    expect(field.value).toBe('1280×720');
+    fireEvent.change(field, { target: { value: '800x600' } });
+    fireEvent.keyDown(field, { key: 'Enter' });
+    expect(props.onViewport).toHaveBeenLastCalledWith({ width: 800, height: 600 });
+    fireEvent.change(field, { target: { value: ' 1024 * 768 ' } });
+    fireEvent.blur(field);
+    expect(props.onViewport).toHaveBeenLastCalledWith({ width: 1024, height: 768 });
+    fireEvent.change(field, { target: { value: 'wide' } });
+    fireEvent.blur(field);
+    expect(props.onViewport).toHaveBeenCalledTimes(2);
+    expect(field.value).toBe('1280×720'); // the prop is what it shows again: nothing was reported
+    fireEvent.change(field, { target: { value: '0×10' } });
+    fireEvent.keyDown(field, { key: 'Enter' });
+    expect(props.onViewport).toHaveBeenCalledTimes(2);
   });
 
   it('the tree toggle reports and reflects the pane', async () => {

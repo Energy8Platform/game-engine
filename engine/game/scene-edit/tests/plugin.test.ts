@@ -22,10 +22,11 @@ const DOCS: SceneDoc[] = [
 
 type Frame = { type: string; id?: number; event?: string; payload?: unknown; ok?: boolean; result?: unknown };
 
-function boot(scene = 'a', docs = DOCS, docsReady?: Promise<void>) {
+function boot(scene = 'a', docs = DOCS, docsReady?: Promise<void>, safeArea?: { top: number; right: number; bottom: number; left: number }) {
   const ctx = new Context();
   const app = { stage: new Container(), ticker: { add: vi.fn(), remove: vi.fn() }, canvas: document.createElement('canvas'), screen: { width: 480, height: 288 } };
   ctx.provide('renderer', { app });
+  if (safeArea) ctx.provide('safeArea', safeArea);
   const nodeTypes = createNodeTypes();
   for (const t of [container, image, box, anim, wrapped]) nodeTypes.register(t);
   ctx.provide('nodeTypes', nodeTypes);
@@ -332,7 +333,7 @@ describe('scene-edit plugin', () => {
     body.emit('pointerdown', ev(70, 70));
     layer.emit('globalpointermove', ev(89.999999, 70));
     layer.emit('pointerup', ev(89.999999, 70));
-    expect(events().at(-1)).toEqual({ event: 'edit', payload: { node: 'hi', props: { x: 160, y: 120 } } });
+    expect(events().at(-1)).toEqual({ event: 'edit', payload: { node: 'hi', props: { x: 160, y: 120 }, variant: null } });
     expect(scenes.docs().get('a')!.nodes[1].props).toEqual({ x: 160, y: 120 });
     expect(scenes.view({ scene: 'a', node: 'hi' })!.position.x).toBe(160);
     // The second drag starts on the fresh view; the IDE's echo of the first lands mid-way.
@@ -344,7 +345,7 @@ describe('scene-edit plugin', () => {
     expect(scenes.view({ scene: 'a', node: 'hi' })).toBe(view); // JSON-equal: no remount
     layer.emit('pointerup', ev(110, 70));
     expect(events().filter((e) => e.event === 'edit')).toHaveLength(2);
-    expect(events().at(-1)).toEqual({ event: 'edit', payload: { node: 'hi', props: { x: 200, y: 120 } } });
+    expect(events().at(-1)).toEqual({ event: 'edit', payload: { node: 'hi', props: { x: 200, y: 120 }, variant: null } });
   });
 
   it('a stale echo of an earlier nudge does not snap the node back under key repeat; a refused write does', async () => {
@@ -403,12 +404,12 @@ describe('scene-edit plugin', () => {
     key('[');
     expect(events().at(-1)).toEqual({ event: 'zorder', payload: { node: 'hi', delta: -1 } });
     key('ArrowRight');
-    expect(events().at(-1)).toEqual({ event: 'edit', payload: { node: 'hi', props: { x: 121, y: 120 } } });
+    expect(events().at(-1)).toEqual({ event: 'edit', payload: { node: 'hi', props: { x: 121, y: 120 }, variant: null } });
     key('ArrowDown', { shiftKey: true });
-    expect(events().at(-1)).toEqual({ event: 'edit', payload: { node: 'hi', props: { x: 121, y: 130 } } });
+    expect(events().at(-1)).toEqual({ event: 'edit', payload: { node: 'hi', props: { x: 121, y: 130 }, variant: null } });
     key('ArrowLeft', { metaKey: true }); // a browser chord, not a nudge
     key('ArrowLeft', { ctrlKey: true });
-    expect(events().at(-1)).toEqual({ event: 'edit', payload: { node: 'hi', props: { x: 121, y: 130 } } });
+    expect(events().at(-1)).toEqual({ event: 'edit', payload: { node: 'hi', props: { x: 121, y: 130 }, variant: null } });
     const input = document.body.appendChild(document.createElement('input'));
     input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Delete', bubbles: true }));
     expect(events().at(-1)?.event).toBe('edit'); // typing in a field is not a canvas key
@@ -480,6 +481,81 @@ describe('scene-edit plugin', () => {
     const failed = boot('a', [], Promise.reject(new Error('could not read the scene documents: down')));
     await vi.waitFor(() => expect(failed.events().at(-1)).toEqual({ event: 'error', payload: { message: 'could not read the scene documents: down' } }));
     expect(failed.gizmoLayer()).toBeUndefined();
+  });
+
+  /** A stroke's bounds carry its width (and a `-0`): within a pixel of the rect is the rect. */
+  const near = (b: { x: number; y: number; width: number; height: number }, want: number[]) => {
+    for (const [i, v] of [b.x, b.y, b.width, b.height].entries()) expect(Math.abs(v - want[i])).toBeLessThanOrEqual(1);
+  };
+
+  // Design 960×576 on the same 480×288 screen with a 48px band at the
+  // bottom: the fit is into 480×240 (scale 240/576 = 5/12, the design 400
+  // wide, letterboxed 40px each side), so the safe rect runs from design
+  // x −96 to 1056 and y 0 to 576, and the band below it is 48 screen px.
+  it('draws the design box and the safe rect from the fit, with the bar band hatched below it; the frames follow a resize', async () => {
+    const { app, scenes, ready, frame } = boot('a', DOCS, undefined, { top: 0, right: 0, bottom: 48, left: 0 });
+    await ready();
+    expect(scenes.fit()?.viewport).toEqual({ left: -96, top: 0, right: 1056, bottom: 576 });
+    const frames = scenes.container.getChildByLabel('frames')!;
+    expect(scenes.container.getChildIndex(frames)).toBe(1); // over the grid, under the scene
+    near(frames.getChildByLabel('design-frame')!.getBounds(), [40, 0, 400, 240]);
+    near(frames.getChildByLabel('safe-rect')!.getBounds(), [0, 0, 480, 240]);
+    near(frames.getChildByLabel('safe-band')!.getBounds(), [0, 240, 480, 48]);
+    // The band goes with the insets: a resize without them leaves no band and the safe rect on the design box.
+    scenes.resize(480, 288);
+    frame();
+    expect(frames.getChildByLabel('safe-band')!.getBounds().height).toBe(0);
+    near(frames.getChildByLabel('safe-rect')!.getBounds(), [0, 0, 480, 288]);
+    void app;
+  });
+
+  it("a pinned node's drag emits the offset from its pin point, not the absolute position", async () => {
+    // `pinned` sits 100 design px in from the bottom-right corner: absolute (860, 476), screen (430, 238).
+    const docs: SceneDoc[] = [{ id: 'a', nodes: [{ id: 'pinned', type: 'box', props: { pin: 'bottom-right', x: -100, y: -100 } }] }, DOCS[1]];
+    const { edit, scenes, events, ready, gizmoLayer } = boot('a', docs);
+    await ready();
+    expect(scenes.view({ scene: 'a', node: 'pinned' })!.position).toMatchObject({ x: 860, y: 476 });
+    edit().pickAndSelect(440, 248);
+    expect(events().at(-1)).toEqual({ event: 'selected', payload: { node: 'pinned' } });
+    const layer = gizmoLayer()!;
+    const body = layer.children[1];
+    body.emit('pointerdown', ev(440, 248));
+    layer.emit('globalpointermove', ev(460, 238)); // +20, −10 screen = +40, −20 design
+    layer.emit('pointerup', ev(460, 238));
+    expect(events().at(-1)).toEqual({ event: 'edit', payload: { node: 'pinned', props: { x: -60, y: -120 }, variant: null } });
+    expect(scenes.docs().get('a')!.nodes[0].props).toEqual({ pin: 'bottom-right', x: -60, y: -120 });
+    expect(scenes.view({ scene: 'a', node: 'pinned' })!.position).toMatchObject({ x: 900, y: 456 });
+  });
+
+  it('under a portrait fit an edit carries variant: portrait and the optimistic patch writes portrait.nodes, leaving nodes[] alone', async () => {
+    const { app, edit, scenes, events, ready, frame, key, call } = boot();
+    await ready();
+    edit().pickAndSelect(65, 65); // hi
+    // The screen turns: the safe rect is taller than wide, the design rotates (576×960).
+    app.screen.width = 288; app.screen.height = 480;
+    scenes.resize(288, 480);
+    frame();
+    expect(edit().orientation()).toBe('portrait');
+    expect(edit().fit()).toBe(scenes.fit());
+    key('ArrowRight');
+    expect(events().at(-1)).toEqual({ event: 'edit', payload: { node: 'hi', props: { x: 121, y: 120 }, variant: 'portrait' } });
+    const a = scenes.docs().get('a')!;
+    expect(a.portrait).toEqual({ nodes: { hi: { x: 121, y: 120 } } });
+    expect(a.nodes[1].props).toEqual({ x: 120, y: 120 });
+    expect(scenes.view({ scene: 'a', node: 'hi' })!.position.x).toBe(121);
+    // The IDE's echo carries the block: acknowledged on that layer, nothing snaps back.
+    key('ArrowRight');
+    await call('replace', { docs: [{ ...DOCS[0], portrait: { nodes: { hi: { x: 121, y: 120 } } } }, DOCS[1]] });
+    frame();
+    expect(scenes.view({ scene: 'a', node: 'hi' })!.position.x).toBe(122);
+    expect(scenes.docs().get('a')!.portrait).toEqual({ nodes: { hi: { x: 122, y: 120 } } });
+    // Back to landscape: the override is dropped from the view and edits go to the node again.
+    app.screen.width = 480; app.screen.height = 288;
+    scenes.resize(480, 288);
+    frame();
+    expect(scenes.view({ scene: 'a', node: 'hi' })!.position.x).toBe(120);
+    key('ArrowRight');
+    expect(events().at(-1)).toEqual({ event: 'edit', payload: { node: 'hi', props: { x: 121, y: 120 }, variant: null } });
   });
 
   it('disposing the fiber tears everything down', async () => {

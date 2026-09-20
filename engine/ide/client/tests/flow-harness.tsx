@@ -97,6 +97,8 @@ function scenesStub(scenes: readonly (string | SceneDoc)[]): ScenesService {
     update: async () => [],
     preview: async () => [],
     open: () => {},
+    variant: () => null,
+    setVariant: () => {},
     subscribe(fn) {
       listeners.add(fn);
       return () => listeners.delete(fn);

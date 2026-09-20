@@ -353,6 +353,88 @@ describe('PropertiesSidebar', () => {
     });
   });
 
+  it("under variant: 'portrait' a root's edit writes the override only — the changed key into portrait.nodes[id], the node untouched — and the form shows the override merged over the node", async () => {
+    const { ctx, puts } = await harness();
+    act(() => ctx.scenes.setVariant('portrait'));
+    act(() => ctx.scenes.select({ scene: 'base_game', node: 'title' }));
+    renderSide(ctx);
+    expect(screen.getByTestId('prop-variant')).toHaveTextContent('portrait');
+    const x = screen.getByLabelText('x, design px');
+    fireEvent.change(x, { target: { value: '25' } });
+    fireEvent.blur(x);
+    await waitFor(() => expect(puts()).toHaveLength(1));
+    expect(puts()[0].nodes).toEqual(BASE.nodes);
+    expect(puts()[0].portrait).toEqual({ nodes: { title: { x: 25 } } });
+    // The answer shows through: the form's x is the override's, its src still the node's.
+    await waitFor(() =>
+      expect((screen.getByLabelText('x, design px') as HTMLInputElement).value).toBe('25'),
+    );
+    expect((screen.getByLabelText('src') as HTMLInputElement).value).toBe('title.png');
+    // A second edit merges into the same entry.
+    const alpha = screen.getByLabelText('alpha');
+    fireEvent.change(alpha, { target: { value: '0.5' } });
+    fireEvent.blur(alpha);
+    await waitFor(() => expect(puts()).toHaveLength(2));
+    expect(puts()[1].portrait).toEqual({ nodes: { title: { x: 25, alpha: 0.5 } } });
+    expect(puts()[1].nodes[1].props).toEqual({ src: 'title.png' });
+  });
+
+  it("under variant: 'portrait' a NESTED node still edits itself (no override for it), and no badge shows", async () => {
+    const { ctx, puts } = await harness();
+    act(() => ctx.scenes.setVariant('portrait'));
+    act(() => ctx.scenes.select({ scene: 'base_game', node: 'logo' }));
+    renderSide(ctx);
+    expect(screen.queryByTestId('prop-variant')).toBeNull();
+    const x = screen.getByLabelText('x, design px');
+    fireEvent.change(x, { target: { value: '25' } });
+    fireEvent.blur(x);
+    await waitFor(() => expect(puts()).toHaveLength(1));
+    expect(puts()[0].portrait).toBeUndefined();
+    expect(puts()[0].nodes[0].children?.[0].props).toEqual({ src: 'logo.png', x: 25 });
+  });
+
+  it("pin is a select of the nine points (and ''); with a pin set, x/y are labelled as offsets — the override's pin counts", async () => {
+    const { ctx, puts } = await harness();
+    act(() => ctx.scenes.select({ scene: 'base_game', node: 'title' }));
+    renderSide(ctx);
+    const pin = screen.getByLabelText(/anchors x\/y to this point/) as HTMLSelectElement;
+    expect(pin.tagName).toBe('SELECT');
+    expect([...pin.options].map((o) => o.value)).toEqual([
+      '',
+      'top-left',
+      'top',
+      'top-right',
+      'left',
+      'center',
+      'right',
+      'bottom-left',
+      'bottom',
+      'bottom-right',
+    ]);
+    expect(screen.getByLabelText('x, design px')).toBeTruthy();
+    expect(screen.queryByLabelText('offset x, design px')).toBeNull();
+    fireEvent.change(pin, { target: { value: 'bottom-right' } });
+    await waitFor(() => expect(puts()).toHaveLength(1));
+    expect(puts()[0].nodes[1].props).toEqual({ src: 'title.png', pin: 'bottom-right' });
+    await waitFor(() => expect(screen.getByLabelText('offset x, design px')).toBeTruthy());
+    expect(screen.getByLabelText('offset y, design px')).toBeTruthy();
+    expect(screen.queryByLabelText('x, design px')).toBeNull();
+    // Back to absolute, then a portrait override pinning it: the merged value decides.
+    fireEvent.change(screen.getByLabelText(/anchors x\/y to this point/), {
+      target: { value: '' },
+    });
+    await waitFor(() => expect(puts()).toHaveLength(2));
+    await waitFor(() => expect(screen.getByLabelText('x, design px')).toBeTruthy());
+    act(() => ctx.scenes.setVariant('portrait'));
+    fireEvent.change(screen.getByLabelText(/anchors x\/y to this point/), {
+      target: { value: 'top' },
+    });
+    await waitFor(() => expect(puts()).toHaveLength(3));
+    expect(puts()[2].portrait).toEqual({ nodes: { title: { pin: 'top' } } });
+    expect(puts()[2].nodes[1].props).toEqual({ src: 'title.png', pin: '' });
+    await waitFor(() => expect(screen.getByLabelText('offset x, design px')).toBeTruthy());
+  });
+
   it('a selected node that is no longer in the document renders nothing but keeps the root', async () => {
     const { ctx } = await harness();
     act(() => ctx.scenes.select({ scene: 'base_game', node: 'gone' }));
@@ -381,5 +463,21 @@ describe('mergedSchema', () => {
     });
     // The common props a type does NOT declare are untouched.
     expect(dict.x.meta.description).toBe('x, design px');
+  });
+
+  it('pinned re-describes x/y as offsets and nothing else', () => {
+    const dict = (
+      new Schema(mergedSchema(undefined, true) as never) as unknown as {
+        dict: Record<string, Schema>;
+      }
+    ).dict;
+    expect(dict.x.meta).toMatchObject({ default: 0, description: 'offset x, design px' });
+    expect(dict.y.meta).toMatchObject({ default: 0, description: 'offset y, design px' });
+    expect(dict.scale.meta.default).toBe(1);
+    expect(Object.keys(dict)).toEqual(
+      Object.keys(
+        (new Schema(mergedSchema(undefined) as never) as unknown as { dict: object }).dict,
+      ),
+    );
   });
 });

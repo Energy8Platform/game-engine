@@ -12,7 +12,16 @@ import * as viewers from '../src/plugins/viewers';
 import * as scenes from '../src/plugins/scenes';
 import * as assetNodeTypes from '../src/plugins/asset-node-types';
 import * as files from '../src/plugins/files';
-import { addNode, moveNode, nextId, removeNode, shiftNode } from '../src/shell/SceneDocument';
+import {
+  SAFE_BOTTOM,
+  addNode,
+  clearVariant,
+  moveNode,
+  nextId,
+  patchVariant,
+  removeNode,
+  shiftNode,
+} from '../src/shell/SceneDocument';
 
 /**
  * The scene tab, rendered through the plugin's OWN viewer registration
@@ -281,6 +290,33 @@ describe('SceneDocument helpers', () => {
   });
 });
 
+describe('SceneDocument variant helpers', () => {
+  const WITH: SceneDoc = {
+    ...BASE,
+    portrait: { nodes: { title: { x: 1 }, bg: { visible: false } } },
+  };
+
+  it('patchVariant merges into portrait.nodes[id], creating the block; a nested or unknown id is left alone', () => {
+    expect(patchVariant(BASE, 'title', { x: 5 })).toEqual({
+      ...BASE,
+      portrait: { nodes: { title: { x: 5 } } },
+    });
+    expect(patchVariant(WITH, 'title', { y: 2 }).portrait).toEqual({
+      nodes: { title: { x: 1, y: 2 }, bg: { visible: false } },
+    });
+    expect(patchVariant(WITH, 'logo', { x: 5 })).toBe(WITH);
+    expect(patchVariant(BASE, 'nope', { x: 5 })).toBe(BASE);
+    expect(BASE.portrait).toBeUndefined();
+  });
+
+  it('clearVariant drops the entry, and the block once empty; nothing to clear is the same doc', () => {
+    expect(clearVariant(WITH, 'title').portrait).toEqual({ nodes: { bg: { visible: false } } });
+    expect(clearVariant(clearVariant(WITH, 'title'), 'bg')).toEqual(BASE);
+    expect(clearVariant(WITH, 'logo')).toBe(WITH);
+    expect(clearVariant(BASE, 'title')).toBe(BASE);
+  });
+});
+
 describe('SceneDocument', () => {
   it('renders the tree as nested rows with levels; an unknown id says so', async () => {
     const { ctx } = await harness();
@@ -458,12 +494,47 @@ describe('SceneDocument', () => {
     expect(screen.getByTestId('canvas-tree')).toContainElement(screen.getByTestId('node-bg'));
     const iframe = screen.getByTitle('scene canvas') as HTMLIFrameElement;
     expect(screen.getByTestId('canvas-stage')).toContainElement(iframe);
-    expect(iframe.getAttribute('src')).toBe(`${PREVIEW_URL}/editor.html?scene=base_game`);
+    expect(iframe.getAttribute('src')).toBe(
+      `${PREVIEW_URL}/editor.html?scene=base_game&safeBottom=0`,
+    );
     expect(iframe.getAttribute('width')).toBe('640');
     expect(iframe.getAttribute('height')).toBe('360');
     expect(iframe.style.transform).toBe('scale(1)');
     expect(screen.getByTestId('canvas-zoom')).toHaveTextContent('100%');
     expect(screen.queryByTestId('canvas-unavailable')).toBeNull();
+  });
+
+  it("a viewport preset sizes the iframe and tells the editor page the shell's bar band for that layout; design has none", async () => {
+    const { ctx } = await harness();
+    renderTab(ctx);
+    const select = screen.getByTestId('canvas-viewport') as HTMLSelectElement;
+    const iframe = screen.getByTitle('scene canvas') as HTMLIFrameElement;
+    await userEvent.selectOptions(select, 'phone-portrait');
+    expect(iframe.getAttribute('width')).toBe('390');
+    expect(iframe.getAttribute('height')).toBe('844');
+    expect(iframe.getAttribute('src')).toBe(
+      `${PREVIEW_URL}/editor.html?scene=base_game&safeBottom=${SAFE_BOTTOM.mobile}`,
+    );
+    expect(ctx.scenes.variant()).toBe('portrait');
+    const frame = iframe.parentElement as HTMLElement;
+    expect(frame.style.width).toBe('390px');
+    expect(frame.style.height).toBe('844px');
+    await userEvent.selectOptions(select, 'landscape');
+    expect(iframe.getAttribute('width')).toBe('1280');
+    expect(iframe.getAttribute('height')).toBe('720');
+    expect(iframe.getAttribute('src')).toBe(
+      `${PREVIEW_URL}/editor.html?scene=base_game&safeBottom=${SAFE_BOTTOM.wide}`,
+    );
+    expect(ctx.scenes.variant()).toBeNull();
+    // The same iframe throughout: a preset is a resize, not a remount.
+    expect(screen.getByTitle('scene canvas')).toBe(iframe);
+    await userEvent.selectOptions(select, 'design');
+    expect(iframe.getAttribute('width')).toBe('640');
+    expect(iframe.getAttribute('src')).toBe(
+      `${PREVIEW_URL}/editor.html?scene=base_game&safeBottom=0`,
+    );
+    // The pair the bar's constants add up to (BottomBar.ts:42 and :55).
+    expect(SAFE_BOTTOM).toEqual({ wide: 92, mobile: 142 });
   });
 
   it('with no preview to point at, says so instead of an iframe', async () => {
@@ -524,6 +595,40 @@ describe('SceneDocument', () => {
       props: { src: 'logo.png', x: 12, y: 34 },
     });
     expect(puts()[0].nodes.map((n) => n.id)).toEqual(['bg', 'reels-1', 'title']);
+  });
+
+  it("an edit with variant: 'portrait' lands in portrait.nodes (rounded), leaves nodes[] untouched, and the block survives the round trip; the tree marks the node and its ◐ clears it", async () => {
+    const { ctx, puts } = await harness();
+    renderTab(ctx);
+    const { iframe } = canvas();
+    frame(iframe, 'edit', { node: 'title', props: { x: 12.4, y: 34 }, variant: 'portrait' });
+    await waitFor(() => expect(puts()).toHaveLength(1));
+    expect(puts()[0].nodes).toEqual(BASE.nodes);
+    expect(puts()[0].portrait).toEqual({ nodes: { title: { x: 12, y: 34 } } });
+    // Through JSON both ways (the PUT and its answer) the block is the same fact.
+    await waitFor(() =>
+      expect(ctx.scenes.docs()[0]).toEqual({
+        ...BASE,
+        portrait: { nodes: { title: { x: 12, y: 34 } } },
+      }),
+    );
+    expect(JSON.parse(JSON.stringify(ctx.scenes.docs()[0]))).toEqual(ctx.scenes.docs()[0]);
+    // A second one merges into the entry; a `null` variant goes to the node.
+    frame(iframe, 'edit', { node: 'title', props: { pin: 'bottom' }, variant: 'portrait' });
+    await waitFor(() => expect(puts()).toHaveLength(2));
+    expect(puts()[1].portrait).toEqual({ nodes: { title: { x: 12, y: 34, pin: 'bottom' } } });
+    frame(iframe, 'edit', { node: 'title', props: { x: 1 }, variant: null });
+    await waitFor(() => expect(puts()).toHaveLength(3));
+    expect(puts()[2].nodes[2].props).toEqual({ src: 'title.png', x: 1 });
+    expect(puts()[2].portrait).toEqual({ nodes: { title: { x: 12, y: 34, pin: 'bottom' } } });
+    // The mark, on the overridden node only; clicking it drops the entry (and the empty block).
+    await waitFor(() => expect(screen.getByTestId('scene-node-title-variant')).toBeTruthy());
+    expect(screen.queryByTestId('scene-node-bg-variant')).toBeNull();
+    await userEvent.click(screen.getByTestId('scene-node-title-variant'));
+    await waitFor(() => expect(puts()).toHaveLength(4));
+    expect(puts()[3].portrait).toBeUndefined();
+    expect(puts()[3].nodes[2].props).toEqual({ src: 'title.png', x: 1 });
+    await waitFor(() => expect(screen.queryByTestId('scene-node-title-variant')).toBeNull());
   });
 
   it('what the canvas measures is rounded before it is written: x/y/width/height to whole pixels, scale to 2 decimals, rotation to 4', async () => {

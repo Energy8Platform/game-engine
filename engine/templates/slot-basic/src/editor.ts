@@ -8,15 +8,22 @@
 import { createGame } from '@energy8engine/game-runtime';
 import * as sceneEdit from '@energy8engine/scene-edit';
 
+const params = new URLSearchParams(location.search);
+// The band the shell's bar would take, as the IDE's viewport preset says
+// (`?safeBottom=<px>`): the scenes fit into the screen minus it, as under a real shell.
+const safeBottom = Number(params.get('safeBottom') ?? 0) || 0;
 // The editor page composes the WHOLE bundle, `shell1` included — and the
 // shell would draw its bar over the very canvas being edited. Not here.
-const game = await createGame({ mount: document.getElementById('mount')!, without: ['ui.shell'] });
+const game = await createGame({
+  mount: document.getElementById('mount')!,
+  without: ['ui.shell'],
+  provide: { safeArea: { top: 0, right: 0, bottom: safeBottom, left: 0 } },
+});
 // Test hook, the pair of `main.ts`'s `__e8.shell()`: `game-shell.spec.ts`
 // asserts the game page HAS a shell and this page has NONE.
 (window as unknown as { __e8editor: unknown }).__e8editor = {
   hasShell: () => !!game.ctx.reflect.get('shell', false),
 };
-const params = new URLSearchParams(location.search);
 const parentOrigin = document.referrer ? new URL(document.referrer).origin : '*';
 await game.ctx.plugin(sceneEdit, {
   scene: params.get('scene') ?? '',

@@ -11,6 +11,18 @@
 
 const TIMEOUT_MS = 5000;
 
+/**
+ * The canvas' `edit` event: one node's changed props, rounded by the tab
+ * before they are written. `variant: 'portrait'` says the canvas was in a
+ * portrait safe rect — the edit belongs in `portrait.nodes[node]`, not in
+ * the node's own props (spec §7). Absent or `null`: the node itself.
+ */
+export interface EditPayload {
+  node: string;
+  props: Record<string, unknown>;
+  variant?: 'portrait' | null;
+}
+
 type Pending = { resolve: (v: unknown) => void; reject: (e: unknown) => void };
 
 /** The `window`/`iframe.contentWindow` surface this module needs — injectable for tests. */

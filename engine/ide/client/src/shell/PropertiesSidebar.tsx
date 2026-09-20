@@ -6,7 +6,7 @@ import { COMMON } from '@energy8engine/scenes/common-schema';
 import { extOf } from '../plugins/asset-node-types';
 import { useScenes } from '../plugins/scenes';
 import { SchemaForm } from '../schema-form/SchemaForm';
-import { map, walk } from './SceneDocument';
+import { map, patchVariant, walk } from './SceneDocument';
 
 /**
  * The right-hand inspector over `ctx.scenes.selected()`. A node: its id
@@ -15,6 +15,14 @@ import { map, walk } from './SceneDocument';
  * merged with the type's own schema. A scene with no node: its id, the
  * node count and the images it draws, through nested scenes. Holds no
  * draft of the document: every edit is one `ctx.scenes.update(next)`.
+ *
+ * The write goes where the canvas' does (spec §7): while
+ * `ctx.scenes.variant()` is `'portrait'` and the node is a root, the form
+ * shows `portrait.nodes[<id>]` merged over the node's own props and a
+ * change writes only the keys that moved into that block
+ * (`patchVariant`); otherwise the node's props, as before. A node whose
+ * merged `pin` is set has its `x`/`y` labelled as offsets — that is what
+ * the runtime reads them as.
  *
  * A string field with `meta.asset` (`.extra('asset', ['png'])`) is a
  * select of the project's files with those extensions — `useAssetPicker`;
@@ -66,15 +74,27 @@ export function useNodePicker(ctx: Context): () => string[] {
 
 const COMMON_JSON = JSON.parse(JSON.stringify(COMMON)) as unknown;
 
-/** `Schema.object({ ...COMMON.dict, ...own.dict })`, as JSON `SchemaForm` rebuilds; `null` when the type's schema is malformed. */
-export function mergedSchema(info: NodeTypeInfo | undefined): unknown {
+/** `x`/`y` re-described for a pinned node: the runtime reads them from the pin's point of the safe rect. */
+const OFFSETS = {
+  x: Schema.number().default(0).description('offset x, design px'),
+  y: Schema.number().default(0).description('offset y, design px'),
+};
+
+/** `Schema.object({ ...COMMON.dict, ...own.dict })`, as JSON `SchemaForm` rebuilds; `null` when the type's schema is malformed. `pinned` swaps in the offset labels. */
+export function mergedSchema(info: NodeTypeInfo | undefined, pinned = false): unknown {
   try {
     const common = new Schema(COMMON_JSON as never) as unknown as { dict: object };
     const own = new Schema((info?.schema ?? {}) as never) as unknown as { dict?: object };
-    return JSON.parse(JSON.stringify(Schema.object({ ...common.dict, ...own.dict } as never)));
+    const dict = { ...common.dict, ...(pinned ? OFFSETS : {}), ...own.dict };
+    return JSON.parse(JSON.stringify(Schema.object(dict as never)));
   } catch {
     return null;
   }
+}
+
+/** The keys of `after` whose value is not `before`'s — what one form change moved. */
+function changed(before: Record<string, unknown>, after: Record<string, unknown>) {
+  return Object.fromEntries(Object.entries(after).filter(([k, v]) => !Object.is(before[k], v)));
 }
 
 /** The tree with the one node replaced by `f(node)`, its children kept. */
@@ -98,11 +118,16 @@ function assetsOf(docs: readonly SceneDoc[], id: string, seen = new Set<string>(
 }
 
 export function PropertiesSidebar({ ctx }: { ctx: Context }) {
-  const { docs, nodeTypes, selected } = useScenes(ctx);
+  const { docs, nodeTypes, selected, variant } = useScenes(ctx);
   const doc = selected ? docs.find((d) => d.id === selected.scene) : undefined;
   const node =
     doc && selected?.node
       ? [...walk(doc.nodes)].find(({ node }) => node.id === selected.node)?.node
+      : undefined;
+  // The override layer this form edits: only a ROOT can carry one (the runtime applies no other).
+  const override =
+    doc && node && variant === 'portrait' && doc.nodes.some((n) => n.id === node.id)
+      ? (doc.portrait?.nodes?.[node.id] ?? {})
       : undefined;
 
   return (
@@ -133,6 +158,7 @@ export function PropertiesSidebar({ ctx }: { ctx: Context }) {
           ctx={ctx}
           doc={doc}
           node={node}
+          override={override}
           info={nodeTypes.find((t) => t.type === node.type)}
         />
       ) : null}
@@ -144,18 +170,23 @@ function NodeProperties({
   ctx,
   doc,
   node,
+  override,
   info,
 }: {
   ctx: Context;
   doc: SceneDoc;
   node: SceneNode;
+  /** `portrait.nodes[node.id]` (or `{}`) while that is the edit target; `undefined` = the node's own props are. */
+  override: Record<string, unknown> | undefined;
   info: NodeTypeInfo | undefined;
 }) {
   const [draft, setDraft] = useState(node.id);
   const [idError, setIdError] = useState<string | null>(null);
   // The host's refusal of the last props edit — cleared by the next one that lands.
   const [error, setError] = useState<string | null>(null);
-  const schema = useMemo(() => mergedSchema(info), [info]);
+  const value = override ? { ...node.props, ...override } : node.props;
+  const pinned = !!value.pin;
+  const schema = useMemo(() => mergedSchema(info, pinned), [info, pinned]);
   const asset = useAssetPicker(ctx);
   const nodePicker = useNodePicker(ctx);
 
@@ -176,7 +207,11 @@ function NodeProperties({
 
   const onChange = (props: Record<string, unknown>) =>
     void ctx.scenes
-      .update({ ...doc, nodes: patch(doc.nodes, node.id, (n) => ({ ...n, props })) })
+      .update(
+        override
+          ? patchVariant(doc, node.id, changed(value, props))
+          : { ...doc, nodes: patch(doc.nodes, node.id, (n) => ({ ...n, props })) },
+      )
       .then((refused) => setError(refused[0]?.message ?? null));
 
   return (
@@ -194,6 +229,15 @@ function NodeProperties({
         <span className="e8-explorer-title" data-testid="prop-type">
           {node.type}
         </span>
+        {override ? (
+          <span
+            className="e8-badge"
+            data-testid="prop-variant"
+            title="edits go to the portrait override"
+          >
+            portrait
+          </span>
+        ) : null}
       </div>
       {idError !== null ? (
         <p className="e8-explorer-diagnostic" data-testid="prop-id-error">
@@ -209,7 +253,7 @@ function NodeProperties({
         <SchemaForm
           rowId={`${doc.id}.${node.id}`}
           schema={schema}
-          value={node.props}
+          value={value}
           onChange={onChange}
           commit="blur"
           pickers={{ asset, node: nodePicker }}

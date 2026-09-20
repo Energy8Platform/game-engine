@@ -8,9 +8,9 @@
  * instead — no scene, no gizmo/grid/keyboard/drop.
  */
 import type { Context } from 'cordis';
-import type { SceneDoc, SymbolsDoc, SymbolState } from '@energy8engine/contracts';
+import type { SafeArea, SceneDoc, SymbolsDoc, SymbolState } from '@energy8engine/contracts';
 import type {} from '@energy8engine/scenes/runtime';
-import { COMMON } from '@energy8engine/scenes';
+import { COMMON, pinPoint, type Fit, type Orientation, type Pin } from '@energy8engine/scenes';
 import { Container, Graphics, type FederatedPointerEvent } from 'pixi.js';
 import { createGizmo, type GizmoTarget } from './gizmo';
 import { pickAt } from './pick';
@@ -51,6 +51,11 @@ export interface Snapshot { scene: string; selected: string | null; bounds: Reco
 /** What symbol mode's `snapshot` answers instead — no nodes, one preview. */
 export interface SymbolSnapshot { symbol: string | null; state: SymbolState | null; w: number; h: number }
 
+/** Which layer of the document an edit lands in: the node's own props (`null`), or `portrait.nodes[<id>]` while the safe rect is portrait (spec §7). */
+export type Variant = 'portrait' | null;
+/** The `edit` event's payload: `x`/`y` are OFFSETS from the pin point when the node's merged props carry a `pin`. */
+export interface EditPayload { node: string; props: Record<string, number>; variant: Variant }
+
 /** `window.__e8edit` on the editor page — test hooks, like `__e8` on the game page. Symbol mode exposes only `emitted`/`snapshot`/`frameOf` (no node to `select`, no `grid`, nothing to `pickAndSelect`). */
 export interface SceneEdit {
   snapshot(): Snapshot | SymbolSnapshot;
@@ -62,6 +67,10 @@ export interface SceneEdit {
   emitted(): { event: string; payload?: unknown }[];
   /** The node's view's `currentFrame` (an `AnimatedSprite`, or the gif wrapper's child); `null` for a still or unknown node. */
   frameOf(node: string): number | null;
+  /** The scenes runtime's verdict on the safe rect — what `variant` on an edit follows. */
+  orientation(): Orientation;
+  /** The last fit: the safe rect in design units, what the second frame is drawn from. */
+  fit(): Fit | null;
 }
 
 const isField = (t: EventTarget | null): boolean =>
@@ -92,7 +101,10 @@ export function apply(ctx: Context, config: SceneEditConfig): void {
   };
   let alive = true;
   ctx.effect(() => () => { alive = false; wire.dispose(); }, 'scene-edit:wire');
-  scenes.resize(app.screen.width, app.screen.height);
+  // Into the same safe rect the scenes runtime fits into: the editor page
+  // provides `safeArea` (the IDE's preset band, `?safeBottom=`), and a
+  // resize here without it would undo that fit until the next one.
+  scenes.resize(app.screen.width, app.screen.height, ctx.reflect.get('safeArea', false) as SafeArea | undefined);
 
   // Symbol mode: one symbols.yml state on the canvas, nothing scene-shaped
   // armed. Gated on `!== undefined`, not truthiness: `''` is a real symbol
@@ -113,12 +125,21 @@ export function apply(ctx: Context, config: SceneEditConfig): void {
   // node back, so an incoming set acknowledges the latest pending edit it
   // reflects and the ones after it are laid over it again. A set that
   // reflects none (a refused write, another writer) is taken as is.
-  const pending: { node: string; props: Record<string, number> }[] = [];
-  const patch = (docs: SceneDoc[], node: string, props: Record<string, number>): SceneDoc[] =>
-    docs.map((d) => d.id !== scene ? d : { ...d, nodes: d.nodes.map((n) => (n.id === node ? { ...n, props: { ...n.props, ...props } } : n)) });
-  const reflects = (docs: SceneDoc[], e: { node: string; props: Record<string, number> }): boolean => {
-    const n = docs.find((d) => d.id === scene)?.nodes.find((x) => x.id === e.node);
-    return !!n && Object.entries(e.props).every(([k, v]) => n.props[k] === v);
+  //
+  // `variant` picks the layer: `'portrait'` writes `portrait.nodes[node]`
+  // (creating the block), `null` the node's own props — and `reflects`
+  // reads the same layer back.
+  const pending: EditPayload[] = [];
+  const patch = (docs: SceneDoc[], node: string, props: Record<string, number>, variant: Variant): SceneDoc[] =>
+    docs.map((d) => {
+      if (d.id !== scene) return d;
+      if (variant) return { ...d, portrait: { nodes: { ...d.portrait?.nodes, [node]: { ...d.portrait?.nodes?.[node], ...props } } } };
+      return { ...d, nodes: d.nodes.map((n) => (n.id === node ? { ...n, props: { ...n.props, ...props } } : n)) };
+    });
+  const reflects = (docs: SceneDoc[], e: EditPayload): boolean => {
+    const d = docs.find((x) => x.id === scene);
+    const layer = e.variant ? d?.portrait?.nodes?.[e.node] : d?.nodes.find((x) => x.id === e.node)?.props;
+    return !!layer && Object.entries(e.props).every(([k, v]) => layer[k] === v);
   };
   // The IDE's documents, on every change: this page composes no `ide-bridge`
   // (its `scene-preview` handler would switch the scene shown here), so the
@@ -129,7 +150,7 @@ export function apply(ctx: Context, config: SceneEditConfig): void {
     let docs = (p as { docs?: SceneDoc[] })?.docs ?? [];
     const acked = pending.map((e) => reflects(docs, e)).lastIndexOf(true);
     pending.splice(0, acked >= 0 ? acked + 1 : pending.length);
-    for (const e of pending) docs = patch(docs, e.node, e.props);
+    for (const e of pending) docs = patch(docs, e.node, e.props, e.variant);
     scenes.replace(docs);
     return {};
   });
@@ -241,9 +262,26 @@ export function apply(ctx: Context, config: SceneEditConfig): void {
     const doc = () => scenes.docs().get(scene);
     const views = () =>
       (doc()?.nodes ?? []).flatMap((n) => { const view = scenes.view({ scene, node: n.id }); return view ? [{ node: n.id, view }] : []; });
-    /** The design size, read off the fit: the screen centre is the design centre in both fit modes. */
-    const design = () => { const c = root.toLocal({ x: app.screen.width / 2, y: app.screen.height / 2 }); return { width: c.x * 2, height: c.y * 2 }; };
+    /**
+     * The design size (the current orientation's), read off the fit: the
+     * design is centred in the safe rect, so `left + right` is its width
+     * — right under insets and a portrait design alike, where the screen
+     * centre is no longer the design centre. Before a fit, the old rule.
+     */
+    const design = () => {
+      const v = scenes.fit()?.viewport;
+      if (v) return { width: v.left + v.right, height: v.top + v.bottom };
+      const c = root.toLocal({ x: app.screen.width / 2, y: app.screen.height / 2 });
+      return { width: c.x * 2, height: c.y * 2 };
+    };
     const toDesign = (p: { x: number; y: number }) => root.toLocal(p);
+    /** A top-level node's props as the runtime reads them: the portrait override laid over its own while the safe rect is portrait. */
+    const merged = (node: string): Record<string, unknown> | undefined => {
+      const d = doc();
+      const n = d?.nodes.find((x) => x.id === node);
+      return n && { ...n.props, ...(scenes.orientation() === 'portrait' ? d?.portrait?.nodes?.[node] : undefined) };
+    };
+    const variant = (): Variant => (scenes.orientation() === 'portrait' ? 'portrait' : null);
 
     // Grid: design space, under the scene root.
     const gridGfx = new Graphics();
@@ -261,6 +299,54 @@ export function apply(ctx: Context, config: SceneEditConfig): void {
       gridGfx.stroke({ width: 1, color: 0xffffff, alpha: 0.15, pixelLine: true });
     };
     ctx.effect(() => () => { root.removeChild(gridGfx); gridGfx.destroy(); }, 'scene-edit:grid');
+
+    // Two frames in design space, over the grid: the design box, and the
+    // safe rect (`fit.viewport`) a `pin` measures from — with the band the
+    // shell's bar would take (below `viewport.bottom`, to the screen's
+    // bottom) hatched. Redrawn with the grid whenever the fit changes.
+    const frames = new Container();
+    frames.label = 'frames';
+    const designFrame = new Graphics();
+    designFrame.label = 'design-frame';
+    const safeRect = new Graphics();
+    safeRect.label = 'safe-rect';
+    const safeBand = new Graphics();
+    safeBand.label = 'safe-band';
+    frames.addChild(designFrame, safeRect, safeBand);
+    root.addChildAt(frames, 1);
+    ctx.effect(() => () => { root.removeChild(frames); frames.destroy({ children: true }); }, 'scene-edit:frames');
+    const drawFrames = () => {
+      const d = design();
+      designFrame.clear().rect(0, 0, d.width, d.height).stroke({ width: 1, color: 0xffffff, alpha: 0.35, pixelLine: true });
+      safeRect.clear();
+      safeBand.clear();
+      const v = scenes.fit()?.viewport;
+      if (!v) return;
+      safeRect.rect(v.left, v.top, v.right - v.left, v.bottom - v.top).stroke({ width: 1, color: 0xffb84d, alpha: 0.9, pixelLine: true });
+      const screenBottom = toDesign({ x: 0, y: app.screen.height }).y;
+      if (v.bottom >= screenBottom) return;
+      const x0 = toDesign({ x: 0, y: 0 }).x;
+      const w = toDesign({ x: app.screen.width, y: 0 }).x - x0;
+      const h = screenBottom - v.bottom;
+      safeBand.rect(x0, v.bottom, w, h).fill({ color: 0xffb84d, alpha: 0.08 });
+      // 45° hatching, each line clipped to the band: `x - x0 - (y - v.bottom) = d`.
+      const step = 12 / (scenes.fit()?.scale ?? 1);
+      for (let dd = -h; dd < w; dd += step) {
+        const p1 = dd >= 0 ? { x: x0 + dd, y: v.bottom } : { x: x0, y: v.bottom - dd };
+        const p2 = dd + h <= w ? { x: x0 + dd + h, y: v.bottom + h } : { x: x0 + w, y: v.bottom + w - dd };
+        safeBand.moveTo(p1.x, p1.y).lineTo(p2.x, p2.y);
+      }
+      safeBand.stroke({ width: 1, color: 0xffb84d, alpha: 0.35, pixelLine: true });
+    };
+    let drawnFit: Fit | null = null;
+    /** The fit is a new object per `resize`: on the frame that sees one, the grid and the frames follow it. */
+    const refit = () => {
+      if (scenes.fit() === drawnFit) return;
+      drawnFit = scenes.fit();
+      grid(gridOn, gridStep);
+      drawFrames();
+    };
+    refit();
 
     // Gizmo: screen space, above everything.
     const layer = new Container();
@@ -280,8 +366,8 @@ export function apply(ctx: Context, config: SceneEditConfig): void {
 
     const targetOf = (node: string): GizmoTarget | null => {
       const view = scenes.view({ scene, node });
-      const n = doc()?.nodes.find((x) => x.id === node);
-      return view && n ? { node, view, props: COMMON(n.props as never) as GizmoTarget['props'] } : null;
+      const props = merged(node);
+      return view && props ? { node, view, props: COMMON(props as never) as GizmoTarget['props'] } : null;
     };
     const select = (node: string | null) => {
       target = node === null ? null : targetOf(node);
@@ -293,14 +379,26 @@ export function apply(ctx: Context, config: SceneEditConfig): void {
     };
     const pickAndSelect = (x: number, y: number) => select(pickAt(views(), { x, y }));
 
-    /** Rounded as the file should read (the IDE rounds the same), applied here, then told. */
+    /**
+     * Rounded as the file should read (the IDE rounds the same), applied
+     * here, then told. The gizmo hands over the view's ABSOLUTE position;
+     * a pinned node's file value is the offset from its pin point, so
+     * `x`/`y` are converted before either. Into the current variant's layer.
+     */
     function applyEdit(node: string, props: Partial<GizmoTarget['props']>): void {
+      const pin = merged(node)?.pin as Pin | '' | undefined;
+      const fit = scenes.fit();
+      const at = pin && fit ? pinPoint(pin, fit.viewport) : { x: 0, y: 0 };
       const rounded: Record<string, number> = {};
-      for (const [k, v] of Object.entries(props) as [string, number][]) rounded[k] = Math.round(v * (k === 'rotation' ? 1e4 : 100)) / (k === 'rotation' ? 1e4 : 100);
-      if (pending.push({ node, props: rounded }) > 100) pending.shift();
-      scenes.replace(patch([...scenes.docs().values()], node, rounded));
+      for (const [k, v] of Object.entries(props) as [string, number][]) {
+        const value = k === 'x' ? v - at.x : k === 'y' ? v - at.y : v;
+        rounded[k] = Math.round(value * (k === 'rotation' ? 1e4 : 100)) / (k === 'rotation' ? 1e4 : 100);
+      }
+      const edit: EditPayload = { node, props: rounded, variant: variant() };
+      if (pending.push(edit) > 100) pending.shift();
+      scenes.replace(patch([...scenes.docs().values()], node, rounded, edit.variant));
       retarget();
-      emit('edit', { node, props: rounded });
+      emit('edit', edit);
     }
 
     // A `replace` remounts: the selected node's view is a new object — follow it, or drop a node that is gone.
@@ -310,7 +408,7 @@ export function apply(ctx: Context, config: SceneEditConfig): void {
       if (!view) select(null);
       else if (view !== target.view) gizmo.attach((target = { ...target, view }));
     };
-    const frame = () => { retarget(); gizmo.refresh(); };
+    const frame = () => { refit(); retarget(); gizmo.refresh(); };
     app.ticker.add(frame);
     ctx.effect(() => () => app.ticker.remove(frame), 'scene-edit:frame');
 
@@ -376,7 +474,7 @@ export function apply(ctx: Context, config: SceneEditConfig): void {
     wire.handle('grid', (p) => { const { on, step } = p as { on?: boolean; step?: number }; grid(!!on, step ?? 16); return {}; });
     wire.handle('snapshot', () => snapshot());
 
-    const api: SceneEdit = { snapshot, select, grid, pickAndSelect, emitted: () => [...emitted], frameOf };
+    const api: SceneEdit = { snapshot, select, grid, pickAndSelect, emitted: () => [...emitted], frameOf, orientation: () => scenes.orientation(), fit: () => scenes.fit() };
     const w = window as unknown as { __e8edit?: SceneEdit };
     w.__e8edit = api;
     ctx.effect(() => () => { if (w.__e8edit === api) delete w.__e8edit; }, 'scene-edit:hook');
