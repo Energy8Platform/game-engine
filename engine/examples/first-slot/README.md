@@ -154,7 +154,10 @@ a `pin` (`top-left`, `top`, `top-right`, `left`, `center`, `right`,
 that point of the safe rect instead: `base_game`'s `win` is `pin: bottom, x:
 0, y: -24`, 24 design px above the bar at any window size. A pin on a nested
 node is ignored (a diagnostic says so), and a `pin` on a symbol state in
-`symbols.yml` is inert — the reels place their cells. When the safe rect is
+`symbols.yml` is inert — the reels place their cells. Un-pinning a node
+(`prop { pin: '' }`, or clearing the field) reads its `x`/`y` as absolutes
+at once — the offset numbers become the position, a visible jump unless the
+same patch also sets `x`/`y`. When the safe rect is
 taller than wide the scenes switch to `scenes1.config.portrait` (288×480
 here; absent, the design rotated) and apply the scene file's `portrait:
 nodes:` block over the named top-level nodes — `logo` pins to the top,

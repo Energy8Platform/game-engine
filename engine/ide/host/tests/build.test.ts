@@ -122,7 +122,7 @@ describe('build', () => {
     // are in the other chunk, imported from the entry, never the reverse —
     // see `build.ts`'s `manualChunks` for the cycle this rules out.
     const names = readdirSync(join(out, 'assets')).filter((name) => name.endsWith('.js'));
-    expect(names.map((name) => name.replace(/-[^-]+\.js$/, '')).sort()).toEqual(['game', 'index']);
+    expect(names.map((name) => name.replace(/-[^.]+\.js$/, '')).sort()).toEqual(['game', 'index']);
     const game = readFileSync(join(out, 'assets', names.find((n) => n.startsWith('game-'))!), 'utf8');
     expect(game).not.toMatch(/from"\.\/index-/);
   });

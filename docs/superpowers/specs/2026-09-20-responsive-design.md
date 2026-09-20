@@ -115,13 +115,20 @@ the node's schema as one patch (a refused override → diagnostic
 `<scene>/<id>: portrait <prop>: …`, the node keeps its landscape props),
 then `type.update` + the common pass — the `setProps` machinery, with the
 variant as a second layer under the live patches. A type without `update`
-is remounted (`unmount` + `mount`) with the merged props. `refresh()`
+is remounted (`unmount` + `mount`) with the merged props only when the
+override touches one of the type's OWN props; a common-only override
+(`x`, `y`, `pin`, `scale`, `visible`, …) takes the common pass — the
+`reels` node turns without a remount. A document's roots take the variant
+even when the document is embedded through a `scene` node (an embedded
+`big_win` turns); a failed remount keeps the old node and reports. `refresh()`
 after a load uses the merged props too. `assets()` collects both layers
 (an image whose portrait `src` differs preloads both).
 
 Only top-level nodes of a document can be overridden (`portrait.nodes`
 keys are top-level ids; an unknown id → host warning at save, runtime
-diagnostic at apply). `symbols.yml` states carry no variant (a symbol's
+diagnostic once per mount). A `scene` override (swapping the embedded
+document) is followed by `assets()`, the edit-refresh graph and the host's
+exists/cycle checks. `symbols.yml` states carry no variant (a symbol's
 look is the reels' business).
 
 ## 7. Editor
@@ -137,15 +144,18 @@ look is the reels' business).
 - `scene-edit` draws two frames: the design box (as today) and the safe
   rect (§4) with the bar band hatched; the band height comes from the
   editor's own preset: the IDE appends `?safeBottom=<px>` to the editor
-  URL (the shell's measured bar heights per layout, one constant each in
-  the client, measured once on the example and noted), `editor.ts`
+  URL (the shell's NOMINAL bar heights per layout — `92` wide, `142`
+  mobile, from `BottomBar.ts`'s constants; the real bar scales under
+  840 px, 131 px at 390×844 — a debt), `editor.ts`
   provides it as the `safeArea` service (`createGame({ provide: { safeArea
   } })`), and the scenes runtime fits into it exactly as it would into the
   shell's — the editor composes no shell. Gizmo drags on a pinned node write the OFFSET
   (pointer − pin point, design units); the Properties form shows `pin` as
   a select and `x`/`y` labelled "offset" when a pin is set.
-- Orientation is the edit target: with a portrait viewport every gizmo
-  drag and every Properties edit of a top-level node writes
+- Orientation is the edit target — the PAGE says which: `scene-edit`
+  reports `orientation` on `ready` and on every flip, and tags every edit
+  with `variant`; the IDE keeps it per scene. With a portrait viewport
+  every gizmo drag and every Properties edit of a top-level node writes
   `portrait.nodes[<id>][<prop>]` (creating the block), never the node's
   own props; the tree marks overridden nodes (`◐`) and a "clear portrait
   override" action removes the entry. With a landscape viewport edits go
@@ -160,11 +170,15 @@ look is the reels' business).
 - `renderer1` in `e8.patch.yml` ×2 loses `width`/`height` (fills the
   mount); `scenes1.config.portrait: { width: 288, height: 480 }`.
 - `index.html` ×2: `#mount { position: fixed; inset: 0 }`, `#controls`
-  and `#log` `position: fixed` above it (top / bottom), dark translucent
-  backgrounds, DEV-only as today.
+  and `#log` `position: fixed` above it (both at the top — a log at the
+  bottom would cover the shell's bar; `#log:empty` is hidden), dark
+  translucent backgrounds, DEV-only as today.
 - `scenes/base_game.scene.yml` ×2: `win` gets `pin: bottom, x: 0, y: -24,
   anchor: 0.5`; `logo` stays; a `portrait` block `{ nodes: { logo: { pin:
-  top, x: 0, y: 40 }, coin: { visible: false } } }`.
+  top, x: 0, y: 40 }, board: { pin: top, x: -112, y: 115, scale: 0.55 },
+  coin: { visible: false } } }` — the reels view's origin is reel 0's
+  column centre and row 0's centre, so the 5×3 grid (504×300 design px)
+  scaled to 277×165 sits 16 px under the logo, inside the 288-wide design.
 - `README.md` ×2: a paragraph (the mount, pins, the portrait block, the
   viewport presets).
 - `e8.bundle.yml`: nothing (no new row).
@@ -193,10 +207,12 @@ look is the reels' business).
   on a child); `PUT /api/scenes` keeps the block; `e8 shot --viewport
   390x844` renders portrait (the PNG's size).
 - e2e `responsive.spec.ts`: (1) the example at `page.setViewportSize`
-  1280×720 then 800×450 — the canvas follows (`__e8.stageScale()` changes,
-  `nodeProps('base_game','win')` bounds stay at `bottom − 24 − bar` in
-  screen space); (2) 390×844 → `logo` sits above the reels
-  (`nodeProps` y < the board's), `coin` invisible (`nodeVisible` false);
+  1280×720 then 800×600 (a non-16:9 size, so the safe rect's `bottom`
+  differs from the design's) — the canvas follows (`__e8.stageScale()`
+  changes) and `win.y === fit().viewport.bottom − 24` at both, the two
+  values differing; (2) 390×844 → `orientation() === 'portrait'`, the
+  grid's top (`board.y − 48·scale`) ≥ 16 px under the logo's bottom, the
+  grid inside the design width, `coin` invisible, a spin still completes;
   back to 1280×720 → visible; (3) the scene editor: pick `phone portrait`,
   drag `logo`, the file gains `portrait.nodes.logo` and `nodes[logo]` is
   unchanged; pick `design`, drag `logo`, `nodes[logo]` changes and the
