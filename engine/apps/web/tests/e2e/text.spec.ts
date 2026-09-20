@@ -174,10 +174,21 @@ nodes:
   await page.goto(`${IDE_URL}#/doc/composition`);
   const frame = await readyFrame(page);
 
-  expect(await frame.evaluate(() => (window as any).__e8.nodeText('base_game', 'hello'))).toBe(
-    'hello',
-  );
-  expect(
-    (await frame.evaluate(() => (window as any).__e8.nodeProps('base_game', 'hello')))?.width,
-  ).toBeGreaterThan(0);
+  // Same boot-GET race `readyFrame` never waits out (case 1's own poll,
+  // above): `#status` reads `ready` before `scenes.ready` (the boot GET)
+  // has necessarily answered, so `hello` may not be mounted yet.
+  await expect
+    .poll(() => frame.evaluate(() => (window as any).__e8.nodeText('base_game', 'hello')), {
+      timeout: 10_000,
+    })
+    .toBe('hello');
+  await expect
+    .poll(
+      () =>
+        frame.evaluate(
+          () => (window as any).__e8.nodeProps('base_game', 'hello')?.width as number | undefined,
+        ),
+      { timeout: 10_000 },
+    )
+    .toBeGreaterThan(0);
 });
