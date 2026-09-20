@@ -75,7 +75,8 @@ Seam `session` (the mechanism exists: `E8SeamDeclaration` in the manifest,
 
 - `@energy8engine/session-host` — `seam { name: session, matcher: { default: true } }`.
   `init` from a new `GET /api/session` on the preview server (`betLevels`
-  from the authored `.spin`'s `bet_levels`, `defaultBet` = the first,
+  from `game/spec.json`'s `betLevels` — the source the host already reads
+  for its default bet —, `defaultBet` = the first,
   `currency` USD/`$`/2/left, `balance: 1000`; a failed GET → a diagnostic
   and `{ balance: 0, betLevels: [1], defaultBet: 1 }`, so the shell still
   mounts); `play` = today's `POST /api/spin`
@@ -86,7 +87,7 @@ Seam `session` (the mechanism exists: `E8SeamDeclaration` in the manifest,
   `createPlatformSession({ sdk })` from `@energy8platform/platform-core`;
   `init` from `initData` (`balance`, `currency` from `config.currency`'s
   meta — code alone → symbol = code, 2 decimals —, `config.betLevels` — the
-  spec's `bet_levels` when absent —, `config.stake?.defaultBetLevel ?? betLevels[0]`
+  `[1]` plus a warning when absent —, `config.stake?.defaultBetLevel ?? betLevels[0]`
   clamped to the ladder, `lang`, `device`); `play` → `PlayParams { action,
   bet: betLevel, roundId, params }` → `PlayResultData` normalised: `bet = req.betLevel`,
   `win = data.win ?? totalWin / bet`, `totalWin = (session?.totalWin ?? totalWin) / bet`
@@ -99,8 +100,9 @@ Seam `session` (the mechanism exists: `E8SeamDeclaration` in the manifest,
   (Stake and Artube echo the round's bet; a `step` of an open round plays
   at that bet, not the default),
   `spinsRemaining/spinsPlayed` from `session` (0 when none), `balance = balanceAfter`,
-  `roundId`; `ack` → `playAck(raw)`. `BALANCE_UPDATE` events update
-  `init.balance` in place. Unit-tested over the SDK's `devMode` memory
+  `roundId`; `ack` → `playAck(raw)` (one `last` stash, not a map).
+  `BALANCE_UPDATE` events update the live `$session.balance` root;
+  `init.balance` stays the handshake value. Unit-tested over the SDK's `devMode` memory
   channel with `DevBridge` as the platform. The platform's `data` for a
   `.spin` game is e8-server's `data_json` by construction; the mapping is
   verified against the SDK's types only — confirmed on the first real
@@ -127,9 +129,12 @@ Provides `shell` (the `Shell` handle: `state`, setters, `actions`, `safeArea`).
 Row config (schemastery, lenient — nested shell structures are `any` with a
 description): `language` (default `''` → init/`en`), `version` (`'1.0.0'`),
 `features` (`ShellFeatures` — `turbo` 0–3 default 1, `autoplay` `{ maxCount? } | null`
-default `{}`, `buyBonus` `BonusOption[] | false` default `false`, `hotkeys`,
-`spacebar`), `gameInfo` (default `{ sections: [] }`), `menu` (omitted → the
-shell's default list), `i18n` (`{}`), `tiers`, `theme`.
+default `{}`, `buyBonus` `BonusOption[] | false` default `false`, `hotkeys`
+(`init.device === 'mobile'` forces `false` over the author — the legacy
+host's rule), `spacebar`), `gameInfo` (default `{ sections: [] }`), `menu`
+(omitted → the shell's default list), `i18n` (`{}`, reserved — the shell
+has no per-game hook yet), `theme` (a blank YAML key is `undefined`).
+`tiers` is not a `ShellConfig` field and is not in the schema.
 
 **The row decides nothing.** Two mechanical bridges only:
 
@@ -238,17 +243,24 @@ proof's server proxies `/api/session` and `/api/spin` to a running host.
   `+ sessionsdk1 (@energy8engine/session-sdk)` after `renderer1`;
   `+ shell1 (@energy8engine/shell-pixi)` after `playloop1`. `compose.test.ts`
   pins the order.
-- `first-slot` ≡ `slot-basic`: `flow.yml` rebuilt on the shell —
-  `boot → show base_game → on shell.spin → shell { busy: true } → sound →
-  spin { betLevel: $shell.bet } → shell { balance: $result.balance } →
-  present { turbo: $shell.turbo } → prop win → shell { win: $result.totalWinAmount }
-  → done → step → draw … → ack → shell { busy: false } → idle`; autoplay:
-  `on shell.autoplayStart` edges into the same `shell { busy: true }`; after
-  `shell { busy: false }` an `if '$shell.autoplay.active'` gate → `shell
-  { autoplay: tick }` → `if '$shell.autoplay.remaining > 0'` → back to
-  `shell { busy: true }` (one chain, two entries; the shell itself clears
-  `active` when its toggle stops, so no `autoplayStop` node is needed;
-  `tick` leaves a non-finite `remaining` alone). `e8.patch.yml`: `shell1.config { features:
+- `first-slot` ≡ `slot-basic`: `flow.yml` rebuilt on the shell (22 nodes,
+  26 edges; every string-prop literal quoted — an unquoted YAML `true` or
+  number is refused by a `Schema.string()` prop and ends the branch) —
+  `boot → show base_game → reset(shell { busy: 'false', autoplay: stop })
+  → on shell.spin → busy(shell { busy: 'true', win: '0' }) → sound →
+  spin { betLevel: '$shell.bet' } → present { turbo: '$shell.turbo' } →
+  prop win → shell { win: '$result.totalWinAmount' } → shell { balance:
+  '$result.balance' } → done → step → draw … → ack → free(shell { busy:
+  'false' })`; `spin`/`present`/`step` `failed` → `halt(shell { autoplay:
+  stop, balance: '$session.balance' }) → free`; autoplay: `on
+  shell.autoplayStart` edges into the same `busy`; after `free` an `if
+  '$shell.autoplay.active'` gate → `shell { autoplay: tick }` → `if
+  '$shell.autoplay.remaining > 0'` → `wait { ms: 500 }` → `if
+  '$shell.autoplay.active'` → back to `busy` (one chain, two entries; the
+  shell itself clears `active` when its toggle stops; `tick` leaves a
+  non-finite `remaining` alone; the 500 ms beat lets the win count-up land
+  and honours a Stop pressed during it; the boot-time `reset` frees the
+  shell after a mid-round `replace()`). `e8.patch.yml`: `shell1.config { features:
   { turbo: 1, autoplay: {}, buyBonus: false }, gameInfo: { sections: [] } }`,
   `playloop1.config.skipEvents: [ui.skip, ui.tap]`. `index.html`/`main.ts`/
   `env.d.ts`/`README.md` per §6. `template.test.ts`: the file list grows by
@@ -288,8 +300,8 @@ proof's server proxies `/api/session` and `/api/spin` to a running host.
 - e2e `build.spec.ts`: `e8 build` on a copy → `dist/index.html`,
   `dist/api/{composition,flow,scenes,symbols}`, `dist/assets/spin.wav`; (1)
   `dist/` under a bare static server: boots, `base_game` mounted, the shell
-  present, `__e8.spin()` leaves by `failed` with `no session` (no
-  `/api/spin`); (2) the same `dist/` under a static server that proxies
+  present, `__e8.spin()` leaves by `failed` with a diagnostic naming
+  `/api/spin` or `/api/session` (nothing answers them); (2) the same `dist/` under a static server that proxies
   `/api/session` and `/api/spin` to the running host: `__e8.spin()`
   resolves `next` — the bundled rows, a working session.
 
