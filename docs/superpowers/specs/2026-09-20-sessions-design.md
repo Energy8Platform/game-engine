@@ -89,7 +89,7 @@ and drops the "did not complete on the first response" warning. `e8 spin
 
 A project whose `game/spec.json` is a `GameSpec` (the platform's
 `@energy8platform/platform-core/game-spec` type — detected by `type ===
-'slot'` and `symbols[0].pays` present) gets its script ASSEMBLED by the
+'slot'` and an array `symbols`; no descriptive `spec.json` carries `type`) gets its script ASSEMBLED by the
 host: `buildSpinScript(defineGame(spec), logic)` where `logic` is
 `game/script.spin`; written to `<project>/.e8/game/script.spin` (the
 directory is created; the template's `.gitignore` gains `.e8/`), and
@@ -98,8 +98,13 @@ errors and `defineGame` throws are diagnostics (plugin `spec`, where
 `game/spec.json`); the project opens without its game on an error (the
 existing "spec present but unusable" path). Re-assembled on every write to
 `game/spec.json` or `game/script.spin` BEFORE the existing restart-on-write.
-`e8 check` and the IDE's spin schema read the assembled file when it
-exists. A `spec.json` that is NOT a `GameSpec` (first-slot's descriptive
+`e8 check` and `e8 spin` assemble first and read the assembled file,
+carrying `assemble`'s diagnostics; the IDE's spin schema keeps reading
+the AUTHORED `game/script.spin` — the parser reads records, enums, the
+`game` block and actions and skips every `const`, which is all the prelude
+holds, so the assembled read would change nothing and cost a disk write
+per refresh. A missing `maxWin` (which `validateSpec` lets through) is the
+host's own diagnostic. A `spec.json` that is NOT a `GameSpec` (first-slot's descriptive
 one) changes nothing. `known` (symbols) and `actions` (flow warning) read
 the same file as before.
 
