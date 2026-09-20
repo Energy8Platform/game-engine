@@ -427,6 +427,14 @@ describe('built-in kinds', () => {
 
       // A missing NODE (no schema at all) is a different case — that's the
       // "missing node" test above, and does not trip this check.
+
+      // And a prop named after something every object inherits: `in` would
+      // have said the node has it, and handed schemastery a prop it does not.
+      expect(
+        await kind('prop').run!(propProps({ target: 'a/b', prop: 'constructor', value: '1' }), rc),
+      ).toEqual({ out: 'next' });
+      expect(rc.report).toHaveBeenCalledWith(`node "a/b" has no prop "constructor"`);
+      expect(setProps).not.toHaveBeenCalled();
     });
 
     it('a target with no "/" reports and never reaches nodeSchema/setProps', async () => {

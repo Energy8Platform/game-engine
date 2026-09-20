@@ -122,6 +122,7 @@ describe('App', () => {
       'activity-preview',
       'activity-scenes',
       'activity-flow',
+      'activity-symbols',
     ]);
   });
 
@@ -144,6 +145,7 @@ describe('App', () => {
     // before `App` ever renders), so it lands first in registration order.
     expect(docs.map((d) => [d.key, d.closable])).toEqual([
       ['flow', false],
+      ['symbols', false],
       ['composition', false],
       ['preview', false],
     ]);

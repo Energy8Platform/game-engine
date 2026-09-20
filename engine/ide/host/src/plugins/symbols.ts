@@ -154,6 +154,7 @@ export function checkSymbols(
           infos.get(node.type),
           nodeTypes.length > 0,
           hasFile,
+          true,
         ),
       );
     }

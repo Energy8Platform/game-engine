@@ -170,26 +170,24 @@ describe('checkScenes', () => {
     ).toEqual([]);
   });
   // Slice 24: a symbol state's prop may be bound to the cell's data
-  // (`'$cell.multiplier'`), resolved at bind time — so the string stands for a
-  // value of whatever type the prop declares, and no schema here may refuse it.
-  // Same rule the symbols runtime's own schema pass applies (`view.ts`).
-  it("a `$cell.<field>` binding passes any prop's schema — a number, a string, a common prop", () => {
-    expect(
-      checkScenes(
-        [
-          doc('a', [
-            {
-              id: 'n',
-              type: 'text',
-              props: { text: '$cell.symbol', size: '$cell.multiplier', x: '$cell.multiplier' },
-            },
-          ]),
-        ],
-        types,
-        () => true,
-        false,
-      ),
-    ).toEqual([]);
+  // (`'$cell.multiplier'`), resolved at bind time. A SCENE node has no cell —
+  // nothing would resolve it, and the string would be drawn as-is — so the
+  // same prop is refused here and accepted only by `checkSymbols`
+  // (`symbols.test.ts` has that half).
+  it('a `$cell.<field>` binding is refused on a scene node — only a symbols.yml state reads a cell', () => {
+    const out = checkScenes(
+      [doc('a', [{ id: 'n', type: 'text', props: { text: '$cell.x' } }])],
+      types,
+      () => true,
+      false,
+    );
+    expect(out).toEqual([
+      expect.objectContaining({
+        severity: 'error',
+        where: 'a/n',
+        message: expect.stringContaining('$cell.'),
+      }),
+    ]);
   });
 
   it('only the `$cell.` prefix passes — any other string on a number prop is still refused', () => {

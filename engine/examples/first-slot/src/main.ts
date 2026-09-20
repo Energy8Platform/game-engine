@@ -743,8 +743,10 @@ interface ViewNode {
 
 /**
  * The live board's grid, as the `ReelGrid` it really is (`cols`/`rows`
- * getters, `getCell(col, row).data`/`.view`); `GridLike` names only
- * `getCell`, hence the cast. `undefined` when nothing provides a board.
+ * getters, `getCell(col, row).data`/`.view`); `GridLike` types `getCell`
+ * as always answering a cell, and that cell's `view` as a `SymbolView`
+ * rather than the bare node `cellArt` walks — hence the cast. `undefined`
+ * when nothing provides a board.
  */
 function liveGrid():
   | {

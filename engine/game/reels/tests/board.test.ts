@@ -437,4 +437,24 @@ describe('boardFromReelSystem: $cell bindings', () => {
       board.refill({ kind: 'refill', board: [[{ symbol: null }], ['b']] }),
     ).resolves.toBeUndefined();
   });
+
+  it('a ragged grid — no cell past a short reel — is walked, not thrown over', () => {
+    // `cols`/`rows` are the WIDEST extent, so the walk asks reel 1 for a row
+    // it does not have; the real `ReelGrid` answers `undefined` there.
+    const { reelSystem, getCell, bindAt } = fakeReelSystem([
+      [{ symbol: 'a' }, { symbol: 'b' }],
+      [{ symbol: 'c' }],
+    ]);
+    const cellOrUndefined = getCell.getMockImplementation()!;
+    getCell.mockImplementation((col, row) =>
+      col === 1 && row === 1 ? (undefined as unknown as CellLike) : cellOrUndefined(col, row),
+    );
+    const board = boardFromReelSystem(reelSystem);
+
+    expect(() => board.repaint()).not.toThrow();
+    // Every cell that IS there still bound — the gap is skipped, not a stop.
+    expect(bindAt(0, 0)).toHaveBeenCalledWith({ symbol: 'a' });
+    expect(bindAt(0, 1)).toHaveBeenCalledWith({ symbol: 'b' });
+    expect(bindAt(1, 0)).toHaveBeenCalledWith({ symbol: 'c' });
+  });
 });

@@ -102,6 +102,8 @@ export function checkNode(
   info: NodeTypeInfo | undefined,
   reported: boolean,
   hasFile: (path: string) => boolean,
+  /** `$cell.<field>` props are accepted — only a `symbols.yml` state has a cell to read them from. */
+  cellBindings = false,
 ): Diagnostic[] {
   const out: Diagnostic[] = [];
   const err = (message: string, fix?: string) =>
@@ -129,7 +131,18 @@ export function checkNode(
         // no schema ever validates it (the flow's `$path` strings are not validated
         // either). That prop's EMPTY is checked in its place, exactly as the symbols
         // runtime does before the first `update` (`symbols/src/view.ts`).
-        target[k] = isCellBinding(v) ? emptyProp((dict[k] ?? COMMON.dict?.[k])?.type) : v;
+        //
+        // Only where there IS a cell, though: a scene node is not mounted per
+        // cell, nothing resolves the binding there, and the string would be
+        // drawn as-is. Substituted either way, so the schema does not pile
+        // a second complaint on top of this one.
+        const bound = isCellBinding(v);
+        if (bound && !cellBindings)
+          err(
+            `prop "${k}" binds "$cell." — only a symbols.yml state reads a cell`,
+            'use a literal value',
+          );
+        target[k] = bound ? emptyProp((dict[k] ?? COMMON.dict?.[k])?.type) : v;
       }
       COMMON(common as never);
       ownSchema(own);

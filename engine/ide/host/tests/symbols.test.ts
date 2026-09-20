@@ -30,6 +30,12 @@ const TYPES: NodeTypeInfo[] = [
     accept: { extensions: ['skel', 'json'], prop: 'skeleton', sibling: 'atlas' },
     assetProps: ['skeleton', 'atlas'],
   },
+  {
+    type: 'text',
+    schema: json(
+      Schema.object({ text: Schema.string().default(''), size: Schema.number().default(24) }),
+    ),
+  },
 ];
 const KNOWN = [
   { id: '1', name: 'Cherry' },
@@ -110,6 +116,29 @@ describe('checkSymbols', () => {
         message: 'node type "bogus" is not one the game registered',
       }),
     );
+  });
+
+  // The other half of `scenes.test.ts`'s refusal: a state HAS a cell, so the
+  // binding stands for a value of whatever type the prop declares (a number,
+  // a string, a common prop) and no schema here may refuse it — the same rule
+  // the symbols runtime's own schema pass applies (`view.ts`).
+  it("a `$cell.<field>` binding passes any prop's schema on a symbol state", () => {
+    expect(
+      checkSymbols(
+        doc([
+          {
+            id: '1',
+            static: {
+              type: 'text',
+              props: { text: '$cell.symbol', size: '$cell.multiplier', x: '$cell.multiplier' },
+            },
+          },
+        ]),
+        TYPES,
+        () => true,
+        [],
+      ),
+    ).toEqual([]);
   });
 
   it('unknown types are not reported until the game has reported its node types', () => {

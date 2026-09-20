@@ -447,7 +447,10 @@ const prop: FlowNodeKind<{ target: string; prop: string; value: string }> = {
     }
 
     const dict = scenes.nodeSchema(ref)?.dict;
-    if (dict && !(p.prop in dict)) {
+    // `hasOwn`, not `in`: `constructor`/`toString` are on every object's
+    // prototype, and a prop named one of those would sail past the guard
+    // into `setProps` as a prop the node does not have.
+    if (dict && !Object.hasOwn(dict, p.prop)) {
       report(`node "${ref.scene}/${ref.node}" has no prop "${p.prop}"`);
       return { out: 'next' };
     }
