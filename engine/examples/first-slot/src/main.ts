@@ -497,14 +497,15 @@ if (!currentEvents() || !currentFlow()) {
 // not "not yet".
 //
 // **`ui.spin`'s payload.** `flow.yml`'s `mode` node (`set turbo =
-// $event.payload.turbo`, between `idle` and `click`) reads it off `vars.
-// event` — what the flow's `on` node hands its `fire()` is the emitted
-// payload UNCHANGED (`@energy8engine/flow`'s `kinds.ts`, the `on` kind:
-// `fire({ event })` with `event` the bus callback's own argument) — so for
-// `$event.payload.turbo` to resolve to the checkbox's own value, the
-// payload emitted here has to BE `{ payload: { turbo } }`, not a bare
-// `{ turbo }`. `__e8.spin()` below mirrors the exact same shape, for the
-// same reason.
+// $event.turbo`, between `idle` and `click`) reads it off `vars.event` —
+// the flow's `on` node hands its `fire()` the emitted payload UNCHANGED
+// (`@energy8engine/flow`'s `kinds.ts`, the `on` kind: `fire({ event })`
+// with `event` the bus callback's own argument), so `$event` IS the
+// payload emitted here. The `emit` flow node kind agrees: it sends
+// `resolve(p.payload, vars)` as the event itself, with no envelope of its
+// own — a flow-emitted `{ turbo: true }` arrives as `$event.turbo`, so a
+// page that wrapped its own payload would make the two paths disagree.
+// `{ turbo: ... }` it is, here and in `__e8.spin()` below.
 spinBtn.addEventListener('click', () => {
   const events = currentEvents();
   if (!events) return;
@@ -514,7 +515,7 @@ spinBtn.addEventListener('click', () => {
     return;
   }
   statusEl.textContent = 'spinning…';
-  events.emit('ui.spin', { payload: { turbo: turboCheckbox.checked } });
+  events.emit('ui.spin', { turbo: turboCheckbox.checked });
 });
 
 // `#status` after a click, from the trace rather than from a return value
@@ -568,9 +569,10 @@ ctx.inject(['flow'], (c) =>
   },
   /**
    * Exactly what the button does when the flow is idle — `events.emit(
-   * 'ui.spin', { payload: { turbo } })` (see the click handler's own
-   * comment for why the payload has to be wrapped that way) — and then the
-   * port the flow's `present` node left by (`next` or `failed`), or
+   * 'ui.spin', { turbo })` (see the click handler's own comment for why
+   * `$event` in `flow.yml`'s `mode` node is the payload itself, no
+   * envelope) — and then the port the flow's `present` node left by
+   * (`next` or `failed`), or
    * `failed` from its `spin` node when the host refused. One 20 s budget
    * for the whole thing; a rejection names which half ran out.
    *
@@ -610,7 +612,7 @@ ctx.inject(['flow'], (c) =>
         off();
         resolve({ out: entry.out! });
       });
-      events.emit('ui.spin', { payload: { turbo: opts?.turbo ?? false } });
+      events.emit('ui.spin', { turbo: opts?.turbo ?? false });
     });
   },
   /**

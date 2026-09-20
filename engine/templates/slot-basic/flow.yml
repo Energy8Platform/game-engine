@@ -3,7 +3,7 @@ nodes:
   - { id: start, kind: boot,    ui: { x: 40,   y: 80 } }
   - { id: base,  kind: show,    props: { scene: base_game }, ui: { x: 220,  y: 80 } }
   - { id: idle,  kind: on,      props: { event: ui.spin },   ui: { x: 400,  y: 80 } }
-  - { id: mode,  kind: set,     props: { name: turbo, value: '$event.payload.turbo' }, ui: { x: 490, y: 240 } }
+  - { id: mode,  kind: set,     props: { name: turbo, value: '$event.turbo' }, ui: { x: 490, y: 240 } }
   - { id: click, kind: sound,   props: { src: assets/spin.wav }, ui: { x: 580,  y: 80 } }
   - { id: spin,  kind: spin,    ui: { x: 760,  y: 80 } }
   - { id: draw,  kind: present, ui: { x: 940,  y: 80 } }

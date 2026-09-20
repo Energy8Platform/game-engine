@@ -16,9 +16,9 @@ completes on the first spin. `e8-base`'s
 /api/flow`), interprets it, and traces every node it enters and leaves;
 `src/main.ts` holds no spin loop any more — its `Spin` button only emits
 `ui.spin` into the bus that row provides, and `#status` is read back off
-the trace. The `#turbo` checkbox rides along on that same emit (`{
-payload: { turbo } }`, read by the `mode` node into the var `present`'s
-own `turbo` prop defaults to), and a second click while the flow is busy
+the trace. The `#turbo` checkbox rides along on that same emit (`{ turbo
+}`, read by the `mode` node into the var `present`'s own `turbo` prop
+defaults to), and a second click while the flow is busy
 emits `ui.skip` instead — caught directly by `playloop1`, never by a node,
 since a skip has to land while a run is already going. The IDE's Flow document edits this file (`PUT /api/flow`); node
 kinds come from the game's own registry (`ctx.flowNodes`), so a project

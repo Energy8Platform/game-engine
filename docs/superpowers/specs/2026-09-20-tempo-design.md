@@ -88,7 +88,7 @@ Flow: `present` gains `turbo` (`string` default `'$turbo'` — a literal
 `ui.skip` → `play.skip()` — a skip must land DURING a run, which an `on`
 trigger cannot (`busy: ignore`), so it is not a flow node. The page
 (`main.ts`): a `#turbo` checkbox; `ui.spin` is emitted with `{ turbo:
-checkbox.checked }` and the example flow gains `set turbo = $event.payload.turbo`
+checkbox.checked }` and the example flow gains `set turbo = $event.turbo`
 after `idle` (before `click`); a click on Spin while the flow is busy
 emits `ui.skip` instead (the button reads `flow.busy()`); `__e8.spin({
 turbo? })`, `__e8.skip()`, `__e8.lastStepOpts()` (the board records the
@@ -123,7 +123,7 @@ config only if that row's schema carries it — `mechanic-cascade`'s
 
 - `first-slot` ≡ `slot-basic`: `index.html` gains `<label><input id="turbo"
   type="checkbox"> turbo</label>` beside Spin; `main.ts` per §4; `flow.yml`
-  gains `{ id: mode, kind: set, props: { name: turbo, value: '$event.payload.turbo' }, ui: { x: 490, y: 240 } }`
+  gains `{ id: mode, kind: set, props: { name: turbo, value: '$event.turbo' }, ui: { x: 490, y: 240 } }`
   between `idle` and `click` (`idle → mode → click`); `README.md` a
   sentence. `e8.patch.yml` unchanged (`base_game: reel-step`).
 - No bundle change (`tumble` is in `reels1`/`mechanics1`; `audio` in
