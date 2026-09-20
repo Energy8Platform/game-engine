@@ -56,13 +56,16 @@ iframe in the IDE sizes itself (§7).
 
 ## 4. The safe rect
 
-`@energy8engine/scenes` fits the design into the viewport MINUS the
-shell's safe area: `resize(w, h)` reads `ctx.reflect.get('shell', false)?.safeArea`
-(lenient; `{0,0,0,0}` without a shell), computes `fitStage({ width: w −
+`@energy8engine/scenes` fits the design into the viewport MINUS the safe
+area: `resize(w, h)` reads a `safeArea` SERVICE when one is provided
+(`ctx.reflect.get('safeArea', false)` — a page's explicit insets: the
+editor page's preset band, later a notch), else the shell's
+(`ctx.reflect.get('shell', false)?.safeArea`), else `{0,0,0,0}`; computes `fitStage({ width: w −
 left − right, height: h − top − bottom }, design, mode)` and offsets the
 container by `(left, top)`. The row re-fits when `shell` is provided
 (`ctx.inject(['shell'], () => fit())` beside the existing resize
-subscription), so row order does not matter. `Fit` gains `viewport: { left,
+subscription), so row order does not matter; the shell's bar height is
+measured, so the fit re-runs on the shell's `resize` too. `Fit` gains `viewport: { left,
 top, right, bottom }` — the safe rect's edges in DESIGN units
 (`left = −fit.x / scale`, `right = left + safeWidth / scale`, …), which is
 what pins measure from. The scene editor page has no shell (`without:
@@ -133,9 +136,12 @@ look is the reels' business).
   portrait variant apply — the canvas IS the preview of that viewport.
 - `scene-edit` draws two frames: the design box (as today) and the safe
   rect (§4) with the bar band hatched; the band height comes from the
-  editor's own preset (`barHeight` = the shell's `wide`/`mobile` bar
-  heights, read from `@energy8platform/shell`'s constants — the editor
-  composes no shell). Gizmo drags on a pinned node write the OFFSET
+  editor's own preset: the IDE appends `?safeBottom=<px>` to the editor
+  URL (the shell's measured bar heights per layout, one constant each in
+  the client, measured once on the example and noted), `editor.ts`
+  provides it as the `safeArea` service (`createGame({ provide: { safeArea
+  } })`), and the scenes runtime fits into it exactly as it would into the
+  shell's — the editor composes no shell. Gizmo drags on a pinned node write the OFFSET
   (pointer − pin point, design units); the Properties form shows `pin` as
   a select and `x`/`y` labelled "offset" when a pin is set.
 - Orientation is the edit target: with a portrait viewport every gizmo
