@@ -198,7 +198,9 @@ diagnostics on stdout, exit 1 on an error). Steps:
    `viteRows(map)` from `@energy8engine/ide-host` (`src/vite-rows.ts`; the
    host already owns vite), which serves
    `virtual:e8-rows` = `{ [rowId]: () => import('<pkg>/<e8.runtime.entry>') }`
-   (static specifiers, so vite bundles and code-splits every runtime half).
+   (static specifiers, so vite bundles every runtime half — one `game`
+   chunk beside the entry: rollup's default split deadlocked the page's
+   top-level `await createGame()` against a row chunk importing the entry).
    `dev-game`'s vite gets the same plugin answering `{}`.
 4. Copy the project's `assets/` to `dist/assets/` (documents name assets
    by relative path; nothing in the bundle references them statically).
