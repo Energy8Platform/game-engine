@@ -438,6 +438,25 @@ describe('createGame — choosing one provider per seam', () => {
     expect(game.diagnostics).toEqual([]);
   });
 
+  /**
+   * The two tests above prove the seam picks by `helpers.ts`'s fixture
+   * declarations, which stand in for the two packages' own `e8.seam`. A
+   * fixture that drifted from a manifest would keep both tests green while
+   * the real composition chose differently — so the fixtures are pinned to
+   * the manifests they mirror.
+   */
+  it("the session fixtures' seam declarations are the packages' own e8.seam", () => {
+    for (const [id, pkg] of [
+      ['sessionhost1', 'session-host'],
+      ['sessionsdk1', 'session-sdk'],
+    ]) {
+      const manifest = JSON.parse(
+        readFileSync(join(__dirname, '..', '..', pkg, 'package.json'), 'utf8'),
+      ) as { e8: { seam: unknown } };
+      expect(row(id).seam, id).toEqual(manifest.e8.seam);
+    }
+  });
+
   it('a row that declares no seam always composes — most rows are candidates for nothing', async () => {
     const applied: string[] = [];
 

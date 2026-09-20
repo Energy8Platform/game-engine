@@ -29,7 +29,10 @@ const DEV: SessionSdkConfig['dev'] = {
   balance: 5000,
   currency: 'EUR',
   gameConfig: { betLevels: [0.2, 0.5] },
-  onPlay: () => ({ totalWin: 1, nextActions: [], data: { stage: 'base', win: 5 } }),
+  // No `nextActions` on purpose: DevBridge then answers its default `['spin']`,
+  // the same "next round's entry action" every real host lists on a
+  // completed round — the suite has to prove that reads as complete.
+  onPlay: () => ({ totalWin: 1, data: { stage: 'base', win: 5 } }),
   networkDelay: 0,
   debug: false,
 };
@@ -116,6 +119,7 @@ describe('session-sdk — play, ack, the live root', () => {
       totalWin: 5,
       totalWinAmount: 1,
       stage: 'base',
+      nextActions: ['spin'],
       roundComplete: true,
       roundId: 'dev-round-1',
     });
@@ -132,13 +136,43 @@ describe('session-sdk — play, ack, the live root', () => {
         ...DEV,
         onPlay: (p) => {
           played = p;
-          return { totalWin: 0, nextActions: [], data: {} };
+          return { totalWin: 0, data: {} };
         },
       },
       sdk: { devMode: true },
     });
     await session.play({ action: 'spin', params: { x: 1 } });
     expect(played).toMatchObject({ action: 'spin', bet: 0.2, params: { x: 1 } });
+    await ctx.fiber.dispose();
+  });
+
+  it("a step plays at the bet its round was started with; a completed round's bet is forgotten", async () => {
+    const played: unknown[] = [];
+    const open = { spinsRemaining: 1, spinsPlayed: 0, totalWin: 0, completed: false };
+    const { ctx, session } = await boot({
+      dev: {
+        ...DEV,
+        onPlay: (p) => {
+          played.push(p);
+          // The fresh play opens a session; the step (a `roundId` on the
+          // wire) closes it — no session on that answer.
+          return p.roundId ? { totalWin: 0, data: {} } : { totalWin: 0, data: {}, session: open };
+        },
+      },
+      sdk: { devMode: true },
+    });
+
+    const first = (await session.play({ action: 'spin', betLevel: 0.5 })).result!;
+    expect(first).toMatchObject({ bet: 0.5, roundComplete: false, roundId: 'dev-round-1' });
+
+    const step = (await session.play({ action: 'free_spin', roundId: first.roundId })).result!;
+    expect(played[1]).toMatchObject({ action: 'free_spin', bet: 0.5, roundId: 'dev-round-1' });
+    expect(step).toMatchObject({ bet: 0.5, roundComplete: true });
+
+    // The round completed, so its bet is gone: a step naming it again
+    // (nothing a flow should do) falls back to the session default.
+    await session.play({ action: 'free_spin', roundId: first.roundId });
+    expect(played[2]).toMatchObject({ bet: 0.2, roundId: 'dev-round-1' });
     await ctx.fiber.dispose();
   });
 
@@ -160,6 +194,17 @@ describe('session-sdk — play, ack, the live root', () => {
     session.ack!({ ...result!, roundId: 'never-played' });
     await tick();
     expect(acks).toHaveLength(1);
+
+    // One stash, the LAST result: once a second play ran, the first can no
+    // longer be acked — only the second can.
+    const { result: second } = await session.play({ action: 'spin', betLevel: 0.2 });
+    session.ack!(result!);
+    await tick();
+    expect(acks).toHaveLength(1);
+    session.ack!(second!);
+    await tick();
+    expect(acks).toHaveLength(2);
+    expect(acks[1]).toMatchObject({ roundId: 'dev-round-2' });
     await ctx.fiber.dispose();
   });
 
@@ -174,7 +219,7 @@ describe('session-sdk — play, ack, the live root', () => {
     await ctx.fiber.dispose();
   });
 
-  it('dispose destroys the platform session — a play after it is one error diagnostic, no throw', async () => {
+  it('dispose destroys the platform session — a play after it is one error diagnostic naming the SDK code', async () => {
     const { ctx, session } = await boot();
     await ctx.fiber.dispose();
 
@@ -185,7 +230,7 @@ describe('session-sdk — play, ack, the live root', () => {
         severity: 'error',
         plugin: 'session-sdk',
         where: 'play',
-        message: expect.stringContaining('destroyed'),
+        message: 'BRIDGE_DESTROYED: SDK has been destroyed',
       }),
     ]);
   });

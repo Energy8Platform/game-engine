@@ -31,6 +31,21 @@
  * nothing has run yet, there is no node to attach it to. The page still
  * boots on the built-in init and every `play` answers with that same
  * diagnostic, so the reason stays visible instead of a blank shell.
+ *
+ * Known edges, none of them this row's to fix:
+ * - The suite and the typecheck resolve `@energy8platform/platform-core`
+ *   and `@energy8platform/game-sdk` through their built `dist/` (their
+ *   `exports` maps point there) — build both before running either.
+ * - A `ready()` that fails inside `createPlatformSession` (a timeout, a
+ *   host that never answers) leaves the SDK's transport listeners
+ *   subscribed: the `PlatformSession` that would own them is never
+ *   constructed, so there is nothing here to `destroy()`. That leak is
+ *   inside platform-core, out of reach.
+ * - Artube's `config.artube.currencyMinimalUnit` (the currency's rounding
+ *   step) and `config.artube.defaultBetIndex` (the default bet as an INDEX
+ *   into `betLevels`) go unread: `init` rounds nothing and takes the
+ *   default bet from `config.stake.defaultBetLevel` or the first rung. A
+ *   debt for the first Artube launch.
  */
 import type { Context } from 'cordis';
 import {
@@ -169,15 +184,34 @@ export async function apply(ctx: Context, config: SessionSdkConfig = {}): Promis
     live.balance = balance;
   });
 
-  // The raw platform result per open round, for `ack` — `playAck` wants
-  // the SDK's own `PlayResultData`, not the seam's `SpinResult`.
-  const raws = new Map<string, PlayResultData>();
+  // The last raw platform result, for `ack` — `playAck` wants the SDK's own
+  // `PlayResultData`, not the seam's `SpinResult`. ONE stash, not a map
+  // keyed by round: plays are sequential and a flow that never acks would
+  // otherwise grow the map for the life of the page (the same single stash
+  // `createSlotPlay` keeps in `packages/game-engine/src/host/slotPlay.ts`).
+  let last: PlayResultData | undefined;
+
+  // The bet each OPEN round was started with. A `step` carries no bet of
+  // its own (`PlayRequest.betLevel` absent — a gRPC `Step` has no bet field
+  // either), but `PlayParams.bet` is mandatory on the platform wire and is
+  // the divisor `normalise` turns money back into multipliers with, so the
+  // round's own bet has to come from somewhere: set when a result leaves a
+  // round open, dropped when one completes it.
+  const roundBet = new Map<string, number>();
+  // A round this row did not start — the open round a reload came back to,
+  // which the handshake reports as `initData.session` with its `betAmount`.
+  // Its round ID only comes with `getState()`, which nothing here calls
+  // yet, so the bet is kept unkeyed: a step of a round `roundBet` has
+  // never seen plays at it. Draining that round at boot is out of scope.
+  const resumedBet = session?.initData?.session?.betAmount;
 
   async function play(
     req: PlayRequest,
   ): Promise<{ result?: SpinResult; diagnostics: Diagnostic[] }> {
     if (failure) return { diagnostics: [failure] };
-    const bet = req.betLevel ?? init.defaultBet;
+    const stepBet =
+      req.roundId === undefined ? undefined : (roundBet.get(req.roundId) ?? resumedBet);
+    const bet = req.betLevel ?? stepBet ?? init.defaultBet;
     try {
       // `session` is set whenever `failure` is not — see the try above.
       const raw = await session!.play({
@@ -186,19 +220,33 @@ export async function apply(ctx: Context, config: SessionSdkConfig = {}): Promis
         roundId: req.roundId,
         params: req.params,
       });
-      raws.set(raw.roundId, raw);
-      return { result: withAmounts(normalise(raw, bet)), diagnostics: [] };
+      last = raw;
+      const result = withAmounts(normalise(raw, bet));
+      if (result.roundComplete) roundBet.delete(result.roundId);
+      else roundBet.set(result.roundId, result.bet);
+      return { result, diagnostics: [] };
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      return { diagnostics: [diagnostic('error', 'session-sdk', 'play', message)] };
+      // An `SDKError` names its cause in `code` (`INSUFFICIENT_FUNDS`,
+      // `TIMEOUT`, `BRIDGE_DESTROYED`); the message alone loses it.
+      const code = (error as { code?: unknown } | null)?.code;
+      return {
+        diagnostics: [
+          diagnostic(
+            'error',
+            'session-sdk',
+            'play',
+            typeof code === 'string' ? `${code}: ${message}` : message,
+          ),
+        ],
+      };
     }
   }
 
   function ack(result: SpinResult): void {
-    const raw = raws.get(result.roundId);
-    if (!raw) return;
-    raws.delete(result.roundId);
-    session?.playAck(raw);
+    if (!last || last.roundId !== result.roundId) return;
+    session?.playAck(last);
+    last = undefined;
   }
 
   ctx.provide('session', { init, play, ack });

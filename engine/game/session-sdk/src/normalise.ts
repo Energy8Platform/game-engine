@@ -20,16 +20,26 @@
  * `data_json.win`, a multiplier already (the same field `spin.ts` lifts
  * `win` from), so it is taken as-is.
  *
+ * `roundComplete` without a session is `true`, not "no next actions": on
+ * every real host a COMPLETED round still carries the NEXT round's entry
+ * actions in `nextActions` (e8's `next_actions: ['spin']`, `DevBridge`'s
+ * default `nextActions ?? ['spin']`, Stake's `nextRoundActions`), so an
+ * emptiness test would never hold and a flow's `if roundComplete → step`
+ * loop would play paid rounds forever. No session ⇒ a single-action round
+ * ⇒ complete; `nextActions` stays informational — the reading
+ * `packages/game-engine/src/host/slotPlay.ts`'s `enrichRoundMeta` already
+ * uses.
+ *
  * | `SpinResult`     | from                                                          |
  * |------------------|---------------------------------------------------------------|
- * | `bet`            | the bet this row sent (`PlayParams.bet`)                      |
+ * | `bet`            | `session.betAmount` when the host echoes the round's bet (Stake, Artube), else the bet this row sent |
  * | `win`            | `data.win` when numeric, else `totalWin / bet` (0 at bet 0)   |
  * | `totalWin`       | `(session?.totalWin ?? totalWin) / bet` (0 at bet 0)          |
  * | `stage`          | `data.stage` when a string, else the `action` that ran        |
- * | `data`           | `data`, untouched                                             |
+ * | `data`           | `data` when a record, else `{}`                               |
  * | `vars`           | `data.vars` when a record, else `{}`                          |
  * | `nextActions`    | `nextActions`, `[]` when a host omits it                      |
- * | `roundComplete`  | `session.completed === true` with a session, else no next actions |
+ * | `roundComplete`  | `session.completed === true` with a session, else `true`      |
  * | `spinsRemaining` | `session.spinsRemaining`, 0 without a session                 |
  * | `spinsPlayed`    | `session.spinsPlayed`, 0 without a session                    |
  * | `balance`        | `balanceAfter`                                                |
@@ -43,18 +53,20 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
-export function normalise(raw: PlayResultData, bet: number): SpinResult {
-  const nextActions = raw.nextActions ?? [];
+/** `requestBet` is the `PlayParams.bet` this row sent — the round's bet unless the host echoes a different one. */
+export function normalise(raw: PlayResultData, requestBet: number): SpinResult {
+  const data = isRecord(raw.data) ? raw.data : {};
+  const bet = raw.session?.betAmount ?? requestBet;
   const perBet = (money: number) => (bet > 0 ? money / bet : 0);
   return {
     bet,
-    win: typeof raw.data.win === 'number' ? raw.data.win : perBet(raw.totalWin),
+    win: typeof data.win === 'number' ? data.win : perBet(raw.totalWin),
     totalWin: perBet(raw.session?.totalWin ?? raw.totalWin),
-    stage: typeof raw.data.stage === 'string' ? raw.data.stage : raw.action,
-    data: raw.data,
-    vars: isRecord(raw.data.vars) ? raw.data.vars : {},
-    nextActions,
-    roundComplete: raw.session ? raw.session.completed === true : nextActions.length === 0,
+    stage: typeof data.stage === 'string' ? data.stage : raw.action,
+    data,
+    vars: isRecord(data.vars) ? data.vars : {},
+    nextActions: raw.nextActions ?? [],
+    roundComplete: raw.session ? raw.session.completed === true : true,
     spinsRemaining: raw.session?.spinsRemaining ?? 0,
     spinsPlayed: raw.session?.spinsPlayed ?? 0,
     scriptSha256: '',

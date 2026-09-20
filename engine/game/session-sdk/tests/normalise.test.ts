@@ -52,9 +52,35 @@ describe('normalise — the spec §3 table, row by row', () => {
     expect(normalise(raw({ totalWin: 2, data: { win: '5' } }), 1).win).toBe(2);
   });
 
-  it('no session: roundComplete is "nothing left to do" — nextActions empty', () => {
+  it('no session: the round is complete whatever nextActions says — a host lists the NEXT round there', () => {
     expect(normalise(raw({ nextActions: [] }), 1).roundComplete).toBe(true);
-    expect(normalise(raw({ nextActions: ['free_spin'] }), 1).roundComplete).toBe(false);
+    expect(normalise(raw({ nextActions: ['spin'] }), 1).roundComplete).toBe(true);
+    expect(normalise(raw({ nextActions: ['free_spin'] }), 1).roundComplete).toBe(true);
+  });
+
+  it("bet is the session's betAmount when the host echoes the round's bet, and that is the divisor", () => {
+    const r = normalise(
+      raw({
+        totalWin: 4,
+        data: {},
+        session: { spinsRemaining: 2, spinsPlayed: 1, totalWin: 4, betAmount: 2 },
+      }),
+      1,
+    );
+    expect(r.bet).toBe(2);
+    expect(r.win).toBe(2);
+    expect(r.totalWin).toBe(2);
+  });
+
+  it('a result with no data at all: data {}, win from totalWin, stage from the action, vars {}', () => {
+    const r = normalise(
+      raw({ action: 'spin', totalWin: 3, data: undefined as unknown as Record<string, unknown> }),
+      1,
+    );
+    expect(r.data).toEqual({});
+    expect(r.win).toBe(3);
+    expect(r.stage).toBe('spin');
+    expect(r.vars).toEqual({});
   });
 
   it('with an open session: totalWin, spins and roundComplete all come from the session', () => {
