@@ -4,7 +4,7 @@
  * executes it.
  *
  * `PresentationPlan` (what `classic`/`cascade` actually emit) stays the
- * closed four-kind vocabulary below — that is deliberate, see
+ * closed vocabulary below — that is deliberate, see
  * `KnownPresentationStep`'s own doc. `PresentationStep` (what a board, a
  * `BoardStepRegistry`, and `executePlan` accept) is wider: a plugin's step
  * only needs a `kind` and its own fields, no edit to this file. See
@@ -99,7 +99,56 @@ export interface RefillStep {
 }
 
 /**
- * One of the four steps `classic`/`cascade` actually stand on — see the
+ * One cascade round as a single beat: the paying cells light up, the
+ * removed ones leave, the survivors slide down into the gaps and fresh
+ * symbols drop in from above, settling on `settled`.
+ *
+ * This is NOT `remove` + `refill` said in one breath. Those two are
+ * `setBoard` twice — the board teleports, there is no gravity and nothing
+ * drops. A `tumble` is handed to the renderer WHOLE precisely because the
+ * slide needs to know where each survivor is going before the first frame
+ * runs; a board driven one step at a time, with no lookahead, cannot
+ * animate it. (`@energy8engine/reels` plays it through the legacy
+ * `TumbleController`, which is exactly that animation.)
+ *
+ * A chain of N rounds is N `tumble` steps, each carrying its own settled
+ * board — not one step carrying N rounds. `drops` is optional: omitted, the
+ * renderer derives the slide from `removed` by gravity, which is what a
+ * mechanic emitting ordinary column-collapse cascades wants.
+ */
+export interface TumbleStep {
+  kind: 'tumble';
+  /** Cells to highlight before they leave — usually the same as `removed`. */
+  winning: Cell[];
+  /** Cells that leave the board this round. */
+  removed: Cell[];
+  /** Explicit survivor slides. Omitted → the renderer derives gravity from `removed`. */
+  drops?: { col: number; fromRow: number; toRow: number }[];
+  /** What lands from above, each carrying a `Board` leaf as its symbol. */
+  fresh: { col: number; row: number; symbol: number | string | BoardCell }[];
+  /** The board this round settles on. */
+  settled: Board;
+}
+
+/**
+ * How fast a step should play — the one thing a presentation carries
+ * besides its own content. Threaded from `play.execute` (`@energy8engine/
+ * play-loop`) through `executePlan` to every `BoardApi` method and every
+ * registered `StepHandler`, unchanged.
+ *
+ * `turbo` is a REQUEST, not a promise: what it shortens is up to whatever
+ * performs the step. The reels board passes it to the legacy
+ * `spin`/`cascade`, which halve their own timings; a legacy `playWin` takes
+ * no options at all and runs at its own pace either way. A plugin's handler
+ * decides for itself. Nothing in the vocabulary says what "twice as fast"
+ * means, because nothing in the vocabulary knows how long anything takes.
+ */
+export interface StepOpts {
+  turbo?: boolean;
+}
+
+/**
+ * One of the five steps the built-in mechanics actually stand on — see the
  * module doc. Kept as its own named union (rather than folding straight
  * into `PresentationStep` below) because `PresentationPlan` is defined from
  * THIS type, not from `PresentationStep`: a mechanic's `steps.push({ kind:
@@ -108,11 +157,13 @@ export interface RefillStep {
  * literal to quietly match instead. See `UnknownPresentationStep`'s doc for
  * the mechanism that would otherwise defeat that.
  *
- * It was six. `setMultiplier` and `wait` were built before any mechanic
- * asked for them, nothing ever emitted either, and they are gone — see
+ * It was six, then four: `setMultiplier` and `wait` were built before any
+ * mechanic asked for them, nothing ever emitted either, and they are gone.
+ * `tumble` (slice 25) earned the fifth place the other way round — see
  * `KNOWN_STEP_KINDS`.
  */
-export type KnownPresentationStep = SpinToStep | RevealWinsStep | RemoveStep | RefillStep;
+export type KnownPresentationStep =
+  SpinToStep | RevealWinsStep | RemoveStep | RefillStep | TumbleStep;
 
 /**
  * A step naming any OTHER kind — a plugin's, task 9's `reelStep` among
@@ -140,8 +191,8 @@ export interface UnknownPresentationStep {
 }
 
 /**
- * A step as `executePlan`/`BoardStepRegistry` see it: one of the four
- * known kinds by its exact shape, or anything else that at least names a `kind`.
+ * A step as `executePlan`/`BoardStepRegistry` see it: one of the known
+ * kinds by its exact shape, or anything else that at least names a `kind`.
  * NOT what mechanics build `PresentationPlan` out of — see
  * `KnownPresentationStep`'s doc for why those stay two different types.
  */
@@ -158,18 +209,22 @@ export type PresentationStep = KnownPresentationStep | UnknownPresentationStep;
 export type PresentationPlan = KnownPresentationStep[];
 
 /**
- * The four kinds' names, exactly as the `switch` below and `BoardApi`'s
- * four methods (`@energy8engine/play-loop`) both key off. Exported so a
+ * The known kinds' names, exactly as the `switch` below and `BoardApi`'s
+ * own methods (`@energy8engine/play-loop`) both key off. Exported so a
  * diagnostic naming an unknown kind can also name what IS known, without a
  * second hand-maintained copy of this list drifting from this one. Kept in
  * sync with the `switch` by hand.
+ *
+ * `tumble` (slice 25) is the fifth, and the one that shows what earns a
+ * place here: it is not a convenience over `remove` + `refill`, it is the
+ * only way to say something those two cannot say at all (see `TumbleStep`).
  *
  * It also gates which kinds a BOARD gets first refusal on: `executePlan`
  * consults `board[step.kind]` only for a kind in this list, and sends
  * everything else to the step registry. Without that gate a plugin
  * registering `toString` was silently answered by `Object.prototype`, and
- * any own method a board carried past the four outranked a registered
- * handler for that name.
+ * any own method a board carried past the known ones outranked a
+ * registered handler for that name.
  *
  * **It was six.** `setMultiplier` and `wait` were built before any
  * mechanic asked for them and none ever did: `classic`, `cascade` and the
@@ -191,6 +246,7 @@ export const KNOWN_STEP_KINDS: readonly KnownPresentationStep['kind'][] = [
   'revealWins',
   'remove',
   'refill',
+  'tumble',
 ] as const;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -226,6 +282,21 @@ function isCell(value: unknown): value is Cell {
   return isRecord(value) && isFiniteNumber(value.col) && isFiniteNumber(value.row);
 }
 
+/** One entry of `TumbleStep.fresh`: a position plus a `Board` leaf to land there. */
+function isFreshCell(value: unknown): boolean {
+  return isCell(value) && isBoardLeaf((value as unknown as Record<string, unknown>).symbol);
+}
+
+/** One entry of `TumbleStep.drops`: a column and the rows a survivor slides between. */
+function isDrop(value: unknown): boolean {
+  return (
+    isRecord(value) &&
+    isFiniteNumber(value.col) &&
+    isFiniteNumber(value.fromRow) &&
+    isFiniteNumber(value.toRow)
+  );
+}
+
 function isRevealedLine(value: unknown): value is RevealedLine {
   return (
     isRecord(value) &&
@@ -257,7 +328,7 @@ export function cellData(cell: number | string | BoardCell): { symbol: string | 
 /**
  * True for any well-formed `PresentationStep` — false for everything else,
  * never throws. "Well-formed" means two different things depending on
- * `kind`: for one of the four known kinds, the FULL shape that kind's own
+ * `kind`: for one of the known kinds, the FULL shape that kind's own
  * interface promises (a `spinTo` needs a real `board`, not just any
  * object); for anything else, only that it names a `kind` at all — this
  * function has no way to know what shape a plugin's step should be, and
@@ -286,8 +357,21 @@ export function isPresentationStep(value: unknown): value is PresentationStep {
       return Array.isArray(value.cells) && value.cells.every(isCell);
     case 'refill':
       return isBoard(value.board);
+    case 'tumble':
+      return (
+        Array.isArray(value.winning) &&
+        value.winning.every(isCell) &&
+        Array.isArray(value.removed) &&
+        value.removed.every(isCell) &&
+        Array.isArray(value.fresh) &&
+        value.fresh.every(isFreshCell) &&
+        isBoard(value.settled) &&
+        // Optional, and only checked when present: "no drops" is the
+        // gravity-derived case a cascade mechanic emits, not a malformed step.
+        (value.drops === undefined || (Array.isArray(value.drops) && value.drops.every(isDrop)))
+      );
     default:
-      // Not one of the four — not malformed BY THAT FACT alone. `value.kind`
+      // Not one of the known kinds — not malformed BY THAT FACT alone. `value.kind`
       // is already confirmed a string above, which is everything
       // `UnknownPresentationStep` requires.
       return true;

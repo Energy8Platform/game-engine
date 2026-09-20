@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { cellData, isPresentationStep } from '../src/index';
+import { KNOWN_STEP_KINDS, cellData, isPresentationStep } from '../src/index';
 
 describe('presentation steps', () => {
   it('accepts every step the two Slice-0 mechanics need', () => {
@@ -127,6 +127,68 @@ describe('presentation steps', () => {
   it('rejects a board whose record cell has a non-symbol-shaped `symbol`', () => {
     expect(isPresentationStep({ kind: 'spinTo', board: [[{ symbol: {} }]] })).toBe(false);
     expect(isPresentationStep({ kind: 'spinTo', board: [[{ symbol: [1] }]] })).toBe(false);
+  });
+
+  // Slice 25: `tumble` — the fifth known kind. One cascade round the reels
+  // board plays through the legacy `TumbleController` in a single call,
+  // instead of `remove` + `refill` (= `setBoard` twice, no gravity).
+  const TUMBLE = () => ({
+    kind: 'tumble',
+    winning: [{ col: 0, row: 0 }],
+    removed: [{ col: 0, row: 0 }],
+    drops: [{ col: 0, fromRow: 1, toRow: 2 }],
+    fresh: [{ col: 0, row: 0, symbol: 'ROCK' }],
+    settled: [['ROCK', 'PAPER', 'SCISSORS']],
+  });
+
+  it('tumble is one of the known kinds', () => {
+    expect(KNOWN_STEP_KINDS).toContain('tumble');
+  });
+
+  it('accepts a tumble step carrying every field', () => {
+    expect(isPresentationStep(TUMBLE())).toBe(true);
+  });
+
+  it('accepts a tumble with no drops — the controller derives gravity', () => {
+    const { drops: _drops, ...rest } = TUMBLE();
+    expect(isPresentationStep(rest)).toBe(true);
+  });
+
+  it('accepts a tumble whose fresh symbols are numbers or per-cell records', () => {
+    expect(
+      isPresentationStep({
+        ...TUMBLE(),
+        fresh: [
+          { col: 0, row: 0, symbol: 7 },
+          { col: 0, row: 1, symbol: { symbol: 'ORB', multiplier: 5 } },
+        ],
+      }),
+    ).toBe(true);
+  });
+
+  it('rejects a tumble missing settled, fresh, winning or removed', () => {
+    for (const field of ['settled', 'fresh', 'winning', 'removed'] as const) {
+      const step = TUMBLE() as Record<string, unknown>;
+      delete step[field];
+      expect(isPresentationStep(step), `a tumble with no ${field}`).toBe(false);
+    }
+  });
+
+  it('rejects a tumble whose settled is not a board', () => {
+    expect(isPresentationStep({ ...TUMBLE(), settled: [[1, true]] })).toBe(false);
+  });
+
+  it('rejects a tumble whose fresh cell has no position or no symbol', () => {
+    expect(isPresentationStep({ ...TUMBLE(), fresh: [{ col: 0, symbol: 'ROCK' }] })).toBe(false);
+    expect(isPresentationStep({ ...TUMBLE(), fresh: [{ col: 0, row: 0 }] })).toBe(false);
+    expect(isPresentationStep({ ...TUMBLE(), fresh: [{ col: 0, row: 0, symbol: {} }] })).toBe(
+      false,
+    );
+  });
+
+  it('rejects a tumble whose drops are malformed', () => {
+    expect(isPresentationStep({ ...TUMBLE(), drops: [{ col: 0, fromRow: 1 }] })).toBe(false);
+    expect(isPresentationStep({ ...TUMBLE(), drops: 'gravity' })).toBe(false);
   });
 
   it('accepts a revealWins line whose symbol is a name, not just a number', () => {

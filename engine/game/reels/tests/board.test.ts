@@ -39,12 +39,26 @@ function fakeReelSystem(initialBoard: LegacyReelSystem['board'] = []) {
     return cells.get(key)!;
   });
 
-  const spin = vi.fn(async (target: unknown) => {
-    calls.push(['spin', target]);
+  const spin = vi.fn(async (target: unknown, opts?: unknown) => {
+    calls.push(['spin', target, opts]);
   });
   const setBoard = vi.fn((target: LegacyReelSystem['board']) => {
     calls.push(['setBoard', target]);
     board = target;
+  });
+  // Faithful to the real facade (measured in `ReelSystem.cascade`): it assigns
+  // `board = steps[i].settledGrid` as each step settles, so — unlike `setData`
+  // or `grid.setGrid` — a cascade DOES leave `reelSystem.board` in step. That
+  // is why `tumble` needs no `remove`-style re-sync.
+  const cascade = vi.fn(
+    async (steps: { settledGrid: LegacyReelSystem['board'] }[], opts?: unknown) => {
+      calls.push(['cascade', steps, opts]);
+      const last = steps[steps.length - 1];
+      if (last) board = last.settledGrid;
+    },
+  );
+  const skip = vi.fn(() => {
+    calls.push(['skip']);
   });
 
   const reelSystem: LegacyReelSystem = {
@@ -62,6 +76,8 @@ function fakeReelSystem(initialBoard: LegacyReelSystem['board'] = []) {
     },
     spin,
     setBoard,
+    cascade,
+    skip,
   };
 
   return {
@@ -69,6 +85,8 @@ function fakeReelSystem(initialBoard: LegacyReelSystem['board'] = []) {
     calls,
     spin,
     setBoard,
+    cascade,
+    skip,
     getCell,
     cellAt: (c: number, r: number) => cells.get(`${c}:${r}`),
     bindAt: (c: number, r: number) =>
@@ -90,10 +108,15 @@ describe('boardFromReelSystem: spinTo', () => {
     });
 
     expect(spin).toHaveBeenCalledTimes(1);
-    expect(spin).toHaveBeenCalledWith([
-      [{ symbol: '1' }, { symbol: '2' }],
-      [{ symbol: '3' }, { symbol: '4' }],
-    ]);
+    expect(spin).toHaveBeenCalledWith(
+      [
+        [{ symbol: '1' }, { symbol: '2' }],
+        [{ symbol: '3' }, { symbol: '4' }],
+      ],
+      // slice 25: the legacy run options, carrying whatever tempo the step was
+      // given — `{ turbo: undefined }` is `spin(target)`'s own default.
+      { turbo: undefined },
+    );
     // no repaint was asked for: the op's own settle re-sets nothing
     expect(setBoard).not.toHaveBeenCalled();
   });
@@ -108,7 +131,9 @@ describe('boardFromReelSystem: spinTo', () => {
 
     await board.spinTo({ kind: 'spinTo', board: [['ROCK', 'PAPER']] });
 
-    expect(spin).toHaveBeenCalledWith([[{ symbol: 'ROCK' }, { symbol: 'PAPER' }]]);
+    expect(spin).toHaveBeenCalledWith([[{ symbol: 'ROCK' }, { symbol: 'PAPER' }]], {
+      turbo: undefined,
+    });
   });
 
   it('a record cell: symbol normalized, extras (multiplier, bonus, …) reach setData/spin untouched', async () => {
@@ -120,7 +145,9 @@ describe('boardFromReelSystem: spinTo', () => {
       board: [[{ symbol: 'ORB', multiplier: 5 }, { symbol: 2, bonus: 1 }]],
     });
 
-    expect(spin).toHaveBeenCalledWith([[{ symbol: 'ORB', multiplier: 5 }, { symbol: '2', bonus: 1 }]]);
+    expect(spin).toHaveBeenCalledWith([[{ symbol: 'ORB', multiplier: 5 }, { symbol: '2', bonus: 1 }]], {
+      turbo: undefined,
+    });
   });
 });
 
@@ -345,7 +372,10 @@ describe('boardFromReelSystem: repaint / cellSize', () => {
 
   it('cellSize reads grid.cellSize off the fake, square', () => {
     const { reelSystem } = fakeReelSystem();
-    const board = boardFromReelSystem({ ...reelSystem, config: { grid: { cellSize: 64 } } });
+    const board = boardFromReelSystem({
+      ...reelSystem,
+      config: { grid: { cellSize: 64 } } as unknown as LegacyReelSystem['config'],
+    });
 
     expect(board.cellSize).toEqual({ width: 64, height: 64 });
   });
@@ -456,5 +486,166 @@ describe('boardFromReelSystem: $cell bindings', () => {
     expect(bindAt(0, 0)).toHaveBeenCalledWith({ symbol: 'a' });
     expect(bindAt(0, 1)).toHaveBeenCalledWith({ symbol: 'b' });
     expect(bindAt(1, 0)).toHaveBeenCalledWith({ symbol: 'c' });
+  });
+});
+
+/**
+ * Slice 25 — `tumble`. One vocabulary step is one legacy `TumbleStep`
+ * through `ReelSystem.cascade`: the gravity slide the IDE's `remove` +
+ * `refill` (= `setBoard` twice) could never draw.
+ */
+describe('boardFromReelSystem: tumble', () => {
+  const step = () => ({
+    kind: 'tumble' as const,
+    winning: [{ col: 0, row: 0 }],
+    removed: [{ col: 0, row: 0 }],
+    drops: [{ col: 0, fromRow: 1, toRow: 2 }],
+    fresh: [
+      { col: 0, row: 0, symbol: 7 },
+      { col: 1, row: 0, symbol: { symbol: 'ORB', multiplier: 5 } },
+    ],
+    settled: [
+      [{ symbol: 'ORB', multiplier: 5 }, 'b'],
+      ['c', 2],
+    ],
+  });
+
+  it('calls cascade once with the mapped legacy TumbleStep — drops through, symbols via cellData', async () => {
+    const { reelSystem, cascade } = fakeReelSystem([[{ symbol: 'x' }, { symbol: 'y' }]]);
+    const board = boardFromReelSystem(reelSystem);
+
+    await board.tumble(step());
+
+    expect(cascade).toHaveBeenCalledTimes(1);
+    expect(cascade.mock.calls[0][0]).toEqual([
+      {
+        winningCells: [{ col: 0, row: 0 }],
+        removedCells: [{ col: 0, row: 0 }],
+        drops: [{ col: 0, fromRow: 1, toRow: 2 }],
+        // `newCells.symbol` is a bare string in the legacy step — a number
+        // stringifies, a record contributes only its symbol (its extras ride
+        // along on `settledGrid`, which is where the cell takes its data).
+        newCells: [
+          { col: 0, row: 0, symbol: '7' },
+          { col: 1, row: 0, symbol: 'ORB' },
+        ],
+        settledGrid: [
+          [{ symbol: 'ORB', multiplier: 5 }, { symbol: 'b' }],
+          [{ symbol: 'c' }, { symbol: '2' }],
+        ],
+      },
+    ]);
+  });
+
+  it('a tumble with no drops passes none — the controller derives gravity', async () => {
+    const { reelSystem, cascade } = fakeReelSystem();
+    const board = boardFromReelSystem(reelSystem);
+    const { drops: _drops, ...noDrops } = step();
+
+    await board.tumble(noDrops);
+
+    expect((cascade.mock.calls[0][0] as { drops?: unknown }[])[0].drops).toBeUndefined();
+  });
+
+  it('forwards turbo to cascade, and nothing when no opts were given', async () => {
+    const { reelSystem, cascade } = fakeReelSystem();
+    const board = boardFromReelSystem(reelSystem);
+
+    await board.tumble(step(), { turbo: true });
+    expect(cascade.mock.calls[0][1]).toEqual({ turbo: true });
+
+    await board.tumble(step());
+    expect(cascade.mock.calls[1][1]).toEqual({ turbo: undefined });
+  });
+
+  it('leaves reelSystem.board reading the settled grid, and binds every cell after', async () => {
+    const { reelSystem, bindAt, setBoard } = fakeReelSystem([[{ symbol: 'x' }, { symbol: 'y' }]]);
+    const board = boardFromReelSystem(reelSystem);
+
+    await board.tumble(step());
+
+    expect(reelSystem.board).toEqual([
+      [{ symbol: 'ORB', multiplier: 5 }, { symbol: 'b' }],
+      [{ symbol: 'c' }, { symbol: '2' }],
+    ]);
+    // `cascade` settles the board itself (unlike `setData`/`setGrid`), so no
+    // `remove`-style re-sync is needed — and none is made.
+    expect(setBoard).not.toHaveBeenCalled();
+    expect(bindAt(0, 0)).toHaveBeenCalledWith({ symbol: 'ORB', multiplier: 5 });
+    expect(bindAt(1, 1)).toHaveBeenCalledWith({ symbol: '2' });
+  });
+
+  it('a repaint asked for mid-tumble is deferred until it lands, like a spin', async () => {
+    const { reelSystem, cascade, setBoard } = fakeReelSystem([[{ symbol: 'x' }]]);
+    let land!: () => void;
+    cascade.mockImplementation(
+      () =>
+        new Promise<void>((resolve) => {
+          land = resolve;
+        }),
+    );
+    const board = boardFromReelSystem(reelSystem);
+
+    const tumbling = board.tumble(step());
+    board.repaint();
+    await new Promise((r) => setTimeout(r, 5));
+    expect(setBoard).not.toHaveBeenCalled();
+
+    land();
+    await tumbling;
+    expect(setBoard).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('boardFromReelSystem: turbo, skip, config, lastOpts', () => {
+  it('spinTo hands turbo to the legacy spin', async () => {
+    const { reelSystem, spin } = fakeReelSystem();
+    const board = boardFromReelSystem(reelSystem);
+
+    await board.spinTo({ kind: 'spinTo', board: [[1]] }, { turbo: true });
+
+    expect(spin).toHaveBeenCalledWith([[{ symbol: '1' }]], { turbo: true });
+  });
+
+  it('revealWins still runs the legacy playWin as is — turbo cannot hurry it', async () => {
+    const { reelSystem, cellAt } = fakeReelSystem();
+    const board = boardFromReelSystem(reelSystem);
+
+    await board.revealWins(
+      { kind: 'revealWins', total: 1, lines: [{ line: 0, symbol: 1, count: 1, win: 1, positions: [{ col: 0, row: 0 }] }] },
+      { turbo: true },
+    );
+
+    expect(cellAt(0, 0)!.playWin).toHaveBeenCalledTimes(1);
+  });
+
+  it('skip forwards to the legacy ReelSystem.skip', () => {
+    const { reelSystem, skip } = fakeReelSystem();
+    const board = boardFromReelSystem(reelSystem);
+
+    board.skip();
+
+    expect(skip).toHaveBeenCalledTimes(1);
+  });
+
+  it('config is the reel system\'s own, read through', () => {
+    const { reelSystem } = fakeReelSystem();
+    const config = { grid: { cellSize: 64 } } as unknown as LegacyReelSystem['config'];
+    const board = boardFromReelSystem({ ...reelSystem, config });
+
+    expect(board.config).toBe(config);
+  });
+
+  it('lastOpts records the opts the last method was given — undefined until one runs', async () => {
+    const { reelSystem } = fakeReelSystem();
+    const board = boardFromReelSystem(reelSystem);
+
+    expect(board.lastOpts).toBeUndefined();
+
+    await board.spinTo({ kind: 'spinTo', board: [[1]] }, { turbo: true });
+    expect(board.lastOpts).toEqual({ turbo: true });
+
+    await board.refill({ kind: 'refill', board: [[1]] });
+    expect(board.lastOpts).toBeUndefined();
   });
 });

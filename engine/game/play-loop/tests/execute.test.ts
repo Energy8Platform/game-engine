@@ -17,6 +17,9 @@ function fakeBoard() {
     refill: vi.fn(async () => {
       calls.push('refill');
     }),
+    tumble: vi.fn(async () => {
+      calls.push('tumble');
+    }),
   };
 }
 
@@ -59,7 +62,9 @@ describe('executePlan', () => {
   it('passes each step its own payload', async () => {
     const board = fakeBoard();
     await executePlan([{ kind: 'refill', board: [[7]] }], board);
-    expect(board.refill).toHaveBeenCalledWith({ kind: 'refill', board: [[7]] });
+    // Two arguments since slice 25: the step, and the tempo the plan plays at
+    // (`undefined` when the caller named none).
+    expect(board.refill).toHaveBeenCalledWith({ kind: 'refill', board: [[7]] }, undefined);
   });
 
   it('reports a step the board cannot perform and keeps going', async () => {
@@ -134,5 +139,79 @@ describe('executePlan', () => {
     expect(problems).toHaveLength(1);
     expect(problems[0].message).toContain('malformed');
     expect(board.spinTo).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * Slice 25 — tempo. A presentation can be hurried (`opts.turbo`) and the
+ * `tumble` kind joined the vocabulary. Both are pure pass-through here:
+ * `executePlan` decides nothing about what turbo MEANS, it only makes sure
+ * the one thing that does — the board, or a plugin's handler — is told.
+ */
+describe('executePlan: StepOpts and tumble', () => {
+  it('hands every board method the opts it was called with', async () => {
+    const board = fakeBoard();
+
+    await executePlan(
+      [
+        { kind: 'spinTo', board: [[1]] },
+        {
+          kind: 'tumble',
+          winning: [],
+          removed: [{ col: 0, row: 0 }],
+          fresh: [{ col: 0, row: 0, symbol: 1 }],
+          settled: [[1]],
+        },
+      ],
+      board,
+      undefined,
+      { turbo: true },
+    );
+
+    expect(board.calls).toEqual(['spinTo', 'tumble']);
+    expect(board.spinTo).toHaveBeenCalledWith({ kind: 'spinTo', board: [[1]] }, { turbo: true });
+    expect(board.tumble).toHaveBeenCalledWith(expect.objectContaining({ kind: 'tumble' }), {
+      turbo: true,
+    });
+  });
+
+  it('opts are undefined when the caller passes none — the pre-tempo call, unchanged', async () => {
+    const board = fakeBoard();
+    await executePlan([{ kind: 'spinTo', board: [[1]] }], board);
+    expect(board.spinTo).toHaveBeenCalledWith({ kind: 'spinTo', board: [[1]] }, undefined);
+  });
+
+  it("hands a registered handler the same opts, after the board's own refusal", async () => {
+    const board = fakeBoard();
+    const run = vi.fn(async () => {});
+    const registry = {
+      register: () => () => {},
+      has: () => true,
+      get: (kind: string) => (kind === 'zap' ? { kind, run } : undefined),
+      kinds: () => ['zap'],
+      collisions: () => [],
+    };
+
+    await executePlan([{ kind: 'zap' }], board, registry, { turbo: true });
+
+    expect(run).toHaveBeenCalledWith({ kind: 'zap' }, board, { turbo: true });
+  });
+
+  it('a tumble the board has no method for is the missing-method diagnostic, not an unknown kind', async () => {
+    const board = fakeBoard() as Partial<ReturnType<typeof fakeBoard>>;
+    delete board.tumble;
+    const [problem] = await executePlan(
+      [
+        {
+          kind: 'tumble',
+          winning: [],
+          removed: [],
+          fresh: [],
+          settled: [[1]],
+        },
+      ],
+      board as never,
+    );
+    expect(problem.message).toContain('board cannot perform step "tumble"');
   });
 });

@@ -20,6 +20,9 @@ function fakeBoard() {
     remove: vi.fn(async () => {
       calls.push('remove');
     }),
+    tumble: vi.fn(async () => {
+      calls.push('tumble');
+    }),
     refill: vi.fn(async () => {
       calls.push('refill');
     }),

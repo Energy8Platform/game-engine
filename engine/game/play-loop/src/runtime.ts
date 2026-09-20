@@ -37,6 +37,13 @@
  * before. Nothing about the two-argument call changed; what changed is what
  * it now consults.
  *
+ * **Slice 25 adds a fourth thing: tempo.** `execute` carries `StepOpts`
+ * through to the board, and `ctx.play.skip()` collapses whatever is
+ * presenting — reachable from a page directly, and from the flow bus's
+ * `ui.skip`, which this row subscribes to leniently (see `apply`). A skip
+ * is not a flow node: it has to land WHILE the flow is busy, which is the
+ * one moment a flow node cannot run.
+ *
  * **The precedence rule is untouched.** `executePlan` gives the board first
  * refusal on every kind and reaches a registry only for kinds the board has
  * no method for, so registering `spinTo` here still cannot replace the
@@ -60,7 +67,7 @@
  * the `inject` field this row deliberately does not have.
  */
 import type { Context } from 'cordis';
-import type { Diagnostic, PresentationStep } from '@energy8engine/contracts';
+import type { Diagnostic, PresentationStep, StepOpts } from '@energy8engine/contracts';
 import type { SpinLog, SpinLogEntry } from '@energy8engine/spin-log';
 import { reportAll, type DiagnosticsService } from '@energy8engine/diagnostics';
 // Type-only and fully erased — the same device `first-slot`'s `main.ts`
@@ -88,7 +95,24 @@ export interface PlayService {
     plan: PresentationStep[],
     board: BoardApi | undefined,
     registry?: BoardStepRegistry,
+    opts?: StepOpts,
   ): Promise<Diagnostic[]>;
+  /**
+   * Collapse the presentation that is running right now: the board this
+   * row last played a plan against (`BoardApi.skip` — the legacy
+   * `ReelSystem.skip()` one level down) and every handler registered for a
+   * plugin's step kind. Both are optional, and anything that cannot be
+   * hurried is simply passed over.
+   *
+   * **The result still lands.** A skip shortens the watching, it does not
+   * abandon the round — `execute`'s promise resolves as usual, with the
+   * same diagnostics, once the collapsed steps fall through.
+   *
+   * Never throws: it is called from a UI handler (a second tap on Spin,
+   * `ui.skip` on the flow bus), and one board or handler refusing to be
+   * hurried must not cost the others theirs.
+   */
+  skip(): void;
   /**
    * The registry `execute` consults by default — the same object
    * `ctx.steps` names. Exposed here as well so a caller holding the play
@@ -124,6 +148,11 @@ declare module 'cordis' {
 
 export const name = 'play-loop';
 
+/** The flow bus, as much of it as this row uses. Not cordis's own `ctx.events`. */
+interface FlowBus {
+  on(name: string, fn: (payload: unknown) => void): () => void;
+}
+
 export function apply(ctx: Context): void {
   const steps = createBoardStepRegistry();
 
@@ -132,9 +161,66 @@ export function apply(ctx: Context): void {
   // uses, and compose in either order relative to this row.
   ctx.provide('steps', steps);
 
+  // What `skip()` aims at: whatever the LAST `execute` ran against. The
+  // board is handed in per call (see this file's module doc on
+  // `requires: ["board"]`), so there is nothing else to remember it by;
+  // the registry is remembered too because a caller may legitimately pass
+  // its own instead of the composed `steps`.
+  let lastBoard: BoardApi | undefined;
+  let lastRegistry: BoardStepRegistry = steps;
+
+  const hurry = (target: { skip?(): void } | undefined) => {
+    try {
+      target?.skip?.();
+    } catch {
+      // Swallowed deliberately: one thing refusing to be hurried must not
+      // cost the rest of them their skip, and `skip()` has no return value
+      // to report it through. A board that throws here has already failed
+      // its plan's own step, which IS reported, through `execute`.
+    }
+  };
+
+  const skip = () => {
+    hurry(lastBoard);
+    try {
+      for (const kind of lastRegistry.kinds()) hurry(lastRegistry.get(kind));
+    } catch {
+      // `kinds()`/`get()` are a third party's, same as `collisions()` in
+      // `executePlan` — see the guard there.
+    }
+  };
+
+  // The flow bus is the only channel a skip can arrive on DURING a run: a
+  // flow `on` node cannot fire while the flow is busy (`busy: ignore`),
+  // which is exactly when a skip means anything. Read leniently, because
+  // `events` is `flow1`'s and this row does not depend on it.
+  //
+  // Armed TWICE on purpose. In `e8-base` `playloop1` is listed BEFORE
+  // `flow1`, so at apply time there is usually no bus yet and the lookup
+  // below answers `undefined` — the second arming, on the first `execute`,
+  // is what actually catches it (by then a flow node is what called us).
+  // A composition that provides the bus first is caught by the first.
+  let offSkip: (() => void) | undefined;
+  const armSkip = () => {
+    if (offSkip) return;
+    offSkip = (ctx.reflect.get('events', false) as FlowBus | undefined)?.on('ui.skip', () =>
+      skip(),
+    );
+  };
+  ctx.effect(() => {
+    armSkip();
+    return () => {
+      offSkip?.();
+      offSkip = undefined;
+    };
+  }, 'play:ui-skip');
+
   ctx.provide('play', {
-    async execute(plan, board, registry = steps) {
-      const problems = await executePlan(plan, board, registry);
+    async execute(plan, board, registry = steps, opts) {
+      lastBoard = board;
+      lastRegistry = registry;
+      armSkip();
+      const problems = await executePlan(plan, board, registry, opts);
       // This row IS `executePlan`'s caller — the nearest point that both
       // knows a plan just ran and can reach the composition's shared
       // `diagnostics` service, so every game gets this for free rather
@@ -151,6 +237,7 @@ export function apply(ctx: Context): void {
       return problems;
     },
     steps,
+    skip,
     record(entry) {
       try {
         // Looked up per call, not captured at apply time. Row order

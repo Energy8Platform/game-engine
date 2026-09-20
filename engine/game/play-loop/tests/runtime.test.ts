@@ -330,3 +330,143 @@ describe('play-loop runtime half: reporting to the diagnostics service', () => {
     await ctx.fiber.dispose();
   });
 });
+
+/**
+ * Slice 25 — tempo. Two things the row gains: `execute` carries `StepOpts`
+ * through to the board, and `skip()` collapses whatever is presenting right
+ * now — the board's own `skip` (the legacy `ReelSystem.skip()`, one level
+ * down) plus every registered handler's optional one.
+ *
+ * The `ui.skip` subscription is lenient on purpose and armed twice: a skip
+ * has to land DURING a run, which a flow `on` node cannot do (`busy:
+ * ignore`), so the row subscribes to the flow bus itself — and in `e8-base`
+ * `playloop1` composes BEFORE `flow1`, so at apply time there is no bus to
+ * subscribe to yet. Hence the second arming, on the first `execute`.
+ */
+describe('play-loop runtime half: turbo and skip', () => {
+  it('execute forwards StepOpts to the board', async () => {
+    const ctx = new Context();
+    await ctx.plugin(runtime);
+
+    const spinTo = vi.fn(async () => {});
+    await ctx.play.execute(
+      [{ kind: 'spinTo', board: [[1]] }],
+      { spinTo } as unknown as BoardApi,
+      undefined,
+      {
+        turbo: true,
+      },
+    );
+
+    expect(spinTo).toHaveBeenCalledWith({ kind: 'spinTo', board: [[1]] }, { turbo: true });
+
+    await ctx.fiber.dispose();
+  });
+
+  it('skip() reaches the last board and every registered handler', async () => {
+    const ctx = new Context();
+    await ctx.plugin(runtime);
+
+    const boardSkip = vi.fn();
+    const handlerSkip = vi.fn();
+    ctx.steps.register({ kind: 'reelStep', run: async () => {}, skip: handlerSkip });
+    // A handler with no `skip` at all must not break the fan-out.
+    ctx.steps.register({ kind: 'quiet', run: async () => {} });
+
+    await ctx.play.execute([{ kind: 'spinTo', board: [[1]] }], {
+      spinTo: async () => {},
+      skip: boardSkip,
+    } as unknown as BoardApi);
+    ctx.play.skip();
+
+    expect(boardSkip).toHaveBeenCalledTimes(1);
+    expect(handlerSkip).toHaveBeenCalledTimes(1);
+
+    await ctx.fiber.dispose();
+  });
+
+  it('skip() before anything has run, and a board that refuses to be hurried, are both quiet', async () => {
+    const ctx = new Context();
+    await ctx.plugin(runtime);
+
+    expect(() => ctx.play.skip()).not.toThrow();
+
+    const handlerSkip = vi.fn();
+    ctx.steps.register({ kind: 'reelStep', run: async () => {}, skip: handlerSkip });
+    await ctx.play.execute([{ kind: 'spinTo', board: [[1]] }], {
+      spinTo: async () => {},
+      skip: () => {
+        throw new Error('nope');
+      },
+    } as unknown as BoardApi);
+
+    expect(() => ctx.play.skip()).not.toThrow();
+    // the throwing board did not cost the handlers their skip
+    expect(handlerSkip).toHaveBeenCalledTimes(1);
+
+    await ctx.fiber.dispose();
+  });
+
+  it('a `ui.skip` on the flow bus skips — bus composed before this row', async () => {
+    const ctx = new Context();
+    const listeners = new Map<string, (payload: unknown) => void>();
+    ctx.provide('events', {
+      emit: (name: string, payload?: unknown) => listeners.get(name)?.(payload),
+      on: (name: string, fn: (payload: unknown) => void) => {
+        listeners.set(name, fn);
+        return () => listeners.delete(name);
+      },
+    });
+    await ctx.plugin(runtime);
+
+    const boardSkip = vi.fn();
+    await ctx.play.execute([{ kind: 'spinTo', board: [[1]] }], {
+      spinTo: async () => {},
+      skip: boardSkip,
+    } as unknown as BoardApi);
+    (ctx.reflect.get('events', false) as { emit(n: string): void }).emit('ui.skip');
+
+    expect(boardSkip).toHaveBeenCalledTimes(1);
+
+    await ctx.fiber.dispose();
+  });
+
+  it('…and when the bus lands AFTER this row — the e8-base order — the first execute arms it', async () => {
+    const ctx = new Context();
+    await ctx.plugin(runtime);
+
+    const listeners = new Map<string, (payload: unknown) => void>();
+    ctx.provide('events', {
+      emit: (name: string, payload?: unknown) => listeners.get(name)?.(payload),
+      on: (name: string, fn: (payload: unknown) => void) => {
+        listeners.set(name, fn);
+        return () => listeners.delete(name);
+      },
+    });
+
+    const boardSkip = vi.fn();
+    await ctx.play.execute([{ kind: 'spinTo', board: [[1]] }], {
+      spinTo: async () => {},
+      skip: boardSkip,
+    } as unknown as BoardApi);
+    (ctx.reflect.get('events', false) as { emit(n: string): void }).emit('ui.skip');
+
+    expect(boardSkip).toHaveBeenCalledTimes(1);
+
+    await ctx.fiber.dispose();
+  });
+
+  it('no flow bus at all is not an error — the row still plays plans', async () => {
+    const ctx = new Context();
+    await ctx.plugin(runtime);
+
+    const diagnostics = await ctx.play.execute(
+      [{ kind: 'spinTo', board: [[1]] }],
+      fakeBoard() as unknown as BoardApi,
+    );
+
+    expect(diagnostics).toEqual([]);
+
+    await ctx.fiber.dispose();
+  });
+});

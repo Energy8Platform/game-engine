@@ -3,7 +3,7 @@
  * happen" (a mechanic's plan) and "what the screen does" (a board).
  *
  * `BoardApi` declares one method per step kind in the vocabulary, each
- * taking the whole step object as its only argument. This file defines the
+ * taking the whole step object plus the tempo the plan is playing at. This file defines the
  * contract; the real implementation (wrapping the legacy pixi reel system)
  * is Task 9's, and a fake recording its calls is what this file's own tests
  * run against — pixi does not initialise usefully in jsdom, and animation
@@ -17,9 +17,9 @@
  * matter what the plan contains (including a step whose `kind` matches
  * nothing in the vocabulary).
  *
- * **The registry.** `BoardApi` is the closed vocabulary two shipped
- * mechanics stand on — four kinds, four methods, not touched here. A third
- * kind (task 9's `reelStep` among them) has nowhere to land on `BoardApi`
+ * **The registry.** `BoardApi` is the closed vocabulary the shipped
+ * mechanics stand on — one method per known kind, not opened here. Any
+ * OTHER kind (task 9's `reelStep` among them) has nowhere to land on `BoardApi`
  * without editing this package, so `executePlan` also accepts a
  * `BoardStepRegistry`: a plugin registers a `StepHandler` for the kind
  * `BoardApi` doesn't have, and `executePlan` runs it instead of reporting
@@ -41,19 +41,34 @@ import {
   type RemoveStep,
   type RevealWinsStep,
   type SpinToStep,
+  type StepOpts,
+  type TumbleStep,
 } from '@energy8engine/contracts';
 import { createRegistry } from '@energy8engine/registry';
 
 /**
  * What a board must offer to play a `PresentationPlan`: one async method
- * per step kind, each taking the whole step object it handles. Task 9
- * implements this against the legacy pixi reel system.
+ * per step kind, each taking the whole step object it handles plus the
+ * `StepOpts` the plan is being played at. Task 9 implements this against
+ * the legacy pixi reel system.
+ *
+ * `opts` is optional on every method for one practical reason: a caller
+ * that passes none (every caller before slice 25) hands `undefined`
+ * through, and a board that ignores tempo simply declares one parameter.
+ *
+ * `skip` is optional for the honest reason: not every board can be hurried.
+ * One that can collapses whatever it is animating to its end state — the
+ * result still lands, the presentation just stops taking time. See
+ * `PlayService.skip` (`./runtime.ts`) for who calls it.
  */
 export interface BoardApi {
-  spinTo(step: SpinToStep): Promise<void>;
-  revealWins(step: RevealWinsStep): Promise<void>;
-  remove(step: RemoveStep): Promise<void>;
-  refill(step: RefillStep): Promise<void>;
+  spinTo(step: SpinToStep, opts?: StepOpts): Promise<void>;
+  revealWins(step: RevealWinsStep, opts?: StepOpts): Promise<void>;
+  remove(step: RemoveStep, opts?: StepOpts): Promise<void>;
+  refill(step: RefillStep, opts?: StepOpts): Promise<void>;
+  tumble(step: TumbleStep, opts?: StepOpts): Promise<void>;
+  /** Collapse whatever is presenting right now to its end state. */
+  skip?(): void;
 }
 
 /**
@@ -81,7 +96,14 @@ export interface BoardApi {
  */
 export interface StepHandler {
   kind: string;
-  run(step: PresentationStep, board: unknown): Promise<void>;
+  run(step: PresentationStep, board: unknown, opts?: StepOpts): Promise<void>;
+  /**
+   * Collapse this handler's in-flight presentation, if it can be hurried at
+   * all — the same bargain `BoardApi.skip` makes, and optional for the same
+   * reason. A handler implemented with `await` and no cancellable animation
+   * simply has none, and `PlayService.skip` skips over it.
+   */
+  skip?(): void;
 }
 
 /**
@@ -156,7 +178,7 @@ export interface BoardStepRegistry {
   /**
    * Every kind something is currently registered for. What lets an
    * "unknown kind" diagnostic name a plugin's OWN registered kinds
-   * alongside the built-in four — see `knownKindsList` below — rather than
+   * alongside the built-in ones — see `knownKindsList` below — rather than
    * only ever pointing a typo (`reelStap`) at kinds it can't have meant
    * (`spinTo`) while staying silent about the one it probably did
    * (`reelStep`).
@@ -238,12 +260,12 @@ export function createBoardStepRegistry(): BoardStepRegistry {
 }
 
 /**
- * The kinds an "unknown kind" diagnostic can point at: the four `BoardApi`
+ * The kinds an "unknown kind" diagnostic can point at: the ones `BoardApi`
  * always has, plus whatever `registry` currently holds. Without the
  * second half, a project that registers `reelStep` and then typos it as
  * `reelStap` would be told about `spinTo, revealWins, …` — true, but not
  * the one kind the typo was actually reaching for. A `Set` dedupes the
- * unlikely case of a registry also holding one of the four — reachable
+ * unlikely case of a registry also holding a known one — reachable
  * only against a board that is missing a method its own interface
  * declares, since a board that HAS the method always wins it (see
  * `executePlan`), and "known" in the sense this message means either way.
@@ -256,7 +278,7 @@ function knownKindsList(registry: BoardStepRegistry | undefined): string {
   return [...kinds].join(', ');
 }
 
-type BoardMethod = (step: PresentationStep) => Promise<void>;
+type BoardMethod = (step: PresentationStep, opts?: StepOpts) => Promise<void>;
 
 /**
  * Plays `plan` against `board`, one step at a time, awaiting each before
@@ -281,6 +303,12 @@ type BoardMethod = (step: PresentationStep) => Promise<void>;
  * on is exactly the kind of failure this function promises to report as
  * data, not throw on.
  *
+ * `opts` is the plan's tempo (slice 25), passed through untouched to
+ * whichever method or handler performs each step. This function decides
+ * nothing about what it means — see `StepOpts` in
+ * `@energy8engine/contracts`. Omitted, every step is handed `undefined`,
+ * which is exactly the call every caller made before it existed.
+ *
  * `registry` is optional, and reached only after the board has had its
  * refusal: for a kind in `KNOWN_STEP_KINDS`, that means the board carries
  * no method for it; for any other kind, the board is not asked at all
@@ -300,6 +328,7 @@ export async function executePlan(
   plan: PresentationStep[],
   board: BoardApi | undefined,
   registry?: BoardStepRegistry,
+  opts?: StepOpts,
 ): Promise<Diagnostic[]> {
   // Read before the `!board` early return, on purpose: a collision is a
   // fact about the composition, not about this plan, so it must not be
@@ -374,8 +403,8 @@ export async function executePlan(
     // the plan. See `tests/registry.test.ts`'s "a registry whose get()
     // throws" and "a board whose property lookup throws".
     try {
-      // The board gets first refusal on the FOUR KINDS `BoardApi`
-      // declares, and only those. A registered handler is consulted after
+      // The board gets first refusal on the kinds `BoardApi` declares, and
+      // only those. A registered handler is consulted after
       // the board has said it has nothing, never before: reversing that
       // would let a plugin's registration win over `spinTo` (or any other
       // built-in) for every game that loads it, silently. See this file's
@@ -392,13 +421,13 @@ export async function executePlan(
       //    member is a function, so `typeof method === 'function'` held
       //    and `Object.prototype.toString.call(board)` ran instead, which
       //    returns a string rather than throwing, so nothing complained;
-      //  - and any own method a board happens to carry past the four
+      //  - and any own method a board happens to carry past the known ones
       //    outranked a plugin's handler for that name. Not hypothetical:
       //    `@energy8engine/reels`' `ReelsBoard` carries `destroy()`, so a
       //    step kind `destroy` would have torn the board down.
       //
       // Gating on the vocabulary makes the rule exactly what both docs
-      // already claimed — the four go to the board, everything else goes
+      // already claimed — the known kinds go to the board, everything else goes
       // to the registry — instead of "whatever the board object answers
       // to", which is a wider set than anyone writes down.
       const isKnownKind = (KNOWN_STEP_KINDS as readonly string[]).includes(step.kind);
@@ -407,14 +436,14 @@ export async function executePlan(
         : undefined;
 
       if (typeof method === 'function') {
-        await method.call(board, step);
+        await method.call(board, step, opts);
         continue;
       }
 
       const handler = registry?.get(step.kind);
 
       if (handler) {
-        await handler.run(step, board);
+        await handler.run(step, board, opts);
         continue;
       }
 
