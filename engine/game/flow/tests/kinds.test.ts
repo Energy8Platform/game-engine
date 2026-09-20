@@ -180,7 +180,7 @@ describe('built-in kinds', () => {
   });
 
   const stepProps = (props: Record<string, unknown> = {}) =>
-    kind('step').schema(props) as { roundId: string; action: string; betLevel?: string };
+    kind('step').schema(props) as { roundId: string; action: string };
 
   it("step: a bare node defaults roundId/action off vars.result (`nextActions.0` through the array)", async () => {
     const { rc } = runCtx({}, { result: { roundId: 'r-1', nextActions: ['free_spin', 'spin'] } });
@@ -228,29 +228,6 @@ describe('built-in kinds', () => {
     expect(rc2.report).toHaveBeenCalledTimes(1);
     expect(rc2.fetchFn).not.toHaveBeenCalled();
     expect(out2).toEqual({ out: 'failed', vars: { error: "'step' has no action" } });
-  });
-
-  it("step: betLevel behaves exactly like spin's — literal converted, $path read, non-numeric reported and omitted", async () => {
-    const { rc } = runCtx({}, { result: { roundId: 'r-1', nextActions: ['spin'] }, bet: 2 });
-    const bodies: unknown[] = [];
-    rc.fetchFn = vi.fn(async (_url: unknown, init?: RequestInit) => {
-      bodies.push(JSON.parse(init!.body as string));
-      return { ok: true, json: async () => ({}) };
-    }) as unknown as typeof fetch;
-
-    await kind('step').run!(stepProps({ betLevel: '5' }), rc);
-    expect(bodies.at(-1)).toEqual({ action: 'spin', roundId: 'r-1', betLevel: 5 });
-
-    await kind('step').run!(stepProps({ betLevel: '$bet' }), rc);
-    expect(bodies.at(-1)).toEqual({ action: 'spin', roundId: 'r-1', betLevel: 2 });
-
-    const out = await kind('step').run!(stepProps({ betLevel: 'abc' }), rc);
-    expect(rc.report).toHaveBeenCalledWith('betLevel "abc" is not a number');
-    expect(bodies.at(-1)).toEqual({ action: 'spin', roundId: 'r-1' });
-    expect(out).toEqual({
-      out: 'result',
-      vars: { result: {}, request: { action: 'spin', roundId: 'r-1' } },
-    });
   });
 
   it('step: a thrown fetch leaves by failed with the message, same as spin', async () => {

@@ -174,8 +174,8 @@ async function postSpin(
 /**
  * Resolves a `betLevel` prop (a numeric literal or `$path`) into
  * `request.betLevel`, converting a literal string with `Number()` and
- * reporting + omitting one that isn't a number. Shared by `spin` and `step`
- * — both take `betLevel` the same way.
+ * reporting + omitting one that isn't a number. `spin`'s own — `step` has
+ * no `betLevel` prop (see its own doc: a `Step` carries no bet on the wire).
  */
 function applyBetLevel(
   betLevelProp: string | undefined,
@@ -224,8 +224,13 @@ const spin: FlowNodeKind<{ action: string; betLevel?: string }> = {
  * `nextActions.0` segment into the array), so a bare node needs no props;
  * either can still be a literal or a different `$path` for a flow that
  * wants to choose the next action itself (a bonus pick, say).
+ *
+ * No `betLevel` prop: a step keeps the round's bet. A gRPC `Step` carries
+ * `round_id, action, params_json, request_id` and nothing else — there is
+ * no bet field on the wire for it to reach (`e8server.ts`'s
+ * `RoundStepRequest`) — so the prop would be dead the way `spin`'s is not.
  */
-const step: FlowNodeKind<{ roundId: string; action: string; betLevel?: string }> = {
+const step: FlowNodeKind<{ roundId: string; action: string }> = {
   kind: 'step',
   schema: Schema.object({
     roundId: Schema.string()
@@ -234,7 +239,6 @@ const step: FlowNodeKind<{ roundId: string; action: string; betLevel?: string }>
     action: Schema.string()
       .default('$result.nextActions.0')
       .description('next action name (a literal), or `$path` to read a var'),
-    betLevel: Schema.string().description('bet level (a number), or `$path` to read a var'),
   }),
   outs: ['result', 'failed'],
   async run(p, { vars, fetchFn, report }) {
@@ -249,7 +253,6 @@ const step: FlowNodeKind<{ roundId: string; action: string; betLevel?: string }>
       return { out: 'failed', vars: { error: "'step' has no action" } };
     }
     const request: Record<string, unknown> = { action, roundId };
-    applyBetLevel(p.betLevel, vars, request, report);
     return postSpin(request, fetchFn);
   },
 };

@@ -142,5 +142,6 @@ test('a GameSpec project — spec.json + logic-only script.spin — boots and sp
   const outcome = await frame.evaluate(() => (window as any).__e8.spin());
   expect(outcome).toEqual({ out: 'next' });
 
+  await expect(page.getByTestId('diagnostics-panel')).toBeVisible();
   await expect(specOrSchemaError(page)).toHaveCount(0);
 });

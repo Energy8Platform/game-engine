@@ -320,4 +320,39 @@ describe('playRounds', () => {
       { severity: 'error', plugin: 'session', where: 'play', message: 'e8-server died' },
     ]);
   });
+
+  it('an incomplete round offering no next action stops there — not another play() call, not discarded', async () => {
+    const play = scripted([
+      // Opens the round: not complete, and nothing to step with. If the
+      // loop guard is missing `nextActions.length > 0`, it calls `play`
+      // again with `action: undefined` — `scripted` throws when that
+      // happens, since only one response is queued here.
+      {
+        result: result(0.5, {
+          totalWin: 0.5,
+          roundComplete: false,
+          nextActions: [],
+          roundId: 'r1',
+        }),
+      },
+    ]);
+    const { rounds, diagnostics } = await playRounds(1, { gameId: 'g', action: 'spin', betLevel: 1 }, play);
+    expect(diagnostics).toEqual([]); // playRounds itself reports nothing on this path
+    expect(rounds).toHaveLength(1); // pushed whole, same as a completed round
+    expect(rounds[0]).toHaveLength(1);
+    expect(rounds[0][0]).toMatchObject({ roundId: 'r1', roundComplete: false });
+
+    // summarise is what turns it into a diagnostic — a different message
+    // than the step-cap one, since the round never reached the cap.
+    const s = summarise(rounds);
+    expect(s.incompleteRounds).toBe(1);
+    expect(s.diagnostics).toEqual([
+      {
+        severity: 'warning',
+        plugin: 'compute',
+        where: 'roundComplete',
+        message: 'round r1 did not complete: no next action',
+      },
+    ]);
+  });
 });

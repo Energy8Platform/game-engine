@@ -7,6 +7,7 @@
  * places, for the reasons that module's doc argues once.
  */
 import { readFile } from 'node:fs/promises';
+import { join } from 'node:path';
 import { diagnostic, type Diagnostic, type SpinSchema } from '@energy8engine/contracts';
 import { checkSource } from '../plugins/schema';
 import { assemble } from '../plugins/spec';
@@ -14,10 +15,12 @@ import { assemble } from '../plugins/spec';
 export interface CheckInput {
   /**
    * Absolute or cwd-relative path to a `.spin`. Omitted, the project's own
-   * math is checked: `game/script.spin`, or — when `game/spec.json` is a
-   * `GameSpec` — the `.e8/game/script.spin` the host assembles from it,
-   * which is the only form of that game the compiler would accept. See
-   * `plugins/spec.ts`.
+   * `game/script.spin` is checked — always the AUTHORED file, GameSpec
+   * project or not: `checkSource`'s parser only reads declarations and
+   * skips every `const` (all the prelude holds), so it already yields the
+   * full schema straight from the author's file, at the author's own line
+   * numbers — never the `.e8/game/script.spin` assembly (shifted lines,
+   * a filename the explorer skips). See `plugins/spec.ts`.
    */
   file?: string;
   /** Project directory the default `file` is resolved against. Default `process.cwd()`. */
@@ -34,10 +37,12 @@ export async function check(input: CheckInput): Promise<CheckResult> {
   // `assemble` only runs for the default file: an explicit path is checked
   // exactly as given, and never writes anything. Its own diagnostics lead
   // the list — a `game/spec.json` that could not produce a prelude is the
-  // first thing wrong with this project, and it is the reason the file
-  // below is the authored logic rather than the assembly.
-  const assembled = input.file === undefined ? await assemble(input.cwd ?? process.cwd()) : null;
-  const file = input.file ?? assembled!.spinFile;
+  // first thing wrong with this project — but its `spinFile` is NOT what
+  // gets read below: the default `file` is always the authored
+  // `game/script.spin`, GameSpec or not (see `CheckInput.file`'s doc).
+  const cwd = input.cwd ?? process.cwd();
+  const assembled = input.file === undefined ? await assemble(cwd) : null;
+  const file = input.file ?? join(cwd, 'game', 'script.spin');
   const fromSpec = assembled?.diagnostics ?? [];
   let source: string;
   try {

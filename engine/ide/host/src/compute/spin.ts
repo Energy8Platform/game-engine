@@ -82,15 +82,18 @@ export const MAX_STEPS_PER_ROUND = 500;
 /**
  * The numbers of a report from the rounds played — the part of `spin` that
  * is pure, so it can be tested with round shapes no fixture produces (a
- * round stuck past the step cap, without a binary). Each entry in `rounds`
- * is one round's full response sequence in play order: the opening
- * response, then every `Step` response — `spin`'s loop stops appending once
- * `roundComplete` is `true` or `MAX_STEPS_PER_ROUND` is reached, so a
- * round's LAST entry still not `roundComplete` means the cap was hit.
- * `win` numbers are each round's FINAL `totalWin` (a mid-round `Step`'s
- * `totalWin` is only the running total); `stages` tallies every response,
- * not just finals. `diagnostics` holds one entry per capped round; `spin`
- * prepends its own (session, input).
+ * round stuck past the step cap, or one offering no next action, without a
+ * binary). Each entry in `rounds` is one round's full response sequence in
+ * play order: the opening response, then every `Step` response —
+ * `playRounds`'s loop stops appending once `roundComplete` is `true`,
+ * `MAX_STEPS_PER_ROUND` is reached, or the last response offered no
+ * `nextActions` to step with, so a round's LAST entry still not
+ * `roundComplete` means one of the latter two. `win` numbers are each
+ * round's FINAL `totalWin` (a mid-round `Step`'s `totalWin` is only the
+ * running total); `stages` tallies every response, not just finals.
+ * `diagnostics` holds one entry per round left incomplete — the step cap
+ * or no next action, told apart by whether the round actually reached
+ * `MAX_STEPS_PER_ROUND` responses; `spin` prepends its own (session, input).
  */
 export function summarise(rounds: SpinResult[][]): Omit<SpinReport, 'bet' | 'seed'> {
   const finals = rounds.map((r) => r[r.length - 1]);
@@ -102,15 +105,18 @@ export function summarise(rounds: SpinResult[][]): Omit<SpinReport, 'bet' | 'see
     steps += round.length - 1;
     for (const r of round) stages[r.stage] = (stages[r.stage] ?? 0) + 1;
   }
-  const incomplete = finals.filter((r) => !r.roundComplete);
-  const diagnostics: Diagnostic[] = incomplete.map((r) =>
-    diagnostic(
-      'warning',
-      'compute',
-      'roundComplete',
-      `round ${r.roundId} did not complete in ${MAX_STEPS_PER_ROUND} steps`,
-    ),
-  );
+  const incomplete = rounds.filter((round) => !round.at(-1)!.roundComplete);
+  const diagnostics: Diagnostic[] = incomplete.map((round) => {
+    const r = round.at(-1)!;
+    // Capped: the round actually reached MAX_STEPS_PER_ROUND responses.
+    // Anything shorter and still incomplete stopped for the other reason
+    // `playRounds` can stop early on — no `nextActions` to step with.
+    const reason =
+      round.length > MAX_STEPS_PER_ROUND
+        ? `did not complete in ${MAX_STEPS_PER_ROUND} steps`
+        : 'did not complete: no next action';
+    return diagnostic('warning', 'compute', 'roundComplete', `round ${r.roundId} ${reason}`);
+  });
   return {
     spins: wins.length,
     steps,
@@ -133,14 +139,18 @@ export type PlaySpin = (
 
 /**
  * Plays `n` rounds via `play`, stepping each one forward on its own
- * reported `nextActions[0]` until it completes or hits `MAX_STEPS_PER_ROUND`
- * — see `summarise`'s doc for what a capped round's last entry looks like.
- * Pure apart from `play` itself, so a fake `play` (a canned queue of
- * responses, no session/binary) can test the loop's own behavior, e.g. a
- * `Step` failing partway through a round: that discards the round WHOLE —
- * same as a failed opening call — never a partial entry in `rounds`, and
- * ends the run there (the same "report covers what was played" contract a
- * failure has always had, now also true mid-round).
+ * reported `nextActions[0]` until it completes, hits
+ * `MAX_STEPS_PER_ROUND`, or offers no `nextActions` to step with (spec
+ * §5's loop guard) — see `summarise`'s doc for what an incomplete round's
+ * last entry looks like either way. A round that stops for either of
+ * those two reasons is still pushed to `rounds` whole, same as a complete
+ * one; `summarise` is what turns it into a diagnostic. Pure apart from
+ * `play` itself, so a fake `play` (a canned queue of responses, no
+ * session/binary) can test the loop's own behavior, e.g. a `Step` failing
+ * partway through a round: that discards the round WHOLE — same as a
+ * failed opening call — never a partial entry in `rounds`, and ends the
+ * run there (the same "report covers what was played" contract a failure
+ * has always had, now also true mid-round).
  */
 export async function playRounds(
   n: number,
@@ -158,8 +168,8 @@ export async function playRounds(
     }
     const round: SpinResult[] = [first.result];
     let failed = false;
-    while (!round.at(-1)!.roundComplete && round.length <= MAX_STEPS_PER_ROUND) {
-      const last = round.at(-1)!;
+    let last = round.at(-1)!;
+    while (!last.roundComplete && last.nextActions.length > 0 && round.length <= MAX_STEPS_PER_ROUND) {
       const played = await play({ ...req, roundId: last.roundId, action: last.nextActions[0] });
       if (!played.result) {
         diagnostics.push(...played.diagnostics);
@@ -167,6 +177,7 @@ export async function playRounds(
         break;
       }
       round.push(played.result);
+      last = played.result;
     }
     if (failed) break;
     rounds.push(round);

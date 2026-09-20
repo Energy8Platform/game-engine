@@ -6,9 +6,12 @@
  * what `defineGame(spec).spinPrelude` generates (`SPEC`, `SYMBOLS`,
  * `N_SYMBOLS`, `SYM`, `PAY_COUNTS`, `PAY_<ID>`, `VAL_<ID>`). Such a
  * `script.spin` therefore does NOT compile on its own — "unknown variable
- * 'SYM'" is the whole of what `e8 check` has to say about it — and the IDE
- * used to hand exactly that file to e8-server, the spin parser and
- * `e8 check`, so a spec-authored game could not run at all.
+ * 'SYM'" is e8-server's own compiler error, seen through `e8 spin` or a
+ * live session, never `e8 check`'s: that command is parse-only
+ * (`checkSource`/`parseSpinSchema` read declarations, not variable
+ * references) and always reads the authored file regardless — and the IDE
+ * used to hand the authored file to e8-server and the spin parser, so a
+ * spec-authored game could not run at all.
  *
  * `assemble()` closes that: it writes `prelude ⧺ logic` to
  * `.e8/game/script.spin` and hands back the games dir e8-server should be

@@ -119,11 +119,26 @@ describe('assemble', () => {
     expect(result.schema?.gameId).toBe('spec-slot');
   });
 
-  it('e8 check with no file resolves to the assembled .spin for a GameSpec project', async () => {
+  it('e8 check with no file reads the AUTHORED game/script.spin, even for a GameSpec project', async () => {
     const cwd = project();
     const result = await check({ cwd });
-    expect(result.file).toBe(join(cwd, '.e8', 'game', 'script.spin'));
+    expect(result.file).toBe(join(cwd, 'game', 'script.spin'));
     expect(result.diagnostics).toEqual([]);
+    expect(result.schema?.gameId).toBe('spec-slot');
+  });
+
+  it("a mistake appended to the authored file is reported at the author's own line, not the assembly's shifted one", async () => {
+    const cwd = project();
+    const file = join(cwd, 'game', 'script.spin');
+    writeFileSync(file, `${readFileSync(file, 'utf8')}\nrecord {\n`);
+    const authorLine = readFileSync(file, 'utf8').split('\n').indexOf('record {') + 1;
+    expect(authorLine).toBeGreaterThan(1);
+
+    const result = await check({ cwd });
+    expect(result.file).toBe(file);
+    const located = result.diagnostics.filter((d) => d.at !== undefined);
+    expect(located.length).toBeGreaterThan(0);
+    for (const d of located) expect(d.at!.line).toBe(authorLine);
   });
 
   /**
