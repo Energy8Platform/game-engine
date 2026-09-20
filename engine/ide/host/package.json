@@ -24,6 +24,7 @@
     "@energy8engine/scenes": "*",
     "@energy8engine/session-dev": "*",
     "@energy8engine/spin-parser": "*",
+    "@energy8platform/platform-core": "*",
     "cordis": "4.0.0-rc.8",
     "js-yaml": "^4.1.0",
     "schemastery": "3.18.0",

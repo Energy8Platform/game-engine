@@ -47,7 +47,7 @@ export const USAGE = [
   'help is text; check, spin and shot each print one JSON document on stdout',
   '',
   'usage: e8 [ide|dev]',
-  '       e8 check [file] [--quiet]               parse a .spin (default game/script.spin)',
+  "       e8 check [file] [--quiet]               parse a .spin (default: the project's own math)",
   '       e8 spin [--n N] [--bet B] [--seed S] [--action A] [--quiet]',
   '                                             play N spins through e8-server',
   '       e8 shot [--out p] [--viewport WxH] [--spin] [--ide] [--budget ms] [--quiet]',
@@ -187,7 +187,11 @@ async function oneShot(
   try {
     switch (command) {
       case 'check':
-        return await commands.check({ file: positional[0] ?? join('game', 'script.spin') });
+        // No file: `check` resolves the project's own math itself —
+        // `game/script.spin`, or the `.e8/game/script.spin` the host
+        // assembles when `game/spec.json` is a `GameSpec` and the authored
+        // file is logic without its generated prelude.
+        return await commands.check({ file: positional[0], cwd: io.cwd() });
       case 'shot':
         // `--ide` with `--spin` is refused inside `shot()` itself, so a
         // library caller gets the same answer.

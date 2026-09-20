@@ -1,0 +1,3 @@
+# The host's own scratch inside a project: the assembled prelude ⧺ logic
+# .spin (`.e8/game/`) and `e8 shot` output. Never source.
+.e8/

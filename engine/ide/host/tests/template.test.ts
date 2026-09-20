@@ -33,6 +33,7 @@ function walk(dir: string): string[] {
 describe('engine/templates/slot-basic', () => {
   it('carries main.ts, script.spin, e8.profile.yml, flow.yml and the two scene files byte-for-byte from first-slot', () => {
     for (const rel of [
+      '.gitignore',
       'src/main.ts',
       'src/editor.ts',
       'game/script.spin',
@@ -124,16 +125,23 @@ describe('engine/templates/slot-basic', () => {
   /**
    * The template's own top level, ignoring `node_modules` (an install-time
    * hoist, not shipped content — see `walk`'s doc comment): exactly the
-   * fifteen files plus their four parent directories, and in particular no
+   * sixteen files plus their four parent directories, and in particular no
    * `plugins/` — `first-slot` has one, `slot-basic` does not. `README.md`
    * holds the patch's prose: the IDE rewrites `e8.patch.yml` without
    * comments, so a created project keeps the explanation here.
+   *
+   * `.gitignore` is shipped content too, and `workspace.create` copies it
+   * with the rest (`cpSync` does not skip dotfiles): a project the IDE
+   * creates has to ignore `.e8/` from its first commit — that is where the
+   * host writes the assembled `prelude ⧺ logic` .spin and `e8 shot`'s PNGs,
+   * neither of which is the author's source.
    */
-  it('ships exactly the fifteen template files, no plugins/ directory', () => {
+  it('ships exactly the sixteen template files, no plugins/ directory', () => {
     const topLevel = readdirSync(TEMPLATE)
       .filter((name) => name !== 'node_modules')
       .sort();
     expect(topLevel).toEqual([
+      '.gitignore',
       'README.md',
       'assets',
       'e8.patch.yml',

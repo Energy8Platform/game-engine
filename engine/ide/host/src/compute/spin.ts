@@ -22,6 +22,7 @@ import {
   type SpinResult,
 } from '@energy8engine/contracts';
 import * as session from '@energy8engine/session-dev';
+import { assemble } from '../plugins/spec';
 import { check } from './check';
 
 export interface SpinInput {
@@ -202,10 +203,16 @@ export async function spin(input: SpinInput): Promise<SpinReport> {
   }
   if (input.bet === undefined) bet = game.betLevel;
 
+  // A `GameSpec` project plays the assembly, not the logic-only
+  // `game/script.spin` the compiler would refuse — see `plugins/spec.ts`.
+  // Every other project's games dir is `join(cwd, 'game')`, as before.
+  const assembled = await assemble(input.cwd);
+  diagnostics.push(...assembled.diagnostics);
+
   const ctx = new Context();
   try {
     await session.apply(ctx, {
-      gamesDir: join(input.cwd, 'game'),
+      gamesDir: assembled.gamesDir,
       port: 0,
       serverSeed: seed,
       binPath: input.binPath,

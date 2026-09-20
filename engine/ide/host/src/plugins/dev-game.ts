@@ -111,6 +111,7 @@ import { diagnostic, type SpinResult } from '@energy8engine/contracts';
 import { createServer as createViteServer, type ViteDevServer } from 'vite';
 import { installErrorBoundary } from '../error-boundary';
 import { runtimeEntryPaths } from './runtime-assets';
+import { assemble, specSources } from './spec';
 
 /**
  * `runtime-assets.ts` reads this service twice over: its mere PRESENCE
@@ -440,13 +441,49 @@ export async function apply(ctx: Context, config: DevGameConfig): Promise<void> 
     const abs = resolve(config.root, path);
     return (path.endsWith('.spin') && isInside(gamesDir, abs)) || isInside(abs, gamesDir);
   };
-  const restartOn = ({ path }: { path: string }) => {
-    if (!mathChanged(path)) return;
+  /**
+   * The two files a `GameSpec` game is authored in — neither of which is
+   * the file e8-server loads. For such a project `gamesDir` is
+   * `.e8/game`, so `mathChanged` is false for both of them and, without
+   * this, a save reached nothing: the assembly on disk (and therefore the
+   * running engine) stayed at the pre-edit math forever. `spec.json` is
+   * not even a `.spin`, and the prelude it generates is half the math.
+   *
+   * `gamesDir` pointing somewhere other than the project's own `game/` IS
+   * the signal that `assemble` did something (`./spec.ts`) — so an
+   * ordinary project keeps exactly the behavior it had: `game/script.spin`
+   * restarts through `mathChanged`, synchronously, and `game/spec.json`
+   * still restarts nothing.
+   */
+  const specSourceSet = new Set(
+    gamesDir === resolve(config.root, 'game') ? [] : specSources(config.root),
+  );
+  const restart = () =>
     void ctx.session.restart().then(({ diagnostics }) => {
       if (!alive) return;
       ctx.ideRpc.reportGameDiagnostics('session', diagnostics);
       ctx.ideRpc.reportGameDiagnostics('spin', []);
     });
+  const restartOn = ({ path }: { path: string }) => {
+    if (specSourceSet.has(resolve(config.root, path))) {
+      // Re-assemble BEFORE the respawn — e8-server reads `--games-dir` at
+      // startup, so a restart over a stale assembly would just reload the
+      // old math. A spec the prelude cannot be generated from is reported
+      // and nothing is restarted: the engine keeps playing the last
+      // assembly, which is the only math that still exists.
+      void assemble(config.root).then(({ diagnostics }) => {
+        if (!alive) return;
+        if (diagnostics.some((d) => d.severity === 'error')) {
+          ctx.ideRpc.reportGameDiagnostics('spec', diagnostics);
+          return;
+        }
+        ctx.ideRpc.reportGameDiagnostics('spec', []);
+        restart();
+      });
+      return;
+    }
+    if (!mathChanged(path)) return;
+    restart();
   };
   ctx.on('files/written', restartOn);
   ctx.on('files/removed', restartOn);

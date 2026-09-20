@@ -28,6 +28,7 @@ import * as project from './project';
 import * as runtimeAssets from './runtime-assets';
 import * as scenes from './scenes';
 import * as schema from './schema';
+import { assemble } from './spec';
 import * as symbols from './symbols';
 import type { ProjectScopeHandle } from './workspace';
 
@@ -147,5 +148,16 @@ async function readGameConfig(
     Array.isArray(spec.betLevels) && typeof spec.betLevels[0] === 'number'
       ? (spec.betLevels[0] as number)
       : 1;
-  return { config: { root: cwd, gamesDir, gameId: spec.id, betLevel }, diagnostics: [] };
+  // A `GameSpec` game's `game/script.spin` is logic only and does not
+  // compile by itself — `assemble` writes `prelude ⧺ logic` and hands back
+  // the directory e8-server must actually be pointed at (see
+  // `./spec.ts`). For every other project this is `join(cwd, 'game')`, the
+  // same answer as before. A spec that cannot be used is reported like any
+  // other unusable spec.json: the project opens, without its game.
+  const assembled = await assemble(cwd);
+  if (assembled.diagnostics.length) return { diagnostics: assembled.diagnostics };
+  return {
+    config: { root: cwd, gamesDir: assembled.gamesDir, gameId: spec.id, betLevel },
+    diagnostics: [],
+  };
 }

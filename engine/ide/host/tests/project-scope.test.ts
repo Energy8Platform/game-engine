@@ -1,4 +1,13 @@
-import { cpSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { createHash } from 'node:crypto';
+import {
+  cpSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
 import { createServer as createNetServer } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -15,6 +24,8 @@ import * as rpc from '../src/plugins/rpc';
 import * as workspace from '../src/plugins/workspace';
 
 const GAME = join(__dirname, '..', '..', '..', 'examples', 'first-slot', 'game');
+/** `first-slot`'s logic against a `GameSpec` — see `fixtures/project-spec`. */
+const SPEC_GAME = join(__dirname, 'fixtures', 'project-spec', 'game');
 const WEB_ROOT = join(__dirname, 'fixtures', 'dev-game-web');
 const COMPOSITION = join(__dirname, 'fixtures', 'composition');
 
@@ -130,6 +141,61 @@ describe('project-scope: the game', () => {
     cpSync(WEB_ROOT, cwd, { recursive: true });
     return cwd;
   }
+
+  /** The same, with a `GameSpec` `spec.json` and a logic-only `script.spin`. */
+  function specGameProject(): string {
+    const cwd = project('[]\n');
+    cpSync(SPEC_GAME, join(cwd, 'game'), { recursive: true });
+    cpSync(WEB_ROOT, cwd, { recursive: true });
+    return cwd;
+  }
+
+  /** `scriptSha256` is the sha256 of the file e8-server loaded — which file, provable. */
+  const sha256 = (file: string) => createHash('sha256').update(readFileSync(file)).digest('hex');
+  async function spinSha(previewUrl: string): Promise<unknown> {
+    const res = await fetch(`${previewUrl}/api/spin`, { method: 'POST' });
+    return ((await res.json()) as { scriptSha256?: unknown }).scriptSha256;
+  }
+
+  it('a GameSpec project runs on the ASSEMBLED .spin, not the logic that cannot compile', async () => {
+    const c = await root();
+    const cwd = specGameProject();
+    const handle = await bootProjectScope(c, cwd, 0);
+    const assembled = join(cwd, '.e8', 'game', 'script.spin');
+    expect(existsSync(assembled)).toBe(true);
+    // Not the authored file: that one names SYM/PAY_S1, which only the
+    // generated prelude declares, and e8-server refuses it outright.
+    expect(await spinSha(handle.previewUrl!)).toBe(sha256(assembled));
+    expect(await spinSha(handle.previewUrl!)).not.toBe(sha256(join(cwd, 'game', 'script.spin')));
+  }, 20_000);
+
+  it('a save to game/script.spin re-assembles before the restart, and the engine plays the new math', async () => {
+    const c = await root();
+    const cwd = specGameProject();
+    const handle = await bootProjectScope(c, cwd, 0);
+    const before = await spinSha(handle.previewUrl!);
+    expect(before).toBeTypeOf('string');
+
+    // A trailing comment: the smallest edit that is unambiguously still
+    // legal SpinML (dev-game.test.ts makes the same argument for it).
+    const edited = `${readFileSync(join(cwd, 'game', 'script.spin'), 'utf8')}\n-- edited\n`;
+    const put = await fetch(`${url(c)}/api/files/game/script.spin`, {
+      method: 'PUT',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ base64: Buffer.from(edited, 'utf8').toString('base64') }),
+    });
+    expect(put.status).toBe(200);
+
+    // The re-assembly and the respawn are both fire-and-forget off the
+    // write, so this polls for the effect: the engine answering with the
+    // hash of an assembly that now ends in the edit.
+    await expect
+      .poll(() => spinSha(handle.previewUrl!), { timeout: 15_000 })
+      .toSatisfy((sha) => typeof sha === 'string' && sha !== before);
+    const assembled = readFileSync(join(cwd, '.e8', 'game', 'script.spin'), 'utf8');
+    expect(assembled.endsWith('-- edited\n')).toBe(true);
+    expect(await spinSha(handle.previewUrl!)).toBe(sha256(join(cwd, '.e8', 'game', 'script.spin')));
+  }, 25_000);
 
   it('boots dev-game off game/spec.json — the project serves its own page and spins, on its own origin', async () => {
     const c = await root();

@@ -9,10 +9,19 @@
 import { readFile } from 'node:fs/promises';
 import { diagnostic, type Diagnostic, type SpinSchema } from '@energy8engine/contracts';
 import { checkSource } from '../plugins/schema';
+import { assemble } from '../plugins/spec';
 
 export interface CheckInput {
-  /** Absolute or cwd-relative path to a `.spin`. */
-  file: string;
+  /**
+   * Absolute or cwd-relative path to a `.spin`. Omitted, the project's own
+   * math is checked: `game/script.spin`, or — when `game/spec.json` is a
+   * `GameSpec` — the `.e8/game/script.spin` the host assembles from it,
+   * which is the only form of that game the compiler would accept. See
+   * `plugins/spec.ts`.
+   */
+  file?: string;
+  /** Project directory the default `file` is resolved against. Default `process.cwd()`. */
+  cwd?: string;
 }
 
 export interface CheckResult {
@@ -22,21 +31,24 @@ export interface CheckResult {
 }
 
 export async function check(input: CheckInput): Promise<CheckResult> {
+  // `assemble` only runs for the default file: an explicit path is checked
+  // exactly as given, and never writes anything.
+  const file = input.file ?? (await assemble(input.cwd ?? process.cwd())).spinFile;
   let source: string;
   try {
-    source = await readFile(input.file, 'utf8');
+    source = await readFile(file, 'utf8');
   } catch (error) {
     return {
-      file: input.file,
+      file,
       diagnostics: [
         diagnostic(
           'error',
           'compute',
-          input.file,
-          `cannot read ${input.file}: ${error instanceof Error ? error.message : String(error)}`,
+          file,
+          `cannot read ${file}: ${error instanceof Error ? error.message : String(error)}`,
         ),
       ],
     };
   }
-  return { file: input.file, ...checkSource(source, input.file) };
+  return { file, ...checkSource(source, file) };
 }

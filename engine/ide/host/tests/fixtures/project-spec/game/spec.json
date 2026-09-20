@@ -1,0 +1,16 @@
+{
+  "id": "spec-slot",
+  "type": "slot",
+  "grid": { "cols": 5, "rows": 3 },
+  "betLevels": [0.2, 1.0, 5.0],
+  "maxWin": 500.0,
+  "symbols": [
+    { "id": "S1", "name": "sym-1", "kind": "high", "pay": { "3": 5.0, "4": 10.0, "5": 25.0 } },
+    { "id": "S2", "name": "sym-2", "kind": "high", "pay": { "3": 4.0, "4": 8.0, "5": 15.0 } },
+    { "id": "S3", "name": "sym-3", "kind": "mid", "pay": { "3": 3.0, "4": 6.0, "5": 12.0 } },
+    { "id": "S4", "name": "sym-4", "kind": "mid", "pay": { "3": 2.0, "4": 4.0, "5": 8.0 } },
+    { "id": "S5", "name": "sym-5", "kind": "low", "pay": { "3": 1.0, "4": 2.0, "5": 4.0 } },
+    { "id": "S6", "name": "sym-6", "kind": "low", "pay": { "3": 0.5, "4": 1.0, "5": 2.0 } }
+  ],
+  "actions": { "spin": { "role": "base", "stage": "base_game", "cost": 1.0 } }
+}
