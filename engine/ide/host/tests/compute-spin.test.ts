@@ -3,8 +3,15 @@ import { cpSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:f
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, describe, expect, it } from 'vitest';
-import type { SpinResult } from '@energy8engine/contracts';
-import { MAX_STEPS_PER_ROUND, percentiles, spin, summarise } from '../src/compute';
+import { diagnostic, type Diagnostic, type SpinResult } from '@energy8engine/contracts';
+import {
+  MAX_STEPS_PER_ROUND,
+  percentiles,
+  playRounds,
+  spin,
+  summarise,
+  type PlaySpin,
+} from '../src/compute';
 
 const GAME = join(__dirname, '..', '..', '..', 'examples', 'first-slot', 'game');
 // The smallest game whose round does NOT complete on the first response —
@@ -32,6 +39,25 @@ afterAll(() => rmSync(cwd, { recursive: true, force: true }));
 const sessionCwd = realpathSync(mkdtempSync(join(tmpdir(), 'e8-spin-session-')));
 cpSync(SESSION_GAME, join(sessionCwd, 'game'), { recursive: true });
 afterAll(() => rmSync(sessionCwd, { recursive: true, force: true }));
+
+/** A one-response, already-complete round — `first-slot`'s shape, with only what a test reads varied. */
+function result(win: number, over: Partial<SpinResult> = {}): SpinResult {
+  return {
+    win,
+    totalWin: win,
+    bet: 1,
+    stage: 'base_game',
+    data: {},
+    vars: {},
+    nextActions: ['spin'],
+    roundComplete: true,
+    spinsRemaining: 0,
+    spinsPlayed: 1,
+    scriptSha256: 'a'.repeat(64),
+    roundId: 'r',
+    ...over,
+  };
+}
 
 /** Live `e8-server` processes serving `dir`'s `game/` — 0 when none. */
 function e8Servers(dir: string = cwd): number {
@@ -149,8 +175,9 @@ describe('spin steps a round to completion (session-fixture)', () => {
     expect(r.diagnostics).toEqual([]);
     expect(r.spins).toBe(n);
     // Every round: 1 StartRound (not a Step) + exactly 2 Step calls to
-    // finish (the fixture always awards 2 free spins) — see its own doc.
-    expect(r.steps).toBeGreaterThanOrEqual(2 * n);
+    // finish (the fixture always awards 2 free spins, win or no win) —
+    // see its own doc.
+    expect(r.steps).toBe(2 * n);
     expect(Object.values(r.stages).reduce((a, b) => a + b, 0)).toBe(n + r.steps);
     // No round left incomplete, so no roundComplete diagnostic at all.
     expect(r.incompleteRounds).toBe(0);
@@ -172,25 +199,6 @@ describe('percentiles', () => {
 });
 
 describe('summarise', () => {
-  /** A one-response, already-complete round — `first-slot`'s shape, with only what the summary reads varied. */
-  function result(win: number, over: Partial<SpinResult> = {}): SpinResult {
-    return {
-      win,
-      totalWin: win,
-      bet: 1,
-      stage: 'base_game',
-      data: {},
-      vars: {},
-      nextActions: ['spin'],
-      roundComplete: true,
-      spinsRemaining: 0,
-      spinsPlayed: 1,
-      scriptSha256: 'a'.repeat(64),
-      roundId: 'r',
-      ...over,
-    };
-  }
-
   it("win math reads each round's FINAL totalWin, but stages tallies every response in it", () => {
     const round = [
       // The base response: pays 0.5, but the round is not over yet.
@@ -235,7 +243,7 @@ describe('summarise', () => {
     expect(s.diagnostics).toEqual([
       {
         severity: 'warning',
-        plugin: 'spin',
+        plugin: 'compute',
         where: 'roundComplete',
         message: `round r-stuck did not complete in ${MAX_STEPS_PER_ROUND} steps`,
       },
@@ -262,5 +270,54 @@ describe('summarise', () => {
       scriptSha256: null,
       diagnostics: [],
     });
+  });
+});
+
+describe('playRounds', () => {
+  /** A `PlaySpin` that answers from a canned queue — no session, no binary. */
+  function scripted(
+    steps: Array<{ result?: SpinResult; diagnostics?: Diagnostic[] }>,
+  ): PlaySpin {
+    let i = 0;
+    return async () => {
+      const step = steps[i++];
+      if (!step) throw new Error('play called more times than scripted');
+      return { result: step.result, diagnostics: step.diagnostics ?? [] };
+    };
+  }
+
+  it('a Step failing after a successful Step in the same round discards that round whole', async () => {
+    const play = scripted([
+      // Round 1: completes on the opening response.
+      { result: result(0.5, { roundComplete: true, roundId: 'r1' }) },
+      // Round 2 opens, not complete yet.
+      {
+        result: result(0, {
+          totalWin: 0,
+          roundComplete: false,
+          nextActions: ['free_spin'],
+          roundId: 'r2',
+        }),
+      },
+      // Round 2's first Step succeeds — still not complete.
+      {
+        result: result(1, {
+          totalWin: 1,
+          roundComplete: false,
+          nextActions: ['free_spin'],
+          roundId: 'r2',
+        }),
+      },
+      // Round 2's second Step fails: the round is discarded whole, and the
+      // run ends there — no further calls to `play`.
+      { diagnostics: [diagnostic('error', 'session', 'play', 'e8-server died')] },
+    ]);
+    const { rounds, diagnostics } = await playRounds(2, { gameId: 'g', action: 'spin', betLevel: 1 }, play);
+    expect(rounds).toHaveLength(1); // round 1 only — round 2's two responses are nowhere in it
+    expect(rounds[0]).toHaveLength(1);
+    expect(rounds[0][0].roundId).toBe('r1');
+    expect(diagnostics).toEqual([
+      { severity: 'error', plugin: 'session', where: 'play', message: 'e8-server died' },
+    ]);
   });
 });

@@ -15,7 +15,12 @@ import { randomBytes } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { Context } from 'cordis';
-import { diagnostic, type Diagnostic, type SpinResult } from '@energy8engine/contracts';
+import {
+  diagnostic,
+  type Diagnostic,
+  type SpinRequest,
+  type SpinResult,
+} from '@energy8engine/contracts';
 import * as session from '@energy8engine/session-dev';
 import { check } from './check';
 
@@ -100,7 +105,7 @@ export function summarise(rounds: SpinResult[][]): Omit<SpinReport, 'bet' | 'see
   const diagnostics: Diagnostic[] = incomplete.map((r) =>
     diagnostic(
       'warning',
-      'spin',
+      'compute',
       'roundComplete',
       `round ${r.roundId} did not complete in ${MAX_STEPS_PER_ROUND} steps`,
     ),
@@ -120,10 +125,59 @@ export function summarise(rounds: SpinResult[][]): Omit<SpinReport, 'bet' | 'see
   };
 }
 
+/** What `playRounds` needs of `session.play` — real or faked. */
+export type PlaySpin = (
+  req: SpinRequest,
+) => Promise<{ result?: SpinResult; diagnostics: Diagnostic[] }>;
+
+/**
+ * Plays `n` rounds via `play`, stepping each one forward on its own
+ * reported `nextActions[0]` until it completes or hits `MAX_STEPS_PER_ROUND`
+ * — see `summarise`'s doc for what a capped round's last entry looks like.
+ * Pure apart from `play` itself, so a fake `play` (a canned queue of
+ * responses, no session/binary) can test the loop's own behavior, e.g. a
+ * `Step` failing partway through a round: that discards the round WHOLE —
+ * same as a failed opening call — never a partial entry in `rounds`, and
+ * ends the run there (the same "report covers what was played" contract a
+ * failure has always had, now also true mid-round).
+ */
+export async function playRounds(
+  n: number,
+  req: SpinRequest,
+  play: PlaySpin,
+  onProgress?: (done: number, n: number) => void,
+): Promise<{ rounds: SpinResult[][]; diagnostics: Diagnostic[] }> {
+  const rounds: SpinResult[][] = [];
+  const diagnostics: Diagnostic[] = [];
+  for (let i = 1; i <= n; i++) {
+    const first = await play(req);
+    if (!first.result) {
+      diagnostics.push(...first.diagnostics);
+      break;
+    }
+    const round: SpinResult[] = [first.result];
+    let failed = false;
+    while (!round.at(-1)!.roundComplete && round.length <= MAX_STEPS_PER_ROUND) {
+      const last = round.at(-1)!;
+      const played = await play({ ...req, roundId: last.roundId, action: last.nextActions[0] });
+      if (!played.result) {
+        diagnostics.push(...played.diagnostics);
+        failed = true;
+        break;
+      }
+      round.push(played.result);
+    }
+    if (failed) break;
+    rounds.push(round);
+    onProgress?.(i, n);
+  }
+  return { rounds, diagnostics };
+}
+
 export async function spin(input: SpinInput): Promise<SpinReport> {
   const n = input.n ?? 100;
   const seed = input.seed ?? randomBytes(8).toString('hex');
-  const rounds: SpinResult[][] = [];
+  let rounds: SpinResult[][] = [];
   const diagnostics: Diagnostic[] = [];
   let bet = input.bet ?? 0;
 
@@ -161,31 +215,9 @@ export async function spin(input: SpinInput): Promise<SpinReport> {
       return report();
     }
     const req = { gameId: game.gameId, action: input.action ?? 'spin', betLevel: bet };
-    for (let i = 1; i <= n; i++) {
-      const first = await ctx.session.play(req);
-      if (!first.result) {
-        diagnostics.push(...first.diagnostics);
-        break;
-      }
-      const round: SpinResult[] = [first.result];
-      let failed = false;
-      // Step the round forward on its own reported `nextActions[0]` until it
-      // completes or hits the cap — see `summarise`'s doc for what a capped
-      // round's last entry looks like.
-      while (!round.at(-1)!.roundComplete && round.length <= MAX_STEPS_PER_ROUND) {
-        const last = round.at(-1)!;
-        const played = await ctx.session.play({ ...req, roundId: last.roundId, action: last.nextActions[0] });
-        if (!played.result) {
-          diagnostics.push(...played.diagnostics);
-          failed = true;
-          break;
-        }
-        round.push(played.result);
-      }
-      if (failed) break;
-      rounds.push(round);
-      input.onProgress?.(i, n);
-    }
+    const played = await playRounds(n, req, (r) => ctx.session.play(r), input.onProgress);
+    rounds = played.rounds;
+    diagnostics.push(...played.diagnostics);
     return report();
   } finally {
     await ctx.fiber.dispose();
