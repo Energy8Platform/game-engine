@@ -6,10 +6,22 @@
     <title>e8 ide</title>
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link
-      rel="stylesheet"
-      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400&display=swap"
-    />
+    <!-- Appended AFTER `load` on purpose: any stylesheet <link> in the
+         markup (even `media="print"`) holds the page's `load` event until
+         it answers, and with no route to Google Fonts (offline, a firewall)
+         that is a 30 s stall on every IDE page load — measured as +30 s per
+         e2e test. The page loads on the system stacks (`Inter, system-ui`,
+         `JetBrains Mono, ui-monospace`); the fonts swap in when the sheet
+         lands. -->
+    <script>
+      addEventListener('load', () => {
+        const link = document.createElement('link');
+        link.rel = 'stylesheet';
+        link.href =
+          'https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400&display=swap';
+        document.head.append(link);
+      });
+    </script>
   </head>
   <body>
     <div id="root"></div>
