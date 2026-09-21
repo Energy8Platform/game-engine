@@ -66,15 +66,28 @@ async function readyCanvas(page: Page, selector: string): Promise<Frame> {
 }
 
 /**
- * The running game reports its node types to the host over `/ide` the
- * moment it boots (`ideBridge.apply` in `main.ts`); the host keeps them
- * after the game disconnects (served back on the next `GET /api/scenes`),
- * so one direct visit is enough for every later `assetNodeTypes.pick` this
- * file makes. Same idiom as `flow.spec.ts`'s `openComposition`.
+ * The running game reports its node types to the host over `/ide` only
+ * once `main.ts`'s deferred `import('@energy8engine/ide-bridge')` lands
+ * and applies — AFTER `#status` already reads `ready`, so a `#status`
+ * wait proves nothing about the report (measured under load: navigating
+ * away on `ready` left the host with no types, and the drop below found
+ * `no node type for .json`). The host keeps the types after the game
+ * disconnects (`nodeTypes` on every later `GET /api/scenes`, `scenes.ts`),
+ * so this polls that field until it is non-empty; one direct visit is
+ * then enough for every later `assetNodeTypes.pick` this file makes —
+ * `#/doc/symbols`'s own canvas (`editor.ts`) never applies the bridge.
  */
 async function reportNodeTypes(page: Page): Promise<void> {
   await page.goto(host.gameUrl);
-  await expect(page.locator('#status')).not.toHaveText('', { timeout: 20_000 });
+  await expect
+    .poll(
+      async () => {
+        const res = await fetch(`${host.url}/api/scenes`);
+        return ((await res.json()) as { nodeTypes?: unknown[] }).nodeTypes?.length ?? 0;
+      },
+      { timeout: 20_000 },
+    )
+    .toBeGreaterThan(0);
 }
 
 async function openSymbols(page: Page): Promise<void> {
