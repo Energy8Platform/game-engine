@@ -35,6 +35,22 @@
  * `./config`'s `toShellConfig` lays the author's part (features, game info,
  * theme, language as an override) over the session's part.
  *
+ * **Why the paytable is fetched here, not authored.** The Pixi shell has no
+ * `setGameInfo` — its game-info sections are baked into `createPixiShell`
+ * once, same as the bet ladder, so `apply` is now `async` and this has to
+ * happen BEFORE construction. When `gameInfo.sections` is the schema's
+ * empty-array default (an author who never wrote a paytable by hand), it
+ * awaits exactly ONE `GET /api/spec`, turns `spec.symbols[].pay` into a
+ * `paytable` section (`./paytable`'s `paytableFrom`), and lays symbol art
+ * on top from the `symbols` row's document (`ctx.reflect.get('symbols',
+ * false)`, lenient — that row may not be composed — read after its
+ * `ready`). Any non-empty `sections` — including one the author wrote as
+ * `[]` on purpose, indistinguishable from "nothing yet" — is left alone
+ * and no fetch happens at all. No host, a `null` spec, no `pay` anywhere,
+ * a rejected fetch: all of it is swallowed silently and the row boots
+ * with the game info exactly as authored, same as a static build with no
+ * host behind it.
+ *
  * **Why `parent` is the row's own layer, not `app.stage`.** `PixiRenderer.
  * mount` adds the shell's root to `config.parent ?? app.stage`. Handing it
  * `app.stage` would leave the row raising a container it does not own —
@@ -62,10 +78,11 @@
  */
 import type { Context } from 'cordis';
 import { Container } from 'pixi.js';
-import type { SessionService } from '@energy8engine/contracts';
+import type { SessionService, SymbolsDoc } from '@energy8engine/contracts';
 import type { PixiRenderer } from '@energy8engine/renderer-pixi';
 import { createPixiShell, removePixiShell, type Shell } from '@energy8platform/shell/pixi';
 import { toShellConfig } from './config';
+import { paytableFrom } from './paytable';
 import { relay } from './relay';
 import { Config } from './schema';
 
@@ -92,13 +109,29 @@ export const name = 'shell';
 export const inject = ['renderer', 'session'];
 export { Config };
 
-export function apply(ctx: Context, config: Parameters<typeof Config>[0] = {}): void {
+export async function apply(ctx: Context, config: Parameters<typeof Config>[0] = {}): Promise<void> {
   const { app } = ctx.renderer;
   const { init } = ctx.session;
 
+  const validated = Config(config);
+  const sections = (validated.gameInfo as { sections?: unknown[] } | undefined)?.sections;
+  if (Array.isArray(sections) && sections.length === 0) {
+    const fetchFn = (config as { fetchFn?: typeof fetch }).fetchFn ?? ((...a: Parameters<typeof fetch>) => fetch(...a));
+    try {
+      const res = await fetchFn('/api/spec');
+      const body = res.ok ? ((await res.json()) as { spec?: unknown }) : null;
+      const symbols = ctx.reflect.get('symbols', false) as { doc(): SymbolsDoc | null; ready?: Promise<void> } | undefined;
+      await symbols?.ready?.catch(() => {});
+      const section = paytableFrom(body?.spec ?? null, symbols?.doc() ?? null);
+      if (section) validated.gameInfo = { ...validated.gameInfo, sections: [section] };
+    } catch {
+      // No host, or no spec: the game info stays as authored (empty). The static default build lands here.
+    }
+  }
+
   const layer = new Container();
   layer.label = 'shell';
-  const shell = createPixiShell({ app, parent: layer, ...toShellConfig(Config(config), init) });
+  const shell = createPixiShell({ app, parent: layer, ...toShellConfig(validated, init) });
   app.stage.addChild(layer);
 
   const raise = () => {

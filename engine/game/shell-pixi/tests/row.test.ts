@@ -304,3 +304,50 @@ describe('shell-pixi — the Pixi shell as a row', () => {
     expect(captured.fadeError).toBeUndefined();
   });
 });
+
+describe('shell-pixi — a paytable derived from /api/spec when none is authored', () => {
+  const SPEC = {
+    symbols: [
+      { id: 'ROCK', name: 'Rock', pay: { '30': 1.2, '8': 0.15, '9': 0.25 } },
+      { id: 'WILD', name: 'Wild' },
+      { id: 'NUT', pay: { '8': 0.05 } },
+    ],
+  };
+
+  it('an empty gameInfo.sections fetches /api/spec and hands the shell a paytable section', async () => {
+    const fetchFn = vi.fn(async (url: string) => {
+      expect(url).toBe('/api/spec');
+      return { ok: true, json: async () => ({ spec: SPEC }) };
+    }) as unknown as typeof fetch;
+    const { ctx } = await boot({ config: { gameInfo: { sections: [] }, fetchFn } });
+
+    expect(fetchFn).toHaveBeenCalledTimes(1);
+    const sections = (captured.config!.gameInfo as { sections: { type: string }[] }).sections;
+    expect(sections[0].type).toBe('paytable');
+
+    await ctx.fiber.dispose();
+  });
+
+  it('authored sections are left untouched — no fetch at all', async () => {
+    const fetchFn = vi.fn() as unknown as typeof fetch;
+    const { ctx } = await boot({
+      config: { gameInfo: { sections: [{ type: 'custom', title: 'Rules' }] }, fetchFn },
+    });
+
+    expect(fetchFn).not.toHaveBeenCalled();
+    expect(captured.config!.gameInfo).toEqual({ sections: [{ type: 'custom', title: 'Rules' }] });
+
+    await ctx.fiber.dispose();
+  });
+
+  it('a fetchFn that rejects leaves sections empty — the row still mounts, no throw', async () => {
+    const fetchFn = vi.fn(async () => {
+      throw new Error('offline');
+    }) as unknown as typeof fetch;
+    const { ctx } = await boot({ config: { gameInfo: { sections: [] }, fetchFn } });
+
+    expect((captured.config!.gameInfo as { sections: unknown[] }).sections).toEqual([]);
+
+    await ctx.fiber.dispose();
+  });
+});
