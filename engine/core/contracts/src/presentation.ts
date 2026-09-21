@@ -164,8 +164,8 @@ export interface StepOpts {
 }
 
 /**
- * One of the five steps the built-in mechanics actually stand on — see the
- * module doc. Kept as its own named union (rather than folding straight
+ * One of the steps a mechanic may put in its plan: the five board steps
+ * the built-in mechanics stand on, plus `emit` — see the module doc. Kept as its own named union (rather than folding straight
  * into `PresentationStep` below) because `PresentationPlan` is defined from
  * THIS type, not from `PresentationStep`: a mechanic's `steps.push({ kind:
  * 'spinTo', ...typo })` must still fail to compile, and it only does
