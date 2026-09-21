@@ -104,7 +104,15 @@ async function boot(opts: { events?: boolean; flow?: boolean; config?: Record<st
   if (opts.events !== false) ctx.provide('events', { emit, on: vi.fn() });
   const provideRoot = vi.fn((_name: string, _getter: () => unknown) => () => {});
   if (opts.flow !== false) ctx.provide('flow', { provideRoot });
-  await ctx.plugin(shellPixi, opts.config ?? {});
+  // Every case now falls into the empty-`gameInfo.sections` default, so the
+  // row's own `GET /api/spec` runs unless a case supplies its own `fetchFn`
+  // (the three paytable cases below) — without this, the 8 other cases hit
+  // a REAL `fetch('/api/spec')`, rejected by undici and swallowed, making
+  // them depend on undici's relative-URL behaviour rather than this row's.
+  const fetchFn = async () => {
+    throw new Error('no host in this test');
+  };
+  await ctx.plugin(shellPixi, { fetchFn, ...opts.config });
   return { ctx, app, emit, provideRoot };
 }
 
