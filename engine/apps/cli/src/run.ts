@@ -80,7 +80,7 @@ export const USAGE = [
   "         --base is where the page's assets are served from (default /) — the rows still",
   '         fetch /api/* at the origin root, so a base other than / is a warning: serve dist/api',
   '         at the root or proxy it; dist/api/* are frozen copies of /api/{composition,flow,',
-  '         scenes,symbols} — serve dist/ statically and proxy /api/session + /api/spin to a',
+  '         scenes,symbols,spec} — serve dist/ statically and proxy /api/session + /api/spin to a',
   '         running host (or ship --target platform)',
   '  every diagnostic: { severity, plugin, where, message, fix?, at? }',
   '',
