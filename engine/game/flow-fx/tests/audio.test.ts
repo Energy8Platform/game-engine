@@ -101,6 +101,19 @@ describe('createAudio', () => {
     expect(state.categoryVolume('music')).toBe(1); // clamped
   });
 
+  it('a `$expr` volume computes (`$v / 2`); one that does not parse is a warning on the node and reports as not a number', async () => {
+    const state = createAudioState();
+    const kind = createAudio(state);
+    const { rc } = runCtx({ v: 0.8 });
+    await kind.run!(props({ category: 'music', volume: '$v / 2' }), rc);
+    expect(state.categoryVolume('music')).toBe(0.4);
+    expect(rc.report).not.toHaveBeenCalled();
+    await kind.run!(props({ category: 'music', volume: '$v | bogus' }), rc);
+    expect(rc.report).toHaveBeenCalledWith(expect.stringMatching(/^bad value '\$v \| bogus': unknown format 'bogus'/), 'warning');
+    expect(rc.report).toHaveBeenLastCalledWith('volume "$v | bogus" is not a number');
+    expect(state.categoryVolume('music')).toBe(0.4); // untouched
+  });
+
   it('a negative `$path` volume clamps to 0', async () => {
     const state = createAudioState();
     const kind = createAudio(state);

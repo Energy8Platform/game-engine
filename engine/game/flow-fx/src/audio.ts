@@ -12,7 +12,7 @@
  * `betLevel` is in `@energy8engine/flow`'s `kinds.ts`, rather than trusted.
  */
 import Schema from 'schemastery';
-import { readPath, type FlowNodeKind } from '@energy8engine/flow';
+import { resolveValue, type FlowNodeKind } from '@energy8engine/flow';
 import type { AudioState } from './audio-state';
 
 const CATEGORIES = ['sfx', 'music'] as const;
@@ -20,7 +20,7 @@ type Category = (typeof CATEGORIES)[number];
 
 export interface AudioProps {
   category: Category;
-  /** Numeric literal, or `$path` to read a var — clamped 0..1. */
+  /** Numeric literal, `$expr`, or a `{…}` template — clamped 0..1. */
   volume: string;
   /** Ramp duration, milliseconds. */
   fade: number;
@@ -35,7 +35,7 @@ export function createAudio(state: AudioState): FlowNodeKind<AudioProps> {
         .description('mix bus to duck — see `sound`'),
       volume: Schema.string()
         .default('1')
-        .description('0..1 (a numeric literal), or `$path` to read a var'),
+        .description('0..1: a numeric literal, `$expr`, or a `{…}` template'),
       fade: Schema.number().default(0).description('ramp duration, milliseconds'),
     }) as Schema<AudioProps>,
     outs: ['next'],
@@ -44,8 +44,7 @@ export function createAudio(state: AudioState): FlowNodeKind<AudioProps> {
         report(`unknown category '${p.category}'`);
         return { out: 'next' };
       }
-      const raw =
-        typeof p.volume === 'string' && p.volume.startsWith('$') ? readPath(p.volume, vars) : p.volume;
+      const raw = resolveValue(p.volume, vars, (m) => report(m, 'warning'));
       const volume = Number(raw);
       if (raw == null || (typeof raw === 'string' && raw.trim() === '') || Number.isNaN(volume)) {
         report(`volume "${raw}" is not a number`);

@@ -22,7 +22,8 @@ import type { PlayService } from '@energy8engine/play-loop/runtime';
 import type { SceneRef, ScenesService } from '@energy8engine/scenes';
 import { createRegistry } from '@energy8engine/registry';
 import type { EventsService } from './events';
-import { evaluate, readPath } from './expr';
+import { evaluate } from './expr';
+import { resolveValue } from './value';
 
 declare global {
   namespace Schemastery {
@@ -98,9 +99,9 @@ const service = <T>(ctx: Context, name: string): T => {
   return s;
 };
 
-/** A prop value: a `$path` string reads a var, anything else is the literal. */
-const resolve = (value: unknown, vars: Record<string, unknown>) =>
-  typeof value === 'string' && value.startsWith('$') ? readPath(value, vars) : value;
+/** `resolveValue` (a literal, `$expr`, or a `{…}` template); a value that does not parse is a WARNING on the node and stays as written. */
+const resolve = (value: unknown, vars: Record<string, unknown>, report: RunCtx['report']) =>
+  resolveValue(value, vars, (m) => report(m, 'warning'));
 
 /** `v` as a number: a number as is, a non-blank numeric string via `Number()`, anything else `NaN`. */
 const asNumber = (v: unknown): number =>
@@ -210,7 +211,7 @@ async function playThrough(
 }
 
 /**
- * Resolves a `betLevel` prop (a numeric literal or `$path`) into
+ * Resolves a `betLevel` prop (a numeric literal, `$expr` or template) into
  * `request.betLevel`, converting a literal string with `Number()` and
  * reporting + omitting one that isn't a number. `spin`'s own — `step` has
  * no `betLevel` prop (see its own doc: a `Step` carries no bet on the wire).
@@ -221,7 +222,7 @@ function applyBetLevel(
   request: PlayRequest,
   report: (message: string, severity?: Severity) => void,
 ): void {
-  const betLevelRaw = resolve(betLevelProp, vars);
+  const betLevelRaw = resolve(betLevelProp, vars, report);
   if (betLevelRaw === undefined) return;
   const betLevel = asNumber(betLevelRaw);
   if (Number.isNaN(betLevel)) report(`betLevel "${betLevelRaw}" is not a number`);
@@ -231,14 +232,14 @@ function applyBetLevel(
 const spin: FlowNodeKind<{ action: string; betLevel?: string }> = {
   kind: 'spin',
   schema: Schema.object({
-    action: Schema.string().default('spin').description('action name, or `$path` to read a var'),
-    // A string, not a number: the IDE's number field cannot hold a `$path` —
+    action: Schema.string().default('spin').description('action name: a literal, `$expr`, or a `{…}` template'),
+    // A string, not a number: the IDE's number field cannot hold a `$expr` —
     // `applyBetLevel` converts a literal with `Number()`.
-    betLevel: Schema.string().description('bet level (a number), or `$path` to read a var'),
+    betLevel: Schema.string().description('bet level (a number): a literal, `$expr`, or a `{…}` template'),
   }),
   outs: ['result', 'failed'],
   async run(p, { ctx, vars, report }) {
-    const action = resolve(p.action, vars);
+    const action = resolve(p.action, vars, report);
     if (typeof action !== 'string' || action === '') {
       report(`'spin' has no action to send (resolved from '${p.action}')`);
       return { out: 'failed', vars: { error: "'spin' has no action" } };
@@ -256,7 +257,7 @@ const spin: FlowNodeKind<{ action: string; betLevel?: string }> = {
  * roundComplete === false` puts the flow into. Both default to reading the
  * PREVIOUS response off `vars.result` (`readPath` follows the numeric
  * `nextActions.0` segment into the array), so a bare node needs no props;
- * either can still be a literal or a different `$path` for a flow that
+ * either can still be a literal or a different `$expr` for a flow that
  * wants to choose the next action itself (a bonus pick, say).
  *
  * No `betLevel` prop: a step keeps the round's bet. A gRPC `Step` carries
@@ -269,19 +270,19 @@ const step: FlowNodeKind<{ roundId: string; action: string }> = {
   schema: Schema.object({
     roundId: Schema.string()
       .default('$result.roundId')
-      .description('the open round id (a literal), or `$path` to read a var'),
+      .description('the open round id: a literal, `$expr`, or a `{…}` template'),
     action: Schema.string()
       .default('$result.nextActions.0')
-      .description('next action name (a literal), or `$path` to read a var'),
+      .description('next action name: a literal, `$expr`, or a `{…}` template'),
   }),
   outs: ['result', 'failed'],
   async run(p, { ctx, vars, report }) {
-    const roundId = resolve(p.roundId, vars);
+    const roundId = resolve(p.roundId, vars, report);
     if (typeof roundId !== 'string' || roundId === '') {
       report(`'step' has no roundId to send (resolved from '${p.roundId}')`);
       return { out: 'failed', vars: { error: "'step' has no roundId" } };
     }
-    const action = resolve(p.action, vars);
+    const action = resolve(p.action, vars, report);
     if (typeof action !== 'string' || action === '') {
       report(`'step' has no action to send (resolved from '${p.action}')`);
       return { out: 'failed', vars: { error: "'step' has no action" } };
@@ -297,7 +298,7 @@ const present: FlowNodeKind<{ turbo: string }> = {
     turbo: Schema.string()
       .default('$turbo')
       .description(
-        "literal 'true', or a `$path` to a var (`true`, or a number > 0 — the shell's `$shell.turbo`) — hurries the board while this plan plays",
+        "literal 'true', or a `$expr` / `{…}` template (`true`, or a number > 0 — the shell's `$shell.turbo`) — hurries the board while this plan plays",
       ),
   }),
   outs: ['next', 'failed'],
@@ -306,7 +307,7 @@ const present: FlowNodeKind<{ turbo: string }> = {
     if (!result) throw new Error('vars.result is missing — run `spin` first');
     const { plan, diagnostics } = service<MechanicsLike>(ctx, 'mechanics').present(result.stage, result.data);
     const play = service<PlayService>(ctx, 'play');
-    const turbo = resolve(p.turbo, vars);
+    const turbo = resolve(p.turbo, vars, report);
     const on = turbo === true || turbo === 'true' || (typeof turbo === 'number' && turbo > 0);
     // `''` is what the form's empty option commits: absent, like `undefined`.
     const off = turbo === false || turbo === 'false' || turbo === 0 || turbo == null || turbo === '';
@@ -409,11 +410,11 @@ const set: FlowNodeKind<{ name: string; value?: unknown }> = {
   kind: 'set',
   schema: Schema.object({
     name: Schema.string().required().description('var name'),
-    value: Schema.any().description('literal, or `$path` to read a var'),
+    value: Schema.any().description('literal, `$expr`, or a `{…}` template'),
   }),
   outs: ['next'],
-  async run(p, { vars }) {
-    return { out: 'next', vars: { [p.name]: resolve(p.value, vars) } };
+  async run(p, { vars, report }) {
+    return { out: 'next', vars: { [p.name]: resolve(p.value, vars, report) } };
   },
 };
 
@@ -422,13 +423,13 @@ const emit: FlowNodeKind<{ event: string; payload?: unknown; wait: boolean }> = 
   kind: 'emit',
   schema: Schema.object({
     event: Schema.string().required().description('event name'),
-    payload: Schema.any().description('literal, or `$path` to read a var'),
+    payload: Schema.any().description('literal, `$expr`, or a `{…}` template'),
     wait: Schema.boolean().default(false).description('hold this branch until every run the event started has ended'),
   }),
   outs: ['next'],
   timeout: false,
-  async run(p, { ctx, vars }) {
-    const done = service<EventsService>(ctx, 'events').emit(p.event, resolve(p.payload, vars));
+  async run(p, { ctx, vars, report }) {
+    const done = service<EventsService>(ctx, 'events').emit(p.event, resolve(p.payload, vars, report));
     if (p.wait) await done;
     return { out: 'next' };
   },
@@ -449,7 +450,7 @@ export function parseTarget(target: string): SceneRef | null {
 
 /**
  * Sets one prop on a mounted scene node. `target`/`value` are each a
- * literal or `$path` (`resolve`); a literal `value` is coerced by the
+ * literal, `$expr` or `{…}` template (`resolve`); a literal `value` is coerced by the
  * node's OWN schema type (`scenes.nodeSchema`) — `'number'` via `Number()`
  * (NaN reports and does nothing further), `'boolean'` by `=== 'true'`,
  * anything else left as the string. `value` defaults to `''` (not left
@@ -475,12 +476,12 @@ const prop: FlowNodeKind<{ target: string; prop: string; value: string }> = {
     target: Schema.string()
       .required()
       .extra('pick', 'node')
-      .description('`<scene>/<node>` (a literal), or `$path` to read a var'),
+      .description('`<scene>/<node>`: a literal, `$expr`, or a `{…}` template'),
     prop: Schema.string().required().description('prop name'),
     value: Schema.string()
       .default('')
       .description(
-        "literal, coerced by the prop's schema type (number/boolean/string), or `$path` to read a var",
+        "literal, coerced by the prop's schema type (number/boolean/string), or `$expr` / a `{…}` template",
       ),
   }),
   outs: ['next'],
@@ -492,7 +493,7 @@ const prop: FlowNodeKind<{ target: string; prop: string; value: string }> = {
     }
     await scenes.ready?.catch(() => {});
 
-    const ref = parseTarget(String(resolve(p.target, vars) ?? ''));
+    const ref = parseTarget(String(resolve(p.target, vars, report) ?? ''));
     if (!ref) {
       report('target must be <scene>/<node>');
       return { out: 'next' };
@@ -507,17 +508,20 @@ const prop: FlowNodeKind<{ target: string; prop: string; value: string }> = {
       return { out: 'next' };
     }
 
-    let value: unknown;
-    if (typeof p.value === 'string' && p.value.startsWith('$')) {
-      value = resolve(p.value, vars);
-      // The var IS already typed, so a `$path` skips the literal branch's
+    // Dynamic when a `$expr`/template changed it — a value that did not
+    // parse comes back as written (reported above) and takes the literal
+    // branch, whose own type check names the prop.
+    let value: unknown = resolve(p.value, vars, report);
+    if (value !== p.value) {
+      // The var IS already typed, so a `$expr` skips the literal branch's
       // own Number()/boolean coercion below for everything EXCEPT a
       // `string` target — `Schema.string()` throws outright on anything
       // but a JS string, and `setProps` would refuse the whole patch (a
       // `$result.win` float into a `text` node's `text` prop, the
       // example's own `show_win` node, is exactly this case). Only a
       // number/boolean is stringified; an object or `null` is left for
-      // `setProps` to refuse, same as before this branch existed.
+      // `setProps` to refuse, same as before this branch existed. A
+      // template is always a string — a number prop refuses it there too.
       const type = dict?.[p.prop]?.type;
       if (type === 'string' && (typeof value === 'number' || typeof value === 'boolean')) {
         value = String(value);
@@ -550,7 +554,11 @@ const prop: FlowNodeKind<{ target: string; prop: string; value: string }> = {
  * the flow does not depend on the shell package.
  */
 interface ShellLike {
-  state: { autoplay: { active: boolean; remaining: number } };
+  state: {
+    autoplay: { active: boolean; remaining: number };
+    freeSpins: { current?: number | null; total: number; totalWin: number };
+    bonus: { label: string; value: string } | null;
+  };
   setBalance(n: number): void;
   setWin(n: number, opts?: { animate?: boolean }): void;
   setBet(n: number): void;
@@ -573,7 +581,10 @@ interface ShellProps {
   turbo: string;
   buyBonusEnabled: ShellFlag;
   freeSpins: string;
+  freeSpinsCurrent: string;
+  freeSpinsTotalWin: string;
   bonus: string;
+  bonusTotalWin: string;
   autoplay: string;
 }
 
@@ -581,8 +592,8 @@ const SHELL_MODES = ['base', 'bonus', 'freeSpins', 'replay'];
 
 /**
  * The flow's one door to the shell's readouts. Every prop is a string:
- * `''` leaves that readout untouched, a `$path` resolves first, a literal
- * is coerced by the setter's type. `mode`/`busy`/`buyBonusEnabled` are
+ * `''` leaves that readout untouched, a `$expr`/template resolves first, a
+ * literal is coerced by the setter's type. `mode`/`busy`/`buyBonusEnabled` are
  * unions of their literals, so the IDE draws a dropdown and a typo is
  * refused at the schema; `run` checks the same sets again for a value that
  * reached it unvalidated. A value that cannot be set (NaN, a bad enum, a
@@ -597,30 +608,33 @@ const shell: FlowNodeKind<ShellProps> = {
   schema: Schema.object({
     balance: Schema.string()
       .default('')
-      .description('balance readout, currency units (a number), or `$path` — e.g. `$result.balance`'),
+      .description('balance readout, currency units (a number): a literal, `$expr`, or a `{…}` template — e.g. `$result.balance`'),
     win: Schema.string()
       .default('')
       .description(
-        'win readout, currency units (a number), or `$path` — e.g. `$result.winAmount`; counts up, 0 snaps (a clear)',
+        'win readout, currency units (a number): a literal, `$expr`, or a `{…}` template — e.g. `$result.winAmount`; counts up, 0 snaps (a clear)',
       ),
-    bet: Schema.string().default('').description('bet readout, currency units (a number), or `$path`'),
+    bet: Schema.string().default('').description('bet readout, currency units (a number): a literal, `$expr`, or a `{…}` template'),
     mode: Schema.union(['', 'base', 'bonus', 'freeSpins', 'replay'])
       .default('')
       .description('what the bar shows'),
     busy: Schema.union(['', 'true', 'false']).default('').description('Spin disabled while a round plays'),
-    turbo: Schema.string().default('').description('turbo level (a number), or `$path`'),
+    turbo: Schema.string().default('').description('turbo level (a number): a literal, `$expr`, or a `{…}` template'),
     buyBonusEnabled: Schema.union(['', 'true', 'false'])
       .default('')
       .description('whether Buy Bonus can be pressed'),
     freeSpins: Schema.string()
       .default('')
-      .description('spins total (a number), or `$path` to `{ current?, total, totalWin }`'),
+      .description('spins total (a number: a literal, `$expr`, or a `{…}` template), or `$expr` to `{ current?, total, totalWin }`'),
+    freeSpinsCurrent: Schema.string().default('').description('spins played so far (a number) — merged over the current free-spins readout'),
+    freeSpinsTotalWin: Schema.string().default('').description('free-spins total win, currency units — merged over the current readout'),
     bonus: Schema.string()
       .default('')
-      .description('`$path` to `{ label, value, totalWin }` — a bonus readout in the bar hero'),
+      .description('`$expr` to `{ label, value, totalWin }` — a bonus readout in the bar hero'),
+    bonusTotalWin: Schema.string().default('').description('bonus total win, currency units — merged over the bonus readout set earlier'),
     autoplay: Schema.string()
       .default('')
-      .description("'tick' (one autoplay spin done), 'stop', or a count (a number, or `$path`)"),
+      .description("'tick' (one autoplay spin done), 'stop', or a count (a number: a literal, `$expr`, or a `{…}` template)"),
   }),
   outs: ['next'],
   async run(p, { ctx, vars, report }) {
@@ -631,7 +645,7 @@ const shell: FlowNodeKind<ShellProps> = {
     }
     /** The prop's value, resolved; `undefined` for an untouched (`''`) prop. */
     const value = (prop: keyof ShellProps): unknown =>
-      p[prop] === '' ? undefined : resolve(p[prop], vars);
+      p[prop] === '' ? undefined : resolve(p[prop], vars, report);
     /** A refused value, as resolved AND as written — `null (from "$result.balance")` tells a missing var from a wrong one. */
     const bad = (prop: keyof ShellProps, v: unknown, what: string) =>
       report(`shell: ${prop} ${quote(v)} (from "${p[prop]}") is not ${what}`);
@@ -682,6 +696,27 @@ const shell: FlowNodeKind<ShellProps> = {
         bad('freeSpins', freeSpins, 'a number or a free-spins object');
       }
     }
+    const fsCurrent = value('freeSpinsCurrent');
+    const fsTotalWin = value('freeSpinsTotalWin');
+    if (fsCurrent !== undefined || fsTotalWin !== undefined) {
+      const next = { ...shell.state.freeSpins };
+      let ok = true;
+      if (fsCurrent !== undefined) {
+        const n = asNumber(fsCurrent);
+        if (Number.isNaN(n)) {
+          bad('freeSpinsCurrent', fsCurrent, 'a number');
+          ok = false;
+        } else next.current = n;
+      }
+      if (fsTotalWin !== undefined) {
+        const n = asNumber(fsTotalWin);
+        if (Number.isNaN(n)) {
+          bad('freeSpinsTotalWin', fsTotalWin, 'a number');
+          ok = false;
+        } else next.totalWin = n;
+      }
+      if (ok) apply('freeSpins', () => shell.setFreeSpins(next));
+    }
     const bonus = value('bonus');
     if (bonus !== undefined) {
       if (isObject(bonus)) {
@@ -689,6 +724,13 @@ const shell: FlowNodeKind<ShellProps> = {
       } else {
         bad('bonus', bonus, 'a bonus object');
       }
+    }
+    const bonusTotalWin = value('bonusTotalWin');
+    if (bonusTotalWin !== undefined) {
+      const n = asNumber(bonusTotalWin);
+      if (Number.isNaN(n)) bad('bonusTotalWin', bonusTotalWin, 'a number');
+      else if (!shell.state.bonus) report('shell: bonusTotalWin: no bonus to update', 'warning');
+      else apply('bonusTotalWin', () => shell.setBonus({ ...shell.state.bonus!, totalWin: n }));
     }
     const autoplay = value('autoplay');
     if (autoplay === 'tick') {

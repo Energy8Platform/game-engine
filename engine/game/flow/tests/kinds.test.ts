@@ -190,6 +190,23 @@ describe('built-in kinds', () => {
     expect(session.play).toHaveBeenCalledTimes(2);
   });
 
+  it('spin: a `$expr` betLevel computes (`$shell.bet * 2` doubles the live bet); a template action is a string and goes on the wire', async () => {
+    const session = fakeSession();
+    const { rc } = runCtx({ session }, { shell: { bet: 2 }, kind: 'bonus' });
+    await kind('spin').run!(spinProps({ action: 'buy_{$kind}', betLevel: '$shell.bet * 2' }), rc);
+    expect(session.play).toHaveBeenLastCalledWith({ action: 'buy_bonus', betLevel: 4 });
+    expect(rc.report).not.toHaveBeenCalled();
+  });
+
+  it('spin: a `$expr` that does not parse is a warning on the node and the string goes as written', async () => {
+    const session = fakeSession();
+    const { rc } = runCtx({ session }, { shell: { bet: 2 } });
+    await kind('spin').run!(spinProps({ betLevel: '$shell.bet | bogus' }), rc);
+    expect(rc.report).toHaveBeenCalledWith(expect.stringMatching(/^bad value '\$shell.bet \| bogus': unknown format 'bogus'/), 'warning');
+    expect(rc.report).toHaveBeenLastCalledWith('betLevel "$shell.bet | bogus" is not a number');
+    expect(session.play).toHaveBeenLastCalledWith({ action: 'spin' });
+  });
+
   it('spin: a `$path` action that resolves to a non-string (a number, an object) is refused the same way — never on the wire', async () => {
     const session = fakeSession();
     const { rc } = runCtx({ session }, { n: 5, chosen: { action: 'gamble' } });
@@ -476,6 +493,17 @@ describe('built-in kinds', () => {
       expect(rc.report).not.toHaveBeenCalled();
     });
 
+    it('a `{…}` template into a `string` prop is the joined string; a `$expr` into a `number` prop is the computed number', async () => {
+      const setProps = vi.fn(() => true);
+      const scenes = { setProps, nodeSchema: nodeSchema({ text: { type: 'string' }, x: { type: 'number' } }) };
+      const { rc } = runCtx({ scenes }, { result: { data: { mult_running: 48 } }, a: 10, b: 4 });
+      await kind('prop').run!({ target: 'a/b', prop: 'text', value: 'x{$result.data.mult_running}' }, rc);
+      expect(setProps).toHaveBeenLastCalledWith({ scene: 'a', node: 'b' }, { text: 'x48' });
+      await kind('prop').run!({ target: 'a/b', prop: 'x', value: '$a - $b' }, rc);
+      expect(setProps).toHaveBeenLastCalledWith({ scene: 'a', node: 'b' }, { x: 6 });
+      expect(rc.report).not.toHaveBeenCalled();
+    });
+
     it('a missing node: `setProps` false reports (setProps already reported its own diagnostic elsewhere) and still leaves by next', async () => {
       const setProps = vi.fn(() => false);
       const scenes = { setProps, nodeSchema: vi.fn(() => undefined) };
@@ -594,8 +622,12 @@ describe('built-in kinds', () => {
    */
   describe('shell', () => {
     /** The `Shell` handle as the kind reaches it: `state.autoplay` plus spy setters; `setAutoplay` writes `state` back the way the real one does, so `tick` can be applied twice. */
-    function fakeShell(autoplay = { active: false, remaining: 0 }) {
-      const state = { autoplay };
+    function fakeShell(
+      autoplay = { active: false, remaining: 0 },
+      freeSpins: { current?: number | null; total: number; totalWin: number } = { current: 0, total: 0, totalWin: 0 },
+      bonus: { label: string; value: string } | null = null,
+    ) {
+      const state = { autoplay, freeSpins, bonus };
       return {
         state,
         setBalance: vi.fn(),
@@ -621,7 +653,8 @@ describe('built-in kinds', () => {
 
     it("every prop defaults to '' (untouched); the enumerated ones refuse a literal outside their union at the schema", () => {
       expect(shellProps()).toEqual({
-        balance: '', win: '', bet: '', mode: '', busy: '', turbo: '', buyBonusEnabled: '', freeSpins: '', bonus: '', autoplay: '',
+        balance: '', win: '', bet: '', mode: '', busy: '', turbo: '', buyBonusEnabled: '', freeSpins: '',
+        freeSpinsCurrent: '', freeSpinsTotalWin: '', bonus: '', bonusTotalWin: '', autoplay: '',
       });
       expect(shellProps({ mode: 'bonus', busy: 'true', buyBonusEnabled: 'false' })).toMatchObject({
         mode: 'bonus', busy: 'true', buyBonusEnabled: 'false',
@@ -741,6 +774,46 @@ describe('built-in kinds', () => {
       expect(shell.setBonus).toHaveBeenCalledTimes(1);
     });
 
+    it('freeSpinsCurrent/freeSpinsTotalWin: merged over the current free-spins readout, one setFreeSpins; NaN reports and sets nothing', async () => {
+      const shell = fakeShell(undefined, { current: 1, total: 8, totalWin: 2 });
+      const { rc } = runCtx({ shell }, { result: { winAmount: 4.6 } });
+      await kind('shell').run!(shellProps({ freeSpinsCurrent: '3' }), rc);
+      expect(shell.setFreeSpins).toHaveBeenLastCalledWith({ current: 3, total: 8, totalWin: 2 });
+      await kind('shell').run!(shellProps({ freeSpinsTotalWin: '$result.winAmount' }), rc);
+      expect(shell.setFreeSpins).toHaveBeenLastCalledWith({ current: 1, total: 8, totalWin: 4.6 });
+      await kind('shell').run!(shellProps({ freeSpinsCurrent: '$result.winAmount + 1', freeSpinsTotalWin: '9' }), rc);
+      expect(shell.setFreeSpins).toHaveBeenLastCalledWith({ current: 5.6, total: 8, totalWin: 9 });
+      expect(shell.setFreeSpins).toHaveBeenCalledTimes(3);
+      expect(rc.report).not.toHaveBeenCalled();
+      await kind('shell').run!(shellProps({ freeSpinsCurrent: 'abc', freeSpinsTotalWin: '1' }), rc);
+      expect(rc.report).toHaveBeenCalledWith('shell: freeSpinsCurrent "abc" (from "abc") is not a number');
+      expect(shell.setFreeSpins).toHaveBeenCalledTimes(3);
+    });
+
+    it('bonusTotalWin: merged over the bonus readout set earlier; no bonus is a warning and nothing set', async () => {
+      const shell = fakeShell();
+      const { rc } = runCtx({ shell }, { result: { winAmount: 4.6 } });
+      await kind('shell').run!(shellProps({ bonusTotalWin: '$result.winAmount' }), rc);
+      expect(rc.report).toHaveBeenCalledWith('shell: bonusTotalWin: no bonus to update', 'warning');
+      expect(setters(shell)).toEqual([]);
+      shell.state.bonus = { label: 'Adventure', value: '3/5' };
+      await kind('shell').run!(shellProps({ bonusTotalWin: '$result.winAmount' }), rc);
+      expect(shell.setBonus).toHaveBeenCalledWith({ label: 'Adventure', value: '3/5', totalWin: 4.6 });
+      await kind('shell').run!(shellProps({ bonusTotalWin: 'x' }), rc);
+      expect(rc.report).toHaveBeenLastCalledWith('shell: bonusTotalWin "x" (from "x") is not a number');
+      expect(shell.setBonus).toHaveBeenCalledTimes(1);
+    });
+
+    it('a `{…}` template resolves before the type check, and a bad `$expr` is a warning naming the value', async () => {
+      const shell = fakeShell();
+      const { rc } = runCtx({ shell }, { n: 4 });
+      await kind('shell').run!(shellProps({ bet: '{$n}', turbo: '$n |' }), rc);
+      expect(shell.setBet).toHaveBeenCalledWith(4);
+      expect(rc.report).toHaveBeenCalledWith(expect.stringMatching(/^bad value '\$n \|':/), 'warning');
+      expect(rc.report).toHaveBeenLastCalledWith('shell: turbo "$n |" (from "$n |") is not a number');
+      expect(shell.setTurbo).not.toHaveBeenCalled();
+    });
+
     it("autoplay: a number is `{ active: n > 0, remaining: n }`; 'stop' ends it; 'tick' counts one down and stops at 0; Infinity is left alone; NaN reports", async () => {
       const shell = fakeShell({ active: true, remaining: 2 });
       const { rc } = runCtx({ shell }, { n: 5 });
@@ -795,6 +868,29 @@ describe('built-in kinds', () => {
   });
 
   /** Slice 26 — `ack`: "the result was shown", to a session provider that has a credit hook. */
+  describe('set / emit', () => {
+    it('set: a `{…}` template is a string, a `$expr` its value, a literal itself', async () => {
+      const { rc } = runCtx({}, { result: { data: { fs_total: 10, fs_remaining: 4 } } });
+      const value = async (v: unknown) => (await kind('set').run!({ name: 'x', value: v }, rc)).vars!.x;
+      expect(await value('{$result.data.fs_total - $result.data.fs_remaining}/{$result.data.fs_total}')).toBe('6/10');
+      expect(await value('$result.data.fs_total - $result.data.fs_remaining')).toBe(6);
+      expect(await value('tapped')).toBe('tapped');
+      expect(await value(3)).toBe(3);
+      expect(rc.report).not.toHaveBeenCalled();
+      expect(await value('{$result.data.fs_total +}')).toBe('{$result.data.fs_total +}');
+      expect(rc.report).toHaveBeenCalledWith(expect.stringMatching(/^bad value /), 'warning');
+    });
+
+    it('emit: a `{…}` template payload reaches the bus as a string', async () => {
+      const events = createEvents();
+      const heard = vi.fn();
+      events.on('hello', heard);
+      const { rc } = runCtx({ events }, { n: 48 });
+      await kind('emit').run!({ event: 'hello', payload: 'x{$n}', wait: false }, rc);
+      expect(heard).toHaveBeenCalledWith('x48');
+    });
+  });
+
   describe('ack', () => {
     it('calls session.ack with vars.result and leaves by next', async () => {
       const session = { ...fakeSession(), ack: vi.fn() };
