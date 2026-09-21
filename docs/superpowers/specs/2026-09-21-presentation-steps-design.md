@@ -207,7 +207,8 @@ the board's centre. Pick and bounds work through the wrapper unchanged.
   (`null` when absent or unparsable); `e8 build` freezes it under
   `dist/api/spec` with the other documents.
 - `shell-pixi`: when `config.gameInfo.sections` is empty, the row fetches
-  `/api/spec` after boot (non-blocking) and, when `spec.symbols` carries
+  `/api/spec` once, before `createPixiShell` (the shell has no game-info
+  setter; one request on the row's own boot) and, when `spec.symbols` carries
   `pay` entries, adds one `{ type: 'paytable', title: 'Paytable', rows }`
   section: a row per symbol with `pay`, `wins` = its entries sorted by count
   ascending as `{ count, multiplier }`; `symbol.image` = the symbol's
