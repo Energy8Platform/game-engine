@@ -79,6 +79,7 @@ describe('spin on a real e8-server', () => {
     expect(r.diagnostics).toEqual([]);
     expect(r.spins).toBe(20);
     expect(r.bet).toBe(0.2); // spec.json's first betLevel
+    expect(r.cost).toBe(1); // first-slot's `spin` action: cost = 1.0
     expect(r.seed).toBe('abc');
     expect(r.rtp).toBeGreaterThanOrEqual(0);
     // Measured on seed 'abc': some spins pay and some do not, so a rate
@@ -269,15 +270,21 @@ describe('summarise', () => {
       incompleteRounds: 0,
       scriptSha256: null,
       diagnostics: [],
+      cost: 1,
     });
+  });
+
+  it('a costed action divides rtp by cost; avgWin stays the raw round-bet mean', () => {
+    const s = summarise([[result(2)], [result(0)]], 100);
+    expect(s.rtp).toBe(0.01); // (2 + 0) / 2 / 100
+    expect(s.avgWin).toBe(1); // NOT divided by cost
+    expect(s.cost).toBe(100);
   });
 });
 
 describe('playRounds', () => {
   /** A `PlaySpin` that answers from a canned queue — no session, no binary. */
-  function scripted(
-    steps: Array<{ result?: SpinResult; diagnostics?: Diagnostic[] }>,
-  ): PlaySpin {
+  function scripted(steps: Array<{ result?: SpinResult; diagnostics?: Diagnostic[] }>): PlaySpin {
     let i = 0;
     return async () => {
       const step = steps[i++];
@@ -312,7 +319,11 @@ describe('playRounds', () => {
       // run ends there — no further calls to `play`.
       { diagnostics: [diagnostic('error', 'session', 'play', 'e8-server died')] },
     ]);
-    const { rounds, diagnostics } = await playRounds(2, { gameId: 'g', action: 'spin', betLevel: 1 }, play);
+    const { rounds, diagnostics } = await playRounds(
+      2,
+      { gameId: 'g', action: 'spin', betLevel: 1 },
+      play,
+    );
     expect(rounds).toHaveLength(1); // round 1 only — round 2's two responses are nowhere in it
     expect(rounds[0]).toHaveLength(1);
     expect(rounds[0][0].roundId).toBe('r1');
@@ -336,7 +347,11 @@ describe('playRounds', () => {
         }),
       },
     ]);
-    const { rounds, diagnostics } = await playRounds(1, { gameId: 'g', action: 'spin', betLevel: 1 }, play);
+    const { rounds, diagnostics } = await playRounds(
+      1,
+      { gameId: 'g', action: 'spin', betLevel: 1 },
+      play,
+    );
     expect(diagnostics).toEqual([]); // playRounds itself reports nothing on this path
     expect(rounds).toHaveLength(1); // pushed whole, same as a completed round
     expect(rounds[0]).toHaveLength(1);

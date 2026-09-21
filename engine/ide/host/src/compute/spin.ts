@@ -22,6 +22,7 @@ import {
   type SpinResult,
 } from '@energy8engine/contracts';
 import * as session from '@energy8engine/session-dev';
+import { parseSpinSchema } from '@energy8engine/spin-parser';
 import { assemble } from '../plugins/spec';
 import { check } from './check';
 
@@ -50,10 +51,19 @@ export interface SpinReport {
   /** Total `Step` calls across every round (the opening response is not a `Step`). */
   steps: number;
   bet: number;
-  /** Mean win multiplier over each round's FINAL `totalWin` — already a multiple of the bet. */
+  /**
+   * The played action's bet multiplier from the `.spin` schema; 1 when
+   * unknown (no schema, no matching action, or a read/parse failure).
+   * `rtp` divides by this value, EXCEPT a `cost` of 0 or otherwise not a
+   * finite positive number is treated as 1 for that division only — this
+   * field still reports the schema's value honestly, even when it is 0.
+   */
+  cost: number;
+  /** Mean win multiplier over each round's FINAL `totalWin`, divided by `cost` — already a multiple of the bet. */
   rtp: number;
   hitRate: number;
   maxWin: number;
+  /** Mean win multiplier over each round's FINAL `totalWin` — a bet multiple, NOT divided by `cost`. */
   avgWin: number;
   /** Tallies every response played (the opening one and every `Step`), not just finals. */
   stages: Record<string, number>;
@@ -94,8 +104,12 @@ export const MAX_STEPS_PER_ROUND = 500;
  * `diagnostics` holds one entry per round left incomplete — the step cap
  * or no next action, told apart by whether the round actually reached
  * `MAX_STEPS_PER_ROUND` responses; `spin` prepends its own (session, input).
+ * `cost` (default 1) is the divisor for `rtp` — the played action's bet
+ * multiplier, so `rtp` ends up a mean multiple of the ACTION, not the bet;
+ * `avgWin` is left alone (see its own doc). `spin` is the one that reads a
+ * real `cost` off the `.spin` schema and guards it before calling this.
  */
-export function summarise(rounds: SpinResult[][]): Omit<SpinReport, 'bet' | 'seed'> {
+export function summarise(rounds: SpinResult[][], cost = 1): Omit<SpinReport, 'bet' | 'seed'> {
   const finals = rounds.map((r) => r[r.length - 1]);
   const wins = finals.map((r) => r.totalWin);
   const sum = wins.reduce((a, b) => a + b, 0);
@@ -120,7 +134,8 @@ export function summarise(rounds: SpinResult[][]): Omit<SpinReport, 'bet' | 'see
   return {
     spins: wins.length,
     steps,
-    rtp: wins.length ? sum / wins.length : 0,
+    cost,
+    rtp: wins.length ? sum / wins.length / cost : 0,
     hitRate: wins.length ? wins.filter((w) => w > 0).length / wins.length : 0,
     maxWin: wins.length ? Math.max(...wins) : 0,
     avgWin: wins.length ? sum / wins.length : 0,
@@ -169,7 +184,11 @@ export async function playRounds(
     const round: SpinResult[] = [first.result];
     let failed = false;
     let last = round.at(-1)!;
-    while (!last.roundComplete && last.nextActions.length > 0 && round.length <= MAX_STEPS_PER_ROUND) {
+    while (
+      !last.roundComplete &&
+      last.nextActions.length > 0 &&
+      round.length <= MAX_STEPS_PER_ROUND
+    ) {
       const played = await play({ ...req, roundId: last.roundId, action: last.nextActions[0] });
       if (!played.result) {
         diagnostics.push(...played.diagnostics);
@@ -192,10 +211,15 @@ export async function spin(input: SpinInput): Promise<SpinReport> {
   let rounds: SpinResult[][] = [];
   const diagnostics: Diagnostic[] = [];
   let bet = input.bet ?? 0;
+  // The schema's raw cost — reported honestly even when it is 0 (see
+  // `SpinReport.cost`'s doc). `report()` below guards it for `rtp`'s
+  // division separately, so a 0 or non-finite cost never yields Infinity.
+  let cost = 1;
 
   const report = (): SpinReport => {
-    const summary = summarise(rounds);
-    return { ...summary, bet, seed, diagnostics: [...diagnostics, ...summary.diagnostics] };
+    const divisor = Number.isFinite(cost) && cost > 0 ? cost : 1;
+    const summary = summarise(rounds, divisor);
+    return { ...summary, bet, seed, cost, diagnostics: [...diagnostics, ...summary.diagnostics] };
   };
 
   if (!Number.isInteger(n) || n < 1) {
@@ -223,6 +247,13 @@ export async function spin(input: SpinInput): Promise<SpinReport> {
   const assembled = await assemble(input.cwd);
   diagnostics.push(...assembled.diagnostics);
   if (assembled.diagnostics.some((d) => d.severity === 'error')) return report();
+
+  try {
+    const { schema } = parseSpinSchema(await readFile(assembled.spinFile, 'utf8'));
+    cost = schema?.actions.find((a) => a.name === (input.action ?? 'spin'))?.cost ?? 1;
+  } catch {
+    // No schema: cost 1, the help says so.
+  }
 
   const ctx = new Context();
   try {
