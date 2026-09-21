@@ -60,7 +60,7 @@ function emittedJs(dir: string): string {
 }
 
 describe('build', () => {
-  it('writes index.html, the four api/ documents and assets/ with no error diagnostics', () => {
+  it('writes index.html, the five api/ documents and assets/ with no error diagnostics', () => {
     expect(result.out).toBe(out);
     expect(result.diagnostics.filter((d) => d.severity === 'error')).toEqual([]);
     expect(existsSync(join(out, 'index.html'))).toBe(true);
@@ -71,6 +71,7 @@ describe('build', () => {
       'api/flow',
       'api/scenes',
       'api/symbols',
+      'api/spec',
       'assets/spin.wav',
       'assets/symbols/1.png',
     ]) {
@@ -105,10 +106,10 @@ describe('build', () => {
     expect(js).toMatch(/reelstep1:\(\)=>/);
   });
 
-  it('api/flow, api/scenes and api/symbols are byte-identical to a live host’s answers', async () => {
+  it('api/flow, api/scenes, api/symbols and api/spec are byte-identical to a live host’s answers', async () => {
     const host = await createIdeHost({ root: cwd, port: 0, previewPort: 0 });
     try {
-      for (const name of ['flow', 'scenes', 'symbols']) {
+      for (const name of ['flow', 'scenes', 'symbols', 'spec']) {
         const live = await (await fetch(`${host.url}/api/${name}`)).text();
         expect(readFileSync(join(out, 'api', name), 'utf8'), name).toBe(live);
       }
@@ -136,10 +137,23 @@ describe('build', () => {
     // `ide-bridge` in the browser graph (every other mention is a comment).
     expect(js).not.toContain('ide-bridge');
     expect(result.diagnostics.filter((d) => d.where === '--base')).toEqual([]);
+    // No `--target`: the default build has nothing to answer a spin with —
+    // said once, as an `info` diagnostic, never as an `error` (an `e8
+    // build` with no target is a normal, supported thing to do).
+    expect(result.diagnostics).toContainEqual(
+      expect.objectContaining({
+        severity: 'info',
+        where: '--target',
+        message: expect.stringContaining('the default target has no session'),
+      }),
+    );
 
     const platformOut = join(cwd, 'dist-platform');
     const platform = await build({ cwd, out: platformOut, target: 'platform', base: '/game/' });
     expect(platform.diagnostics.filter((d) => d.severity === 'error')).toEqual([]);
+    // `--target platform` bakes its own session seam in — the info line is
+    // specifically about a build with none, so it does not apply here.
+    expect(platform.diagnostics.filter((d) => d.where === '--target')).toEqual([]);
     // `--base` moves the page's assets; the rows' `/api/*` stay at the root — said as a warning.
     expect(platform.diagnostics.filter((d) => d.where === '--base')).toMatchObject([
       { severity: 'warning', plugin: 'build', message: expect.stringContaining('/api/*') },

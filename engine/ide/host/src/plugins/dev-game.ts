@@ -334,6 +334,7 @@ export async function apply(ctx: Context, config: DevGameConfig): Promise<void> 
   ctx.get('scenesHost')?.attachGameRoutes(preview);
   ctx.get('flowHost')?.attachGameRoutes(preview);
   ctx.get('symbolsHost')?.attachGameRoutes(preview);
+  ctx.get('gameSpecHost')?.attachGameRoutes(preview);
 
   // Resolved once, here, rather than read as `config.gamesDir` at every use
   // below. A trailing slash is an easy way to spell the same directory

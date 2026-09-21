@@ -77,7 +77,7 @@ export interface BuildResult {
 }
 
 /** The documents the rows fetch same-origin at boot — frozen under `dist/api/`. */
-const DOCUMENTS = ['flow', 'scenes', 'symbols'] as const;
+const DOCUMENTS = ['flow', 'scenes', 'symbols', 'spec'] as const;
 
 export async function build(input: BuildInput): Promise<BuildResult> {
   // Real-pathed, because vite's module ids are: `manualChunks` below
@@ -129,6 +129,21 @@ export async function build(input: BuildInput): Promise<BuildResult> {
         'build',
         '--base',
         'the rows fetch /api/* at the origin root — serve dist/api there or proxy it',
+      ),
+    );
+  }
+  // No `--target`: the bundle bakes in no session seam (`createGame`'s
+  // `buildTarget` is `undefined`), so nothing in it can answer
+  // `/api/session`/`/api/spin` on its own — said once, as `info` (this is
+  // a normal, supported build — e.g. dist/ served in front of a running
+  // dev host, or a static preview), never as an `error`.
+  if (input.target === undefined) {
+    diagnostics.push(
+      diagnostic(
+        'info',
+        'build',
+        '--target',
+        'the default target has no session: serve /api/session and /api/spin from a host, or build with --target platform',
       ),
     );
   }
