@@ -100,6 +100,8 @@ export interface GridLike {
   getCell(col: number, row: number): CellLike;
   readonly cols: number;
   readonly rows: number;
+  /** The legacy `ReelGrid.geometry`'s centre, in the view's local space — what `origin: 'center'` offsets by. Optional: this package's test fakes have none. */
+  readonly geometry?: { centerX: number; centerY: number };
 }
 
 /**

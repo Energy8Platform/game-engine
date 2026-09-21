@@ -43,6 +43,7 @@
  */
 import type { Context } from 'cordis';
 import Schema from 'schemastery';
+import { Container } from 'pixi.js';
 import { createReelsBoard, type ReelsBoard } from './index';
 import type { CreateReelSystemOptions, SymbolResolver } from '@energy8platform/game-engine/slot';
 import type {} from '@energy8engine/scenes/runtime';
@@ -87,13 +88,26 @@ export function apply(ctx: Context, config: Partial<CreateReelSystemOptions>): v
           type: 'reels',
           schema: Schema.object({
             row: Schema.string().default('reels1').description('the reels row this node shows'),
+            origin: Schema.union(['cell', 'center'])
+              .default('cell')
+              .description("what x/y name: reel 0's cell centre (the board's own origin) or the board's centre"),
           }),
-          mount: () => {
+          mount: (props) => {
             board.view.parent?.removeChild(board.view);
-            return board.view;
+            if (props.origin !== 'center') return board.view;
+            const g = board.grid.geometry;
+            board.view.position.set(-(g?.centerX ?? 0), -(g?.centerY ?? 0));
+            const wrap = new Container();
+            wrap.label = 'reels:center';
+            wrap.addChild(board.view);
+            return wrap;
           },
           unmount: (view) => {
             view.parent?.removeChild(view);
+            if (view === board.view) return;
+            board.view.position.set(0, 0);
+            board.view.parent?.removeChild(board.view);
+            view.destroy();
           },
         }),
       'reels:node-type',

@@ -86,6 +86,27 @@ describe('the reels node type', () => {
     expect(view.destroyed).toBe(false);
   });
 
+  it('origin: center wraps the board view offset by the grid’s centre; cell (the default) hands out the bare view; unmount resets', async () => {
+    const ctx = new Context();
+    await ctx.plugin(assetsService);
+    await ctx.plugin(runtime, { config: { grid: { cols: 5, rows: 3, cellSize: 100, gap: 10 } } });
+    const nodeTypes = createNodeTypes();
+    ctx.provide('nodeTypes', nodeTypes);
+    await vi.waitFor(() => expect(nodeTypes.get('reels')).toBeDefined());
+    const type = nodeTypes.get('reels')!;
+    const board = ctx.get('board')!;
+    const g = board.grid.geometry!;
+    const view = type.mount({ row: 'reels1', origin: 'center' }, ctx);
+    expect(view).not.toBe(board.view);
+    expect(board.view.parent).toBe(view);
+    expect(board.view.position.x).toBeCloseTo(-g.centerX);
+    expect(board.view.position.y).toBeCloseTo(-g.centerY);
+    type.unmount!(view);
+    expect(board.view.parent).toBeNull();
+    expect(board.view.position.x).toBe(0);
+    expect(type.mount({ row: 'reels1', origin: 'cell' }, ctx)).toBe(board.view);
+  });
+
   it('a hot re-apply registers again (a new board) and the disposer takes the old registration back', async () => {
     const ctx = new Context();
     await ctx.plugin(assetsService);
