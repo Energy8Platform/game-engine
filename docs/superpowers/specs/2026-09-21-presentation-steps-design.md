@@ -84,7 +84,13 @@ steps.push({ kind: 'emit', event: 'pd.round', payload: { step, meters, casc_mult
   aborted, and by `stop()` for every run still live.
 - `on.busy` gains `'parallel'`: fire at once, always, a concurrent run. The
   listener returns the run's promise for `parallel` and for an idle
-  `ignore`/`queue`; a dropped or queued fire returns `undefined`.
+  `ignore`/`queue`; a dropped or queued fire returns `undefined` — so a
+  plan's `emit { wait }` to a same-flow `on { busy: ignore }` holds nothing
+  (the fire is dropped while `present` is live); `busy: parallel` is what
+  gives `wait` something to wait for.
+- `present` opts out of the interpreter's 30 s cap (`timeout: false`, as
+  `wait` and `emit` do): a plan is as long as its board steps and its
+  `emit { wait }` holds; `ui.skip` and `stop()` are the escapes.
 - A parallel run's `vars` are fresh (`Object.create(view)`): `$event` and
   the live roots (`$shell`, `$session`, …), **not** the emitting run's vars
   — the payload carries what the branch needs.
@@ -109,7 +115,9 @@ asks yet); `present` does not announce every step on the bus.
 `resolveValue(value: unknown, vars, report?: (message: string) => void): unknown`:
 
 - a string containing `{…}` is a **template**: each `{expr}` is evaluated,
-  `String()`ed and joined with the literal text; the result is a string;
+  `String()`ed and joined with the literal text — a span that reads `null`
+  or `undefined` (a missing var) renders as `''`, not `'null'`; the result
+  is a string;
 - a string starting with `$` is an **expression** (`evaluateValue`);
 - any other value is the literal, unchanged.
 
