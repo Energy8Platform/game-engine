@@ -47,6 +47,22 @@
  * apply time). A skip is not a flow node: it has to land WHILE the flow is
  * busy, which is the one moment a flow node cannot run.
  *
+ * **Slice 29 adds the one step no board performs.** `EmitStep`
+ * (`@energy8engine/contracts`) is a `KnownPresentationStep` but deliberately
+ * left out of `KNOWN_STEP_KINDS`, so `executePlan` never offers it to the
+ * board at all — it always falls to the registry, where `apply` below
+ * registers a handler for `emit` ahead of any plugin (a plugin registering
+ * its own `emit` collides, and the built-in keeps it — `BoardStepRegistry`'s
+ * ordinary first-wins rule). The handler fires the flow bus with
+ * `event`/`payload` and, when `wait: true`, holds the plan open until the
+ * bus's own promise settles — nothing to hold when the bus predates Task 2
+ * and `emit` is still synchronous, or when no `events` service is composed
+ * at all (a per-step diagnostic then, the same as any step nothing can
+ * perform). `skip()`'s existing fan-out reaches it for free: the handler's
+ * `skip` releases every pending hold at once, whether or not the listener's
+ * own promise has settled — the branches the event started keep running on
+ * their own, only the PLAN stops waiting on them.
+ *
  * **The precedence rule is untouched.** `executePlan` gives the board first
  * refusal on every kind and reaches a registry only for kinds the board has
  * no method for, so registering `spinTo` here still cannot replace the
@@ -70,7 +86,7 @@
  * the `inject` field this row deliberately does not have.
  */
 import type { Context } from 'cordis';
-import type { Diagnostic, PresentationStep, StepOpts } from '@energy8engine/contracts';
+import type { Diagnostic, EmitStep, PresentationStep, StepOpts } from '@energy8engine/contracts';
 import type { SpinLog, SpinLogEntry } from '@energy8engine/spin-log';
 import { reportAll, type DiagnosticsService } from '@energy8engine/diagnostics';
 // Type-only and fully erased — the same device `first-slot`'s `main.ts`
@@ -156,14 +172,50 @@ declare module 'cordis' {
 
 export const name = 'play-loop';
 
-/** The flow bus, as much of it as this row uses. Not cordis's own `ctx.events`. */
+/**
+ * The flow bus, as much of it as this row uses. Not cordis's own
+ * `ctx.events`. Structural, on purpose: `@energy8engine/flow`'s own
+ * `EventsService.emit` returns `Promise<void>` (Task 2, `Promise.allSettled`
+ * of whatever its listeners returned), but nothing here imports that type —
+ * `void | Promise<void>` accepts either shape, so the built-in `emit` step
+ * below works against today's bus and tomorrow's without an upgrade of its
+ * own, and against any other bus a project composes in its place.
+ */
 interface FlowBus {
   on(name: string, fn: (payload: unknown) => void): () => void;
+  emit(name: string, payload?: unknown): void | Promise<void>;
 }
 
 export function apply(ctx: Context, config: { skipEvents?: string[] } = {}): void {
   const steps = createBoardStepRegistry();
   const skipEvents = config.skipEvents ?? ['ui.skip'];
+
+  // The one step no board performs: a beat on the flow bus. `wait: true`
+  // holds the plan until the runs the event started have drained (the
+  // bus's `emit` promise — `@energy8engine/flow`); `skip()` lets go of
+  // every pending hold at once, the branches keep running on their own.
+  const holds = new Set<() => void>();
+  steps.register({
+    kind: 'emit',
+    async run(step) {
+      const bus = ctx.reflect.get('events', false) as FlowBus | undefined;
+      if (!bus) throw new Error("no 'events' service in this composition");
+      const { event, payload, wait } = step as unknown as EmitStep;
+      const done = bus.emit(event, payload);
+      if (!wait || !done || typeof done.then !== 'function') return;
+      await new Promise<void>((resolve) => {
+        const release = () => {
+          holds.delete(release);
+          resolve();
+        };
+        holds.add(release);
+        void done.then(release, release);
+      });
+    },
+    skip() {
+      for (const release of [...holds]) release();
+    },
+  });
 
   // Provided as its own service, not only as a field on `play`, so a
   // plugin can `inject(['steps'])` — depend on exactly the capability it

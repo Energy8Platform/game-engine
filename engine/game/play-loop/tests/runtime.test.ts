@@ -36,7 +36,9 @@ describe('play-loop runtime half', () => {
 
     expect(ctx.steps).toBeDefined();
     expect(typeof ctx.steps.register).toBe('function');
-    expect(ctx.steps.kinds()).toEqual([]);
+    // `emit` (slice 29) registers itself at `apply` — see the built-in
+    // `emit` describe block below.
+    expect(ctx.steps.kinds()).toEqual(['emit']);
 
     await ctx.fiber.dispose();
   });
@@ -348,13 +350,23 @@ describe('play-loop runtime half: reporting to the diagnostics service', () => {
  */
 /** A stand-in for `@energy8engine/flow`'s `createEvents()` — the same two methods. */
 function fakeBus() {
-  const listeners = new Map<string, Set<(payload: unknown) => void>>();
+  const listeners = new Map<string, Set<(payload: unknown) => void | Promise<void>>>();
   return {
     service: {
+      // Matches `@energy8engine/flow`'s `createEvents`: dispatch is
+      // synchronous, the returned promise settles once every listener's own
+      // promise has (a listener returning nothing is not awaited at all).
       emit: (name: string, payload?: unknown) => {
-        for (const fn of [...(listeners.get(name) ?? [])]) fn(payload);
+        const set = listeners.get(name);
+        if (!set) return Promise.resolve();
+        const pending: Promise<unknown>[] = [];
+        for (const fn of [...set]) {
+          const r = fn(payload);
+          if (r && typeof (r as Promise<unknown>).then === 'function') pending.push(r as Promise<unknown>);
+        }
+        return Promise.allSettled(pending).then(() => undefined);
       },
-      on: (name: string, fn: (payload: unknown) => void) => {
+      on: (name: string, fn: (payload: unknown) => void | Promise<void>) => {
         const set = listeners.get(name) ?? new Set();
         listeners.set(name, set);
         set.add(fn);
@@ -660,6 +672,85 @@ describe('play-loop runtime half: turbo and skip', () => {
 
     expect(diagnostics).toEqual([]);
 
+    await ctx.fiber.dispose();
+  });
+});
+
+/**
+ * Slice 29 — the one step no board performs. `EmitStep`
+ * (`@energy8engine/contracts`) is a `KnownPresentationStep` but deliberately
+ * absent from `KNOWN_STEP_KINDS`, so `executePlan` never asks the board for
+ * it — it always falls through to whatever this row registered for `emit`
+ * at `apply`, ahead of any plugin. See `runtime.ts`'s module doc for the
+ * built-in's own summary.
+ */
+describe('play-loop runtime half: the built-in emit step', () => {
+  it('registers `emit` at apply; a plugin registering it collides and the built-in keeps it', async () => {
+    const ctx = new Context();
+    await ctx.plugin(runtime);
+    expect(ctx.steps.kinds()).toEqual(['emit']);
+    ctx.steps.register({ kind: 'emit', run: async () => {} });
+    expect(ctx.steps.collisions()).toHaveLength(1);
+    await ctx.fiber.dispose();
+  });
+
+  it('fires the bus with the payload; wait: true holds until the listener’s promise settles; wait absent does not hold', async () => {
+    const ctx = new Context();
+    const bus = fakeBus();
+    await ctx.plugin(busPlugin(bus));
+    await ctx.plugin(runtime);
+    let release!: () => void;
+    const seen: unknown[] = [];
+    bus.service.on('pd.round', (p) => { seen.push(p); return new Promise<void>((r) => (release = r)); });
+    const order: string[] = [];
+    const board = { spinTo: async () => { order.push('spinTo'); } } as unknown as BoardApi;
+    const running = ctx.play.execute(
+      [{ kind: 'emit', event: 'pd.round', payload: { n: 1 }, wait: true }, { kind: 'spinTo', board: [[1]] }],
+      board,
+    );
+    await new Promise((r) => setTimeout(r, 10));
+    expect(seen).toEqual([{ n: 1 }]);
+    expect(order).toEqual([]);
+    release();
+    expect(await running).toEqual([]);
+    expect(order).toEqual(['spinTo']);
+    // wait absent: the next step runs without waiting
+    const held = new Promise<void>(() => {});
+    bus.service.on('free', () => held);
+    expect(await ctx.play.execute([{ kind: 'emit', event: 'free' }, { kind: 'spinTo', board: [[1]] }], board)).toEqual([]);
+    expect(order).toEqual(['spinTo', 'spinTo']);
+    await ctx.fiber.dispose();
+  });
+
+  it('skip() releases a pending wait', async () => {
+    const ctx = new Context();
+    const bus = fakeBus();
+    await ctx.plugin(busPlugin(bus));
+    await ctx.plugin(runtime);
+    // A listener that never settles on its own — only `skip()` can move
+    // the plan past its `wait: true` hold.
+    bus.service.on('pd.round', () => new Promise<void>(() => {}));
+    const board = fakeBoard();
+    const running = ctx.play.execute(
+      [
+        { kind: 'emit', event: 'pd.round', payload: {}, wait: true },
+        { kind: 'spinTo', board: [[1]] },
+      ],
+      board as unknown as BoardApi,
+    );
+    await new Promise((r) => setTimeout(r, 10));
+    expect(board.calls).toEqual([]);
+    ctx.play.skip();
+    expect(await running).toEqual([]);
+    expect(board.calls).toEqual(['spinTo']);
+    await ctx.fiber.dispose();
+  });
+
+  it('no events service is a `step "emit" failed` diagnostic naming it', async () => {
+    const ctx = new Context();
+    await ctx.plugin(runtime);
+    const problems = await ctx.play.execute([{ kind: 'emit', event: 'x' }], fakeBoard() as unknown as BoardApi);
+    expect(problems.map((d) => d.message)).toEqual([expect.stringContaining("no 'events' service")]);
     await ctx.fiber.dispose();
   });
 });
