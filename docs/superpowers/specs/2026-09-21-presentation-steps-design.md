@@ -138,8 +138,17 @@ unary   := '-' unary | primary
 primary := NUMBER | STRING | 'true' | 'false' | 'null' | PATH | '(' or ')'
 ```
 
-- Arithmetic is numeric: both sides through `Number()`; `NaN` propagates
-  (a kind's own "is not a number" diagnostic then names the prop).
+- Arithmetic is numeric: both sides through `Number()`, except that a
+  missing var (`null`), `undefined` and `''` read as `NaN`; `NaN` propagates
+  through arithmetic AND formats (`$missing | currency` → `$NaN`), so a
+  typo'd path shows, rather than rendering as `$0.00` — a kind's own "is not
+  a number" diagnostic then names the prop.
+- `||`/`&&` return the operand, as JS does (both sides are still
+  evaluated): `$result.win || 0 | int` formats the real number. Inside a
+  parenthesised group feeding a comparison it is the operand that is
+  compared, not a coerced boolean. Consequence: a `-` inside a `$path` is
+  now subtraction (`$my-var` reads `$my` minus `$var`); no document in the
+  repo carries one.
 - A path token accepts numeric segments (`$result.data.cascades.0.step_win`),
   matching what `readPath` already reads.
 - `evaluateValue(expr, vars): unknown` is new; `evaluate` is
