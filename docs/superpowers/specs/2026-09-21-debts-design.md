@@ -39,9 +39,10 @@ two test repairs in §7.
   service answers `doc() === null`, `busy() === false`). Closes: `base_game`
   drawn under any other edited scene (21-11), the `reset` warning on the
   editor page (26-7), the spec's old `ui.tap` suppression stays.
-- **Skip fan-out.** `PlayService`'s latched re-fan calls `board.skip?.()`
-  ONCE per skip and only the handlers per later step (each `reelSystem.skip()`
-  destroys the `fx` overlay's children).
+- **Skip fan-out.** The latched re-fan keeps calling `board.skip?.()` per
+  later step (a tumble chain re-arms its controller on every step), but
+  the reels board's `skip()` destroys the `fx` overlay's children at most
+  once per latch (the board remembers it did, until its next `spinTo`).
 - **`once` races.** `SymbolView`'s `playWin` (symbols) races a node type's
   `once` against the wrapper's `'destroyed'`; `strip`/`spritesheet`'s `once`
   queues a second call behind the first (both promises settle).
