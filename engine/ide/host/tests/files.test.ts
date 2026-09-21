@@ -789,6 +789,36 @@ describe('files service — remove, now directories too', () => {
     ).toMatchObject({ code: 'protected-path' });
   });
 
+  it('.e8/shots is readable, not writable: e8 shot writes the PNGs, the Explorer only opens them', async () => {
+    const dir = fixture('plain');
+    mkdirSync(join(dir, '.e8', 'shots'), { recursive: true });
+    writeFileSync(join(dir, '.e8', 'shots', 'a.png'), 'png');
+    const ctx = await hostFor(dir);
+    const { bytes: png, diagnostics } = await ctx.files.read('.e8/shots/a.png');
+    expect(diagnostics).toEqual([]);
+    expect(new TextDecoder().decode(png)).toBe('png');
+    expect((await ctx.files.write('.e8/shots/new.png', bytes('x'))).diagnostics[0]).toMatchObject({
+      code: 'protected-path',
+    });
+    expect((await ctx.files.remove('.e8/shots/a.png')).diagnostics[0]).toMatchObject({
+      code: 'protected-path',
+    });
+    expect((await ctx.files.create('.e8/shots/b.png')).diagnostics[0]).toMatchObject({
+      code: 'protected-path',
+    });
+    expect((await ctx.files.mkdir('.e8/shots/sub')).diagnostics[0]).toMatchObject({
+      code: 'protected-path',
+    });
+    expect((await ctx.files.move('.e8/shots/a.png', 'a.png')).diagnostics[0]).toMatchObject({
+      code: 'protected-path',
+    });
+    expect((await ctx.files.move('game/spec.json', '.e8/shots/spec.json')).diagnostics[0]).toMatchObject({
+      code: 'protected-path',
+    });
+    expect(existsSync(join(dir, '.e8', 'shots', 'new.png'))).toBe(false);
+    expect(existsSync(join(dir, '.e8', 'shots', 'a.png'))).toBe(true);
+  });
+
   it('refuses the project directory itself, however it is spelled', async () => {
     // Measured before this existed: `DELETE /api/files/.` answered 200 and
     // `rmSync`-ed the whole project. `.` and `game/..` both resolve to

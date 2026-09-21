@@ -131,12 +131,16 @@ const PROTECTED_DIRS = new Set(['.git', 'node_modules']);
  * a generated file the editor must not edit), while `.e8/shots` holds the
  * PNGs `e8 shot` writes, which ARE worth opening in the Explorer. So the
  * rule is by path, not by name: everything under `.e8` (and `.e8` itself,
- * so a remove cannot take the assembly with it) is scratch, except what
- * sits under `.e8/shots`. Segments are compared lowercased, like
- * `matches`.
+ * so a remove cannot take the assembly with it) is scratch. The ONE
+ * exemption is `.e8/shots` for `reading` — the tree and `read()`; a
+ * write, mkdir, create, remove or move into it is refused like the rest
+ * of `.e8`, since `e8 shot` writes those PNGs itself. Segments are
+ * compared lowercased, like `matches`.
  */
-function isScratch(segments: string[]): boolean {
-  return segments[0]?.toLowerCase() === '.e8' && segments[1]?.toLowerCase() !== 'shots';
+function isScratch(segments: string[], reading: boolean): boolean {
+  return (
+    segments[0]?.toLowerCase() === '.e8' && !(reading && segments[1]?.toLowerCase() === 'shots')
+  );
 }
 
 /**
@@ -444,7 +448,7 @@ async function readTree(cwd: string): Promise<FileTreeResponse> {
       // scratch children are not.
       if (
         (dirent.isDirectory() && matches(SKIPPED_DIRS, dirent.name)) ||
-        (relDir !== '' && isScratch(relPath.split('/')))
+        (relDir !== '' && isScratch(relPath.split('/'), true))
       )
         continue;
 
@@ -498,7 +502,7 @@ function readOne(
   // symlink at the leaf while `describeRefusal` refused one, so the file
   // read a name the tree does not even list and the rule stated below
   // `describeRefusal` was not true of all three callers.
-  const refusal = describeRefusal(cwd, requestedPath, target);
+  const refusal = describeRefusal(cwd, requestedPath, target, true);
   if (refusal) return { diagnostics: [refusal] };
 
   let stat;
@@ -838,6 +842,8 @@ function describeRefusal(
   cwd: string,
   requestedPath: string,
   target: string,
+  /** `true` from `readOne` only — the `.e8/shots` exemption, see `isScratch`. */
+  reading = false,
 ): Diagnostic | undefined {
   // The project directory itself is inside itself and inside no protected
   // directory, so every check below passes it — and `remove('.')` then
@@ -893,7 +899,7 @@ function describeRefusal(
   const landed = relative(realRoot, realAncestor).split(sep);
   const protectedSegment =
     [...spelled, ...landed].find((segment) => matches(PROTECTED_DIRS, segment)) ??
-    ([spelled, landed].some(isScratch) ? '.e8' : undefined);
+    ([spelled, landed].some((segments) => isScratch(segments, reading)) ? '.e8' : undefined);
   if (protectedSegment !== undefined) {
     return fileDiagnostic(
       'error',
