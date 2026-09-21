@@ -191,4 +191,19 @@ describe('strip', () => {
     expect(order).toEqual([1, 2]);
     view.destroy();
   });
+
+  it('a queued second once() still resolves (not rejects) when destroy cuts the first short', async () => {
+    const base = textureSized(32, 16);
+    const view = strip.mount(
+      props({ cols: 2, loop: true }),
+      ctxWith(() => base),
+    ) as AnimatedSprite;
+    const p1 = strip.once!(view, props({ cols: 2, loop: true }), none);
+    const p2 = strip.once!(view, props({ cols: 2, loop: true }), none);
+    // Destroys mid-first: the queued second's deferred start() must not run gotoAndPlay(0) on
+    // the now-textureless sprite (it would throw and reject p2 instead of resolving it).
+    view.destroy();
+    await expect(p1).resolves.toBeUndefined();
+    await expect(p2).resolves.toBeUndefined();
+  });
 });

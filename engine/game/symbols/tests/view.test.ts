@@ -238,7 +238,11 @@ describe('createSymbolHandle', () => {
     const h = createSymbolHandle('1', deps);
     h.apply({ id: '1', static: STATIC, win: { type: 'stuck', props: {} } });
     h.resize(SIZE);
+    // The handle's own teardown listener is already on `'destroyed'` at this point (registered
+    // at construction) — `playWin` adds a second, its own race listener.
+    const before = h.view.listenerCount('destroyed');
     const p = h.view.playWin!();
+    expect(h.view.listenerCount('destroyed')).toBe(before + 1);
     let done = false;
     void p.then(() => {
       done = true;
@@ -248,6 +252,9 @@ describe('createSymbolHandle', () => {
     h.view.destroy();
     await p;
     expect(done).toBe(true);
+    // No leftover listener from `playWin`'s `finally { view.off(...) }` stacking on top of
+    // whatever pixi's own `destroy()` already swept — nothing survives the resolve either way.
+    expect(h.view.listenerCount('destroyed')).toBe(0);
   });
 
   it('a win type without once holds 600 ms', async () => {

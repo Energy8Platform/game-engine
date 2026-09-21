@@ -225,4 +225,18 @@ describe('spritesheet', () => {
     expect(order).toEqual([1, 2]);
     view.destroy();
   });
+
+  it('a queued second once() still resolves (not rejects) when destroy cuts the first short', async () => {
+    const view = spritesheet.mount(
+      props({ animation: 'spin', loop: true }),
+      ctxWith(() => sheet),
+    ) as AnimatedSprite;
+    const p1 = spritesheet.once!(view, props({ animation: 'spin', loop: true }), none);
+    const p2 = spritesheet.once!(view, props({ animation: 'spin', loop: true }), none);
+    // Destroys mid-first: the queued second's deferred start() must not run gotoAndPlay(0) on
+    // the now-textureless sprite (it would throw and reject p2 instead of resolving it).
+    view.destroy();
+    await expect(p1).resolves.toBeUndefined();
+    await expect(p2).resolves.toBeUndefined();
+  });
 });

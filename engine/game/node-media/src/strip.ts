@@ -159,8 +159,13 @@ export const strip: NodeType<StripProps> = {
     // (and then its own) finishes. No prior run in flight → starts synchronously, same as
     // before — a caller that tears the view down right after calling `once()` (no run in
     // between) still gets the synchronous 'destroyed' wiring it relies on.
+    // The first call may settle via the view being destroyed (not `onComplete`) — the queued
+    // second call's deferred `start()` must not then run: `AnimatedSprite.destroy()` empties
+    // its textures, and `gotoAndPlay(0)` on that throws inside the executor, rejecting the
+    // second promise for no reason a caller can act on. Resolve it at once instead, same as a
+    // solo `once()` on an already-empty view does above.
     const prior = pendingOnce.get(s);
-    const run = prior ? prior.then(start) : start();
+    const run = prior ? prior.then(() => (s.destroyed ? Promise.resolve() : start())) : start();
     pendingOnce.set(s, run);
     // `.then(cleanup, cleanup)`, not `.finally`: a `.finally` callback's own promise chain is
     // never read by anyone, so a rejection (a throwing `gotoAndPlay` on an already-torn-down
