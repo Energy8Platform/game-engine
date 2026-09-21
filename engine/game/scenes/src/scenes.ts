@@ -320,11 +320,16 @@ export function createScenes(options: CreateScenesOptions): ScenesService {
     // the same verdict `applyVariant` gives a flip. `node.props` itself is
     // never written: `replace()`'s diff reads it.
     let variant = root ? overrideOf(sceneId, node.id) : undefined;
-    // `live` was validated by `setProps` already; only the override can be the one refused.
-    const merged =
+    // `live` was validated by `setProps` already; only the override can be
+    // the one refused — and then the patch still lands, alone, or the
+    // fresh host would point at a document it does not show.
+    let merged =
       (variant || live) &&
       tryVariant(where, type, node.props, { ...variant, ...live }, variant ?? live);
-    if (variant && !merged) variant = undefined;
+    if (variant && !merged) {
+      variant = undefined;
+      if (live) merged = tryVariant(where, type, node.props, live);
+    }
     const raw = merged ? merged.raw : node.props;
     let view: Container;
     let props: Record<string, unknown>;

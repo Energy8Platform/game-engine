@@ -13,7 +13,9 @@ export interface Pickable {
  * sets it on the mask, and `getBounds()` then answers an empty rect, so
  * the node could never be picked. For that one case the view's own
  * `getLocalBounds()` (the root is measured whatever `measurable` says) is
- * tested against the point brought into its local space.
+ * tested against the point brought into its local space — through
+ * `getGlobalTransform()`, not `worldTransform`, which a render pass alone
+ * refreshes.
  */
 export function pickAt(views: readonly Pickable[], point: { x: number; y: number }): string | null {
   for (let i = views.length - 1; i >= 0; i--) {
@@ -22,7 +24,7 @@ export function pickAt(views: readonly Pickable[], point: { x: number; y: number
     const b = view.getBounds();
     if (b.containsPoint(point.x, point.y)) return node;
     if (b.width === 0 && b.height === 0 && view.measurable === false) {
-      const local = view.worldTransform.applyInverse(point);
+      const local = view.getGlobalTransform().applyInverse(point);
       if (view.getLocalBounds().containsPoint(local.x, local.y)) return node;
     }
   }

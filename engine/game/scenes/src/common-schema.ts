@@ -40,10 +40,20 @@ const NAMES = `
   .split(/\s+/)
   .join('|');
 
-/** One argument of a function form: `1`, `1.5`, `.5`, `50%` — a number, never a name (`rgb(a,b,c)`). */
-const NUM = '\\d*\\.?\\d+%?';
-/** Three arguments, comma- or space-separated, then an optional `, alpha` / `/ alpha`. */
-const FN = `(?:rgb|hsl)a?\\(\\s*${NUM}(?:\\s*[,\\s]\\s*${NUM}){2}(?:\\s*[,/]\\s*${NUM})?\\s*\\)`;
+/** One argument of a function form: `1`, `1.5`, `.5` — a number, never a name (`rgb(a,b,c)`). */
+const NUM = '\\d*\\.?\\d+';
+const PCT = `${NUM}%`;
+const ANY = `${NUM}%?`;
+/**
+ * A function form in either CSS syntax, each whole — pixi's `Color` throws
+ * on a mix (`rgb(1,2,3/0.5)`, `rgb(1 , 2 3)`): the legacy comma form with
+ * an optional `, alpha`, or the space form with an optional `/ alpha`.
+ * `hsl`'s saturation and lightness carry the `%` (`hsl(120, 50, 50)` is
+ * refused by `Color` too).
+ */
+const form = (fn: string, a: string, b: string, c: string) =>
+  `${fn}a?\\(\\s*(?:${a}\\s*,\\s*${b}\\s*,\\s*${c}(?:\\s*,\\s*${ANY})?|${a}\\s+${b}\\s+${c}(?:\\s*/\\s*${ANY})?)\\s*\\)`;
+const FN = `${form('rgb', ANY, ANY, ANY)}|${form('hsl', NUM, PCT, PCT)}`;
 
 /**
  * What the runtime reads as a colour, and so what a colour prop is allowed

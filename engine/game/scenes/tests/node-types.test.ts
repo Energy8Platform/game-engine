@@ -122,6 +122,10 @@ describe('applyCommon', () => {
       'rgb(1,2)',
       'rgb(1,2,3,4,5)',
       'rgb(red green blue)',
+      // Mixed separators: each syntax whole, or `Color` throws.
+      'rgb(1,2,3/0.5)',
+      'rgb(1 , 2 3)',
+      'hsl(120, 50, 50)',
       'hwb(1 2% 3%)',
       'lab(1 2 3)',
       'cmyk(1,2,3,4)',

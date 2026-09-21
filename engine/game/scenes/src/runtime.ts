@@ -165,14 +165,20 @@ export function apply(ctx: Context, config: ScenesConfig): void {
   const insets = (): SafeArea | undefined =>
     (ctx.reflect.get('safeArea', false) as SafeArea | undefined) ??
     (ctx.reflect.get('shell', false) as { safeArea?: SafeArea } | undefined)?.safeArea;
-  /** The four numbers the last fit was made with — what a frame compares against. */
-  let fitted = '';
-  const key = (i: SafeArea | undefined) => (i ? `${i.top},${i.right},${i.bottom},${i.left}` : '');
+  // The four numbers the last fit was made with, COPIED — the shell mutates
+  // its `safeArea` in place, so holding the object would compare it to itself.
+  let ft = 0;
+  let fr = 0;
+  let fb = 0;
+  let fl = 0;
   const fit = (width = app.screen?.width, height = app.screen?.height) => {
     // `alive`: the deferred call may land after a dispose tore `scenes` down.
     if (!alive || !width || !height) return;
     const i = insets();
-    fitted = key(i);
+    ft = i?.top ?? 0;
+    fr = i?.right ?? 0;
+    fb = i?.bottom ?? 0;
+    fl = i?.left ?? 0;
     scenes.resize(width, height, i);
   };
   fit();
@@ -185,9 +191,16 @@ export function apply(ctx: Context, config: ScenesConfig): void {
   // The insets can move WITHOUT a resize — the shell's `renderBar()`
   // re-scales its bar — and nothing announces that. So every frame reads
   // the four numbers and re-fits when they differ from the last fit's:
-  // pinned nodes follow the bar at once.
+  // pinned nodes follow the bar at once. Four compares, no allocation.
   const check = () => {
-    if (key(insets()) !== fitted) fit();
+    const i = insets();
+    if (
+      (i?.top ?? 0) !== ft ||
+      (i?.right ?? 0) !== fr ||
+      (i?.bottom ?? 0) !== fb ||
+      (i?.left ?? 0) !== fl
+    )
+      fit();
   };
   ctx.effect(() => {
     app.ticker?.add(check);

@@ -20,7 +20,7 @@ describe('pickAt', () => {
       measurable: false,
       getBounds: () => new Bounds(0, 0, 0, 0),
       getLocalBounds: () => new Bounds(0, 0, 40, 30),
-      worldTransform: world,
+      getGlobalTransform: () => world,
     } as unknown as Container;
     const views = [{ node: 'm', view: mask }];
     expect(pickAt(views, { x: 110, y: 60 })).toBe('m'); // local (5, 5)
@@ -40,10 +40,7 @@ describe('pickAt', () => {
     mask.position.set(100, 100);
     root.addChild(masked, mask);
     masked.mask = mask;
-    // `worldTransform` is refreshed by a render pass; stand in for one.
-    root.updateLocalTransform();
-    mask.updateLocalTransform();
-    mask.worldTransform.copyFrom(mask.localTransform);
+    // No render pass here: `getGlobalTransform()` computes the world transform itself.
     expect(mask.measurable).toBe(false);
     expect(mask.getBounds().width).toBe(0);
     const views = [{ node: 'masked', view: masked }, { node: 'mask', view: mask }];

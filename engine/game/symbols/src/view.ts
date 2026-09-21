@@ -84,12 +84,15 @@ interface Wrapper {
 const DEFAULT_SIZE = { width: 96, height: 96 };
 const wait = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 
-const dictOf = (schema: unknown): Record<string, { type?: string } | undefined> =>
-  (schema as { dict?: Record<string, { type?: string }> }).dict ?? {};
+/** One prop's schema as `emptyProp` reads it: its `type`, and a union's `list` of literals. */
+type PropSchema = { type?: string; list?: { value?: unknown }[] };
+const dictOf = (schema: unknown): Record<string, PropSchema | undefined> =>
+  (schema as { dict?: Record<string, PropSchema> }).dict ?? {};
 
 /** A bound prop's value: the cell's field coerced to the prop's schema type — the way a flow's `prop` coerces. */
-function boundValue(field: unknown, type?: string): unknown {
-  if (field === undefined || field === null) return emptyProp(type);
+function boundValue(field: unknown, entry?: PropSchema): unknown {
+  const type = entry?.type;
+  if (field === undefined || field === null) return emptyProp(entry);
   if (type === 'number') {
     const n = Number(field);
     return Number.isNaN(n) ? 0 : n;
@@ -121,9 +124,10 @@ function resolveProps(
       input[key] = value;
       continue;
     }
-    const kind = (own[key] ?? common[key])?.type;
-    input[key] = emptyProp(kind);
-    bound[key] = data ? boundValue(data[cellField(value)], kind) : input[key];
+    // The ENTRY, not its type name: a union's empty is its first literal (`text.align` → 'left').
+    const entry = own[key] ?? common[key];
+    input[key] = emptyProp(entry);
+    bound[key] = data ? boundValue(data[cellField(value)], entry) : input[key];
   }
   return { ...(type.schema(input) as Record<string, unknown>), ...bound };
 }

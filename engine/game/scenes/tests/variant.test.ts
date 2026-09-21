@@ -391,6 +391,34 @@ describe('the portrait variant', () => {
     expect(report).toHaveBeenCalledTimes(1);
   });
 
+  it('a live `scene` patch lands even while the portrait override is refused: the fresh host shows the patched document', async () => {
+    const { report, scenes, view } = boot([
+      {
+        id: 'a',
+        nodes: [{ id: 'host', type: 'scene', props: { scene: 'b', visible: false } }],
+        // Refused by the common pass (not a mount failure): the host keeps its landscape props.
+        portrait: { nodes: { host: { x: 'abc' } } },
+      },
+      { id: 'b', nodes: [{ id: 'n1', type: 'container', props: {} }] },
+      { id: 'fs', nodes: [{ id: 'n2', type: 'container', props: {} }] },
+    ]);
+    await scenes.show('a');
+    scenes.resize(...PORTRAIT);
+    expect(report).toHaveBeenCalledTimes(1);
+    expect(view('host').children[0]!.label).toBe('n1');
+    // The patch is a validated layer of its own; the override's refusal must not take it down with it.
+    expect(scenes.setProps({ scene: 'a', node: 'host' }, { scene: 'fs' })).toBe(true);
+    expect(view('host').children[0]!.label).toBe('n2');
+    expect(view('host').x).toBe(0);
+    // Bookkeeping follows the patched target: `show('fs')` flips THIS host.
+    await scenes.show('fs');
+    expect(view('host').visible).toBe(true);
+    await scenes.hide('fs');
+    expect(view('host').visible).toBe(false);
+    // The override is still refused — said again for the remount, nothing more.
+    expect(report.mock.calls.every(([d]) => d.where === 'a/host' && d.message.startsWith('portrait'))).toBe(true);
+  });
+
   it('a `scene` override\'s target is in the graph: assets() lists it, and editing it while portrait refreshes the copy', async () => {
     const { scenes, view } = boot([
       {

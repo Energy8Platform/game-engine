@@ -413,6 +413,20 @@ describe('$cell bindings', () => {
     expect(textOf(h).text).toBe('5');
   });
 
+  it("a union prop stands at its FIRST literal until bound — the empty '' would be refused — and takes the cell's value", () => {
+    const { deps, report } = setup();
+    const h = createSymbolHandle('orb', deps);
+    h.apply({ id: 'orb', static: { type: 'text', props: { text: 'x', align: '$cell.align' } } });
+    expect(report).not.toHaveBeenCalled();
+    expect(textOf(h).style.align).toBe('left');
+    h.view.bind({ symbol: 'orb', align: 'right' });
+    expect(textOf(h).style.align).toBe('right');
+    // A cell without the field: the first literal again, not the stale 'right'.
+    h.view.bind({ symbol: 'orb' });
+    expect(textOf(h).style.align).toBe('left');
+    expect(report).not.toHaveBeenCalled();
+  });
+
   it('a number prop takes 0 for a field the cell does not carry, and the value when it does', () => {
     const { deps } = setup();
     const h = createSymbolHandle('orb', deps);
