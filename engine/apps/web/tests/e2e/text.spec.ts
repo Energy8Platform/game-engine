@@ -4,20 +4,31 @@
  *
  *  1. The example's own `win` node (`scenes/base_game.scene.yml`) and its
  *     `show_win` flow node (`flow.yml`: `draw → show_win → win → bal → done`,
- *     kind `prop`, `target: base_game/win`, `prop: text`, `value: $result.win`)
- *     — empty at boot, the last spin's credited amount after one.
+ *     kind `prop`, `target: base_game/win`, `prop: text`, `value:
+ *     '{$result.winAmount | currency}'` — a template with the `currency`
+ *     format, which reads `$session.currency` off the dev host: `{ symbol:
+ *     '$', decimals: 2, position: 'left' }`) — empty at boot, the last
+ *     spin's `winAmount` as `$4.60` after one.
  *  2. `ui.tap` reaching a flow: a `wait { event: ui.tap }` node holds until
  *     a click on the preview canvas, then a `prop` node with a LITERAL
  *     value sets the same `win` node's text.
  *  3. A scene document's own `text` node mounts with a real `width` — the
  *     `nodeProps`/`nodeText` pair, off one extra node in a scene copy.
+ *  4. An `emit { wait: true }` holds its branch while an `on { busy:
+ *     parallel }` run it started is live: the parallel branch's `prop`
+ *     (`'x{$event.n * 2}'` — a template with arithmetic over the event's
+ *     payload) lands on the `win` text BEFORE the main branch's (`'after
+ *     {$n}'` — the main run has no `$n`, so the template renders `''`
+ *     there), and the trace says so in the same order.
  *
  * Same fixture and idioms as `fx.spec.ts`/`contract.spec.ts`: a private
  * `projectCopy()`, its `flow.yml`/`scenes/base_game.scene.yml` rewritten
  * BEFORE `startDevHost` for cases 2/3 (the running host reads them once,
- * at boot), the composition document's `Preview`
+ * at boot; case 4 edits `flow.yml` through the host instead, once the
+ * game is up), the composition document's `Preview`
  * (`iframe[title="game preview"]`) and the game's own `window.__e8` — here
- * `nodeText(scene, node)` (Task 4's own hook), `spin()` and `spins()`.
+ * `nodeText(scene, node)` (Task 4's own hook), `spin()`, `spins()` and
+ * `flowTrace()`.
  */
 import { rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -32,9 +43,9 @@ const PREVIEW = 'iframe[title="game preview"]';
  * base_game/win.text = 'tapped')` — same one-node-per-line style as the
  * example's own `flow.yml` and `fx.spec.ts`'s `TWEEN_FLOW`. `mark`'s
  * `value` is a LITERAL ('tapped', already a string), unlike the example's
- * own `$result.win` — this flow proves the tap reaches the flow at all,
- * not the numeric-`$path`-into-a-string-prop coercion case 1 already
- * covers through the real example.
+ * own `'{$result.winAmount | currency}'` — this flow proves the tap
+ * reaches the flow at all, not the template-into-a-string-prop path case
+ * 1 already covers through the real example.
  */
 const TAP_FLOW = `version: 1
 nodes:
@@ -47,6 +58,36 @@ edges:
   - { from: base,  to: hold }
   - { from: hold,  to: mark }
 `;
+
+/**
+ * Case 4's flow. `beat` emits `pd.round` with `wait: true` and `hear`
+ * (`busy: parallel`) answers it while the boot run is still live, so the
+ * main branch sits in `beat` until `hear → pause → inner` has ended;
+ * `pause` (300 ms) keeps that hold long enough to be a real one. `inner`
+ * sees the event (`$event.n`), `after` does not (`$n` is unset in the main
+ * run, and a missing var renders `''` in a template). Unlike `TAP_FLOW`,
+ * this one reaches the game as a LIVE edit, after boot — see the test for
+ * why.
+ */
+const PARALLEL_FLOW = `version: 1
+nodes:
+  - { id: start, kind: boot, ui: { x: 40,  y: 80 } }
+  - { id: base,  kind: show, props: { scene: base_game }, ui: { x: 220, y: 80 } }
+  - { id: beat,  kind: emit, props: { event: pd.round, payload: { n: 3 }, wait: true }, ui: { x: 400, y: 80 } }
+  - { id: after, kind: prop, props: { target: base_game/win, prop: text, value: 'after {$n}' }, ui: { x: 580, y: 80 } }
+  - { id: hear,  kind: on,   props: { event: pd.round, busy: parallel }, ui: { x: 400, y: 240 } }
+  - { id: pause, kind: wait, props: { ms: 300 }, ui: { x: 580, y: 240 } }
+  - { id: inner, kind: prop, props: { target: base_game/win, prop: text, value: 'x{$event.n * 2}' }, ui: { x: 760, y: 240 } }
+edges:
+  - { from: start, to: base }
+  - { from: base,  to: beat }
+  - { from: beat,  to: after }
+  - { from: hear,  to: pause }
+  - { from: pause, to: inner }
+`;
+
+/** What case 4's in-page observer records: a trace entry and the `win` text the instant it landed. */
+type Seen = { node: string; out: string | null; text: string | null };
 
 let dir: string;
 let host: DevHost;
@@ -97,13 +138,13 @@ test("the example's win text is empty at boot and the last spin's credited amoun
   expect(await frame.evaluate(() => (window as any).__e8.spin())).toEqual({ out: 'next' });
 
   const spins = (await frame.evaluate(() => (window as any).__e8.spins())) as {
-    result: { win: number };
+    result: { winAmount: number };
   }[];
   await expect
     .poll(() => frame.evaluate(() => (window as any).__e8.nodeText('base_game', 'win')), {
       timeout: 10_000,
     })
-    .toBe(String(spins.at(-1)!.result.win));
+    .toBe(`$${spins.at(-1)!.result.winAmount.toFixed(2)}`);
 });
 
 test('a tap on the stage reaches a wait node, and a prop node after it sets the text', async ({
@@ -191,4 +232,91 @@ nodes:
       { timeout: 10_000 },
     )
     .toBeGreaterThan(0);
+});
+
+test('an emit with wait holds the main branch until a parallel on-branch ends; templates and arithmetic reach a text node', async ({
+  page,
+  request,
+}) => {
+  host = await startDevHost(dir);
+
+  await page.goto(`${IDE_URL}#/doc/composition`);
+  const frame = await readyFrame(page);
+
+  // `inner`'s write and `after`'s are one macrotask apart from nothing:
+  // `inner` sets the text, its run settles, `beat`'s awaited `emit`
+  // resolves and `after` sets the text again — microtasks end to end
+  // (`setProps` is synchronous), so no `frame.evaluate` can land between
+  // them and a poll on `nodeText` only ever reads `after `. The observer
+  // has to be IN the page, and in place before the sequence starts: it
+  // wraps the interpreter's live trace array (`flowTrace()` answers the
+  // array itself, not a copy; a `replace` empties it in place) and records
+  // what the `win` text reads the instant each trace entry lands —
+  // `inner:next` right after `inner`'s own write, before `after` enters.
+  // Hence the order here: the example's own flow boots the game and parks
+  // at `idle`, the observer goes in, and only THEN does case 4's flow
+  // reach the game — as a live edit through the host (a disk write is not
+  // watched), whose new shape stops the old run, re-arms and fires `boot`
+  // again. Trapped at the page's own `window.__e8 = …` instead (an init
+  // script's setter), it lost the race: `createGame` — the top-level
+  // `await` above that assignment — is already running the flow, and on a
+  // cold vite cache the boot run was past `inner` before the harness
+  // existed (measured: one run in two).
+  await frame.evaluate(() => {
+    const e8 = (window as any).__e8;
+    const seen: Seen[] = [];
+    (window as any).__e8seen = seen;
+    const trace = e8.flowTrace() as { node: string; out: string | null }[];
+    trace.push = function (this: unknown[], ...entries) {
+      for (const e of entries)
+        seen.push({ node: e.node, out: e.out, text: e8.nodeText('base_game', 'win') });
+      return Array.prototype.push.apply(this, entries);
+    };
+  });
+
+  // The game's `ide-bridge` must be on `/ide` before the edit is broadcast
+  // (a socket that connects later is not replayed). It has spoken once the
+  // host's `GET /api/flow` lists a kind only a game registers — `tween`,
+  // `flow-fx`'s, never a built-in — which the bridge sends on open.
+  const gameKinds = async () => {
+    const body = (await (await request.get(`${host.url}/api/flow`)).json()) as {
+      kinds: { kind: string }[];
+    };
+    return body.kinds.map((k) => k.kind);
+  };
+  await expect.poll(gameKinds, { timeout: 10_000 }).toContain('tween');
+
+  const put = await request.put(`${host.url}/api/files/flow.yml`, {
+    data: { base64: Buffer.from(PARALLEL_FLOW).toString('base64') },
+  });
+  expect(put.ok()).toBe(true);
+
+  // The parallel branch's write first: the instant `inner` left, the text
+  // read `x6` — `inner` ran, and `{$event.n * 2}` computed over the
+  // emitted payload.
+  const seenAt = (node: string, out: string | null) =>
+    frame.evaluate(
+      ([n, o]) =>
+        ((window as any).__e8seen as Seen[]).find((e) => e.node === n && e.out === o)?.text ?? null,
+      [node, out] as const,
+    );
+  await expect.poll(() => seenAt('inner', 'next'), { timeout: 10_000 }).toBe('x6');
+  // Then the main branch's: `beat` (wait: true) let go only once the
+  // parallel run had ended, and `$n` is not a var of the main run.
+  await expect
+    .poll(() => frame.evaluate(() => (window as any).__e8.nodeText('base_game', 'win')), {
+      timeout: 10_000,
+    })
+    .toBe('after ');
+
+  // The same order in the trace: `inner` LEFT (`next`) before `after` was
+  // ENTERED (`null`) — the hold, as the interpreter itself recorded it.
+  const trace = (await frame.evaluate(() => (window as any).__e8.flowTrace())) as {
+    node: string;
+    out: string | null;
+  }[];
+  const innerLeft = trace.findIndex((e) => e.node === 'inner' && e.out === 'next');
+  const afterEntered = trace.findIndex((e) => e.node === 'after' && e.out === null);
+  expect(innerLeft).toBeGreaterThanOrEqual(0);
+  expect(afterEntered).toBeGreaterThan(innerLeft);
 });
