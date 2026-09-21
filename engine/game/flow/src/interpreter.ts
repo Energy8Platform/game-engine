@@ -48,7 +48,7 @@ export interface FlowService {
   busy(): boolean;
   /** Resolved here; the runtime row swaps in its boot fetch. */
   ready: Promise<void>;
-  /** Aborts every in-flight branch and disarms the triggers; the doc and the trace stay. */
+  /** Aborts every in-flight branch and disarms the triggers until the next registry change re-arms; the doc and the trace stay. */
   stop(): void;
   /**
    * A live root: `$name.…` in any node of any run reads `getter()` at the
@@ -271,7 +271,12 @@ export function createFlow(o: CreateFlowOptions): FlowService {
    * at the attempt, and not again on every registration.
    */
   let stuck = false;
-  /** The `where`s of every refusal since the last successful arm — retracted by it (the stale `unknown kind`). */
+  /**
+   * The `where`s of everything reported since the last successful arm —
+   * a refusal's errors (the stale `unknown kind`) and an armed doc's own
+   * warnings (`'wait' needs an 'event' or 'ms'`) alike — retracted by
+   * the next arm, so a `replace` that fixes the node takes the entry back.
+   */
   const refused = new Set<string>();
   const doReplace = (doc: FlowDoc | null): void => {
     if (doc && armed && current && shape(doc) === shape(current)) {
@@ -292,11 +297,9 @@ export function createFlow(o: CreateFlowOptions): FlowService {
       refused.clear();
     }
     for (const d of problems) report(d);
+    for (const d of problems) refused.add(d.where);
     stuck = problems.some((d) => d.severity === 'error' && !d.message.startsWith('unknown kind'));
-    if (!ok) {
-      for (const d of problems) refused.add(d.where);
-      return;
-    }
+    if (!ok) return;
     arm(doc);
     armed = true;
   };

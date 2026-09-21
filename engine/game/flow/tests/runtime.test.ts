@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import { Context } from 'cordis';
 import type { FlowDoc } from '@energy8engine/contracts';
+import { createDiagnostics } from '@energy8engine/diagnostics';
 import * as runtime from '../src/runtime';
 
 const fetchOk = (body: unknown) =>
@@ -115,6 +116,30 @@ describe('flow row', () => {
     expect(flow.busy()).toBe(false);
     expect(flow.trace()).toEqual([]);
     flow.stop();
+    await fiber.dispose();
+  });
+
+  it('the row wires `retract` to ctx.diagnostics: a stale `unknown kind` is taken back once the kind registers', async () => {
+    const late: FlowDoc = {
+      version: 1,
+      nodes: [{ id: 'b', kind: 'boot' }, { id: 'x', kind: 'sound' }],
+      edges: [{ from: 'b', to: 'x' }],
+    };
+    const { ctx, fiber } = boot(fetchOk({ doc: late, diagnostics: [], kinds: [] }));
+    const log = createDiagnostics();
+    ctx.provide('diagnostics', log);
+    await fiber;
+    await ctx.get('flow')!.ready;
+    await vi.waitFor(() =>
+      expect(log.own()).toEqual([expect.objectContaining({ plugin: 'flow', where: 'x' })]),
+    );
+    ctx.get('flowNodes')!.register({
+      kind: 'sound',
+      schema: ctx.get('flowNodes')!.list()[0].schema,
+      outs: ['next'],
+      run: async () => ({ out: 'next' }),
+    });
+    expect(log.own()).toEqual([]);
     await fiber.dispose();
   });
 

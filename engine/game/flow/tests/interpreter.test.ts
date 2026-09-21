@@ -412,6 +412,29 @@ describe('createFlow', () => {
     expect(f.flow.trace().every((e) => e.run === 1)).toBe(true);
   });
 
+  it('a warning an ARMED doc reported is retracted by the next replace that fixes it', async () => {
+    const f = harness();
+    const bare = doc(
+      [
+        { id: 'start', kind: 'boot' },
+        { id: 'w', kind: 'wait' },
+      ],
+      [{ from: 'start', to: 'w' }],
+    );
+    f.flow.replace(bare);
+    // Armed (a warning refuses nothing), and the warning stands on `w`.
+    expect(f.report).toHaveBeenCalledTimes(1);
+    expect(f.report).toHaveBeenCalledWith(
+      expect.objectContaining({ severity: 'warning', where: 'w', message: "'wait' needs an 'event' or 'ms'" }),
+    );
+    expect(f.retract).not.toHaveBeenCalled();
+
+    f.flow.replace(doc(bare.nodes.map((n) => (n.id === 'w' ? { ...n, props: { ms: 1 } } : n)), bare.edges));
+    expect(f.retract).toHaveBeenCalledTimes(1);
+    expect(f.retract).toHaveBeenCalledWith('flow', 'w');
+    expect(f.report).toHaveBeenCalledTimes(1);
+  });
+
   it('a doc refused for a non-kind reason (a cycle) is not re-validated on an unrelated registration', async () => {
     const f = harness();
     f.flow.replace(

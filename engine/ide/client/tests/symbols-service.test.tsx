@@ -87,6 +87,21 @@ describe('symbols service', () => {
     expect(ctx.symbols.doc()!.symbols.map((s) => s.id)).toEqual(['1', '2']);
   });
 
+  it('a reducer that throws rejects its own `update`; the next one still runs — the chain does not wedge', async () => {
+    const { ctx } = await harness({
+      'GET /api/symbols': boot({ doc: EMPTY, known: KNOWN, diagnostics: [] }),
+      'PUT /api/symbols': accept,
+    });
+    await vi.waitFor(() => expect(ctx.symbols.doc()).toEqual(EMPTY));
+    const broken = ctx.symbols.update(() => {
+      throw new Error('reducer bug');
+    });
+    const next = ctx.symbols.update((d) => addSymbol(d, '1', 'cherry'));
+    await expect(broken).rejects.toThrow('reducer bug');
+    expect(await next).toEqual([]);
+    expect(ctx.symbols.doc()!.symbols.map((s) => s.id)).toEqual(['1']);
+  });
+
   it('a reducer that reduces to the same doc (by reference) skips the PUT', async () => {
     const { ctx, calls } = await harness({
       'GET /api/symbols': boot({ doc: TWO, known: KNOWN, diagnostics: [] }),
