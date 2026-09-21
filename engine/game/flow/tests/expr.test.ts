@@ -44,6 +44,7 @@ describe('evaluateValue', () => {
   const v = {
     result: { win: 12.5, winAmount: 4.604, data: { cascades: [{ step_win: 3 }], fs_total: 10, fs_remaining: 4, mult_running: 48 } },
     session: { currency: { code: 'USD', symbol: '$', decimals: 2, position: 'left' } },
+    n: 1,
   };
   it.each<[string, unknown]>([
     ['$result.data.fs_total - $result.data.fs_remaining', 6],
@@ -56,6 +57,13 @@ describe('evaluateValue', () => {
     ['$result.win - 2 > 10', true],
     ["$result.win + 'x'", NaN],
     ['$missing + 1', NaN],
+    // Regression: a bare `-` right after a number token (not part of the
+    // number itself — the tokenizer's digit scan stops at it).
+    ['1-2', -1],
+    // Regression: unary `-` right after a binary `*`, no space.
+    ['$result.win * -2', -25],
+    // `&&` returns the right operand (not a boolean) when the left is truthy.
+    ['$result.win && $result.winAmount', 4.604],
   ])('%s → %s', (expr, out) => {
     const got = evaluateValue(expr, v);
     Number.isNaN(out as number) ? expect(got).toBeNaN() : expect(got).toBe(out);
@@ -67,6 +75,13 @@ describe('evaluateValue', () => {
     ['$result.data.mult_running | multiplier', 'x48'],
     ['2.5 | multiplier', 'x2.5'],
     ['$result.win || 0 | int', '13'],
+    // A missing value formats as NaN (num() propagates it), not `0`.
+    ['$missing | currency', '$NaN'],
+    ['$missing | int', 'NaN'],
+    // Regression: a format arg can itself be a `$path`, not just a literal.
+    ['$result.winAmount | fixed:$n', '4.6'],
+    // Regression: pipes chain — `int`'s string output feeds `fixed`.
+    ['$result.win | int | fixed:1', '13.0'],
   ])('%s → %s', (expr, out) => expect(evaluateValue(expr, v)).toBe(out));
   it('currency follows position: right puts the symbol after a space', () => {
     const right = { ...v, session: { currency: { code: 'EUR', symbol: '€', decimals: 2, position: 'right' } } };
@@ -76,6 +91,8 @@ describe('evaluateValue', () => {
     expect(evaluateValue('$result.winAmount | currency', { result: v.result })).toBe('4.60'));
   it('an unknown format is a SyntaxError naming it', () =>
     expect(() => evaluateValue('1 | bogus', v)).toThrow(/unknown format 'bogus'/));
+  it('a pipe cannot appear inside a parenthesised group — it only binds at the very top', () =>
+    expect(() => evaluateValue('($result.win | int)', v)).toThrow(SyntaxError));
   it('evaluate is Boolean(evaluateValue): arithmetic reaches if', () =>
     expect(evaluate('$result.data.fs_total - $result.data.fs_remaining > 5', v)).toBe(true));
 });

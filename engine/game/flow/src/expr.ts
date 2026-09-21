@@ -7,14 +7,16 @@
  *
  * `pipe` (`expr | name` or `expr | name:arg`) only applies at the very top —
  * inside parens, grouping restarts at `or`, so a pipe binds loosest and can't
- * sneak in mid-expression without its own parens. `or`/`and` (`||`/`&&`) use
- * real JS short-circuit semantics: they return the actual left or right
- * OPERAND, not a boolean coercion of it, so `$result.win || 0` keeps `12.5`
- * rather than flattening it to `true` — that's what lets
- * `$result.win || 0 | int` format the real number. `not` (`!`) sits ABOVE
- * `comparison`, i.e. binds LOOSER than a comparison operator: `!a == b`
- * parses as `!(a == b)`, not `(!a) == b`. Chain `!!x` if you need `!` to
- * apply to a bare value before a comparison runs.
+ * sneak in mid-expression without its own parens. `or`/`and` (`||`/`&&`)
+ * return the operand, as JS `||`/`&&` do (both sides are still evaluated):
+ * `$result.win || 0` keeps `12.5` rather than flattening it to `true` —
+ * that's what lets `$result.win || 0 | int` format the real number. Inside
+ * a parenthesised group feeding a comparison, it's that operand — not a
+ * coerced boolean — that gets compared: `($s || $z) == "x"` is `true` when
+ * `$s` is `"x"`. `not` (`!`) sits ABOVE `comparison`, i.e. binds LOOSER than
+ * a comparison operator: `!a == b` parses as `!(a == b)`, not `(!a) == b`.
+ * Chain `!!x` if you need `!` to apply to a bare value before a comparison
+ * runs.
  *
  * `additive`/`multiplicative`/`unary` add `+ - * /` and unary `-` with the
  * usual precedence (`1 + 2 * 3` is `7`, not `9`), over paths into `vars`
@@ -295,7 +297,7 @@ function compare(op: string, a: unknown, b: unknown, pos: number): boolean {
 
 /** The pipe formats; each returns a string. `vars` is for `currency`'s `$session.currency`. */
 function format(name: string, value: unknown, arg: unknown, vars: Record<string, unknown>, pos: number): string {
-  const n = Number(value);
+  const n = num(value);
   switch (name) {
     case 'currency': {
       const c = readPath('$session.currency', vars) as
