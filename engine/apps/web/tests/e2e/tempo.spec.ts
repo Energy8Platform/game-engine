@@ -106,7 +106,7 @@ async function readyPage(page: Page): Promise<void> {
  * instant and there is nothing for a skip to interrupt. Case 5 needs a
  * round that actually takes time.
  */
-function tumbleFixture(animated = false): void {
+function tumbleFixture(animated = true): void {
   const patchFile = join(dir, 'e8.patch.yml');
   const patch = load(readFileSync(patchFile, 'utf8')) as PatchDoc;
   const mechanics = patch.rows.find((r) => r.id === 'mechanics1')!;
@@ -134,6 +134,9 @@ function tumbleFixture(animated = false): void {
 test("mechanics1.config.tumble: true over base_game: cascade — a winning spin's plan carries a tumble step", async ({
   page,
 }) => {
+  // Animated as well: since slice 28 the host warns when `tumble` is on
+  // with `cascade.enabled` off (an instant tumble), and `#status` then
+  // reads "composition has warnings" instead of `ready`.
   tumbleFixture();
 
   host = await startDevHost(dir);
