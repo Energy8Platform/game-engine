@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { KNOWN_STEP_KINDS, cellData, isPresentationStep } from '../src/index';
+import { KNOWN_STEP_KINDS, cellData, isPresentationStep, type PresentationPlan } from '../src/index';
 
 describe('presentation steps', () => {
   it('accepts every step the two Slice-0 mechanics need', () => {
@@ -199,6 +199,23 @@ describe('presentation steps', () => {
         lines: [{ line: 0, symbol: 'ROCK', count: 3, win: 2, positions: [{ col: 0, row: 0 }] }],
       }),
     ).toBe(true);
+  });
+});
+
+describe('emit — a beat on the bus, not a board step', () => {
+  it('is well-formed with an event; payload is anything; wait is a boolean when present', () => {
+    expect(isPresentationStep({ kind: 'emit', event: 'pd.round' })).toBe(true);
+    expect(isPresentationStep({ kind: 'emit', event: 'pd.round', payload: { n: 1 }, wait: true })).toBe(true);
+    expect(isPresentationStep({ kind: 'emit', event: '' })).toBe(false);
+    expect(isPresentationStep({ kind: 'emit', event: 3 })).toBe(false);
+    expect(isPresentationStep({ kind: 'emit', event: 'x', wait: 'yes' })).toBe(false);
+  });
+  it('is NOT one of the board kinds', () => {
+    expect(KNOWN_STEP_KINDS).not.toContain('emit');
+  });
+  it('type-checks in a PresentationPlan', () => {
+    const plan: PresentationPlan = [{ kind: 'emit', event: 'x', wait: true }];
+    expect(plan).toHaveLength(1);
   });
 });
 

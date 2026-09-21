@@ -131,6 +131,22 @@ export interface TumbleStep {
 }
 
 /**
+ * A beat on the flow bus, not a board step: `event` fires with `payload`
+ * (data the mechanic computed — never a scene or shell name), and
+ * `wait: true` holds the plan until every flow branch that event started
+ * has ended (an `on { busy: parallel }` node). Served by the play loop's
+ * built-in handler (`@energy8engine/play-loop`), never by a board — so it
+ * is in `KnownPresentationStep` (a mechanic's plan may carry it, typed)
+ * but NOT in `KNOWN_STEP_KINDS`/`BoardApi` (no board is obliged to know it).
+ */
+export interface EmitStep {
+  kind: 'emit';
+  event: string;
+  payload?: unknown;
+  wait?: boolean;
+}
+
+/**
  * How fast a step should play — the one thing a presentation carries
  * besides its own content. Threaded from `play.execute` (`@energy8engine/
  * play-loop`) through `executePlan` to every `BoardApi` method and every
@@ -157,13 +173,15 @@ export interface StepOpts {
  * literal to quietly match instead. See `UnknownPresentationStep`'s doc for
  * the mechanism that would otherwise defeat that.
  *
- * It was six, then four: `setMultiplier` and `wait` were built before any
- * mechanic asked for them, nothing ever emitted either, and they are gone.
- * `tumble` (slice 25) earned the fifth place the other way round — see
- * `KNOWN_STEP_KINDS`.
+ * It was six, then four, then five: `setMultiplier` and `wait` were built
+ * before any mechanic asked for them, nothing ever emitted either, and they
+ * are gone. `tumble` (slice 25) earned the fifth place the other way round
+ * — see `KNOWN_STEP_KINDS`. `emit` (slice 29) is the sixth, the first that
+ * is not a board step — see `EmitStep`'s own doc for why it belongs here
+ * but not in `KNOWN_STEP_KINDS`.
  */
 export type KnownPresentationStep =
-  SpinToStep | RevealWinsStep | RemoveStep | RefillStep | TumbleStep;
+  SpinToStep | RevealWinsStep | RemoveStep | RefillStep | TumbleStep | EmitStep;
 
 /**
  * A step naming any OTHER kind — a plugin's, task 9's `reelStep` among
@@ -240,6 +258,9 @@ export type PresentationPlan = KnownPresentationStep[];
  * the `reel-step` plugin brings `reelStep`. Adding a kind back to this
  * list is therefore not how to get one — it is how to oblige every board
  * in existence to implement it.
+ *
+ * `emit` is deliberately absent even though it is a `KnownPresentationStep`
+ * — it is not a board step at all, the play loop serves it itself.
  */
 export const KNOWN_STEP_KINDS: readonly KnownPresentationStep['kind'][] = [
   'spinTo',
@@ -369,6 +390,12 @@ export function isPresentationStep(value: unknown): value is PresentationStep {
         // Optional, and only checked when present: "no drops" is the
         // gravity-derived case a cascade mechanic emits, not a malformed step.
         (value.drops === undefined || (Array.isArray(value.drops) && value.drops.every(isDrop)))
+      );
+    case 'emit':
+      return (
+        typeof value.event === 'string' &&
+        value.event.length > 0 &&
+        (value.wait === undefined || typeof value.wait === 'boolean')
       );
     default:
       // Not one of the known kinds — not malformed BY THAT FACT alone. `value.kind`

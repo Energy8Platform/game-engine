@@ -40,6 +40,13 @@ export interface SessionInit {
   /** Absent when the provider has no opinion; the shell keeps its own default. */
   language?: string;
   device?: 'desktop' | 'mobile';
+  /**
+   * The bet multiplier per action name (`{ spin: 1, tournament: 100 }`) —
+   * what a dev wallet charges on an opening play. Absent when the provider
+   * has no opinion (`session-sdk`: the platform charges server-side); a
+   * missing action reads as `1`.
+   */
+  actions?: Record<string, number>;
 }
 
 /**
