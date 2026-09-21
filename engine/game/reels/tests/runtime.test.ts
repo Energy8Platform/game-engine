@@ -66,7 +66,7 @@ describe('reels runtime half', () => {
 });
 
 describe('the reels node type', () => {
-  it('registers `reels` once nodeTypes appears, regardless of order; mount hands out the board view; unmount detaches', async () => {
+  it('registers `reels` once nodeTypes appears, regardless of order; mount wraps the board view; unmount detaches and destroys the wrapper', async () => {
     const ctx = new Context();
     await ctx.plugin(assetsService);
     await ctx.plugin(runtime, { config: { grid: { cols: 5, rows: 3 } } });
@@ -74,19 +74,22 @@ describe('the reels node type', () => {
     ctx.provide('nodeTypes', nodeTypes);
     await vi.waitFor(() => expect(nodeTypes.get('reels')).toBeDefined());
     const type = nodeTypes.get('reels')!;
+    const board = ctx.get('board')!;
     const parent = new Container();
-    parent.addChild(ctx.get('board')!.view);
+    parent.addChild(board.view);
     const view = type.mount({ row: 'reels1' }, ctx);
-    expect(view).toBe(ctx.get('board')!.view);
-    expect(view.parent).toBeNull();
-    const holder = new Container();
-    holder.addChild(view);
+    expect(view).not.toBe(board.view);
+    expect(view.children).toEqual([board.view]);
+    expect(board.view.parent).toBe(view);
     type.unmount!(view);
-    expect(view.parent).toBeNull();
-    expect(view.destroyed).toBe(false);
+    expect(view.destroyed).toBe(true);
+    expect(board.view.parent).toBeNull();
+    expect(board.view.destroyed).toBe(false);
+    expect(board.view.position.x).toBe(0);
+    expect(board.view.position.y).toBe(0);
   });
 
-  it('origin: center wraps the board view offset by the grid’s centre; cell (the default) hands out the bare view; unmount resets', async () => {
+  it('origin: center offsets the wrapped view by the grid’s centre; update toggles it in place, same wrapper', async () => {
     const ctx = new Context();
     await ctx.plugin(assetsService);
     await ctx.plugin(runtime, { config: { grid: { cols: 5, rows: 3, cellSize: 100, gap: 10 } } });
@@ -96,15 +99,55 @@ describe('the reels node type', () => {
     const type = nodeTypes.get('reels')!;
     const board = ctx.get('board')!;
     const g = board.grid.geometry!;
+
     const view = type.mount({ row: 'reels1', origin: 'center' }, ctx);
-    expect(view).not.toBe(board.view);
     expect(board.view.parent).toBe(view);
     expect(board.view.position.x).toBeCloseTo(-g.centerX);
     expect(board.view.position.y).toBeCloseTo(-g.centerY);
-    type.unmount!(view);
-    expect(board.view.parent).toBeNull();
+
+    type.update!(view, { row: 'reels1', origin: 'cell' }, ctx);
+    expect(board.view.parent).toBe(view);
     expect(board.view.position.x).toBe(0);
-    expect(type.mount({ row: 'reels1', origin: 'cell' }, ctx)).toBe(board.view);
+    expect(board.view.position.y).toBe(0);
+
+    type.update!(view, { row: 'reels1', origin: 'center' }, ctx);
+    expect(board.view.parent).toBe(view);
+    expect(board.view.position.x).toBeCloseTo(-g.centerX);
+    expect(board.view.position.y).toBeCloseTo(-g.centerY);
+  });
+
+  it('a fresh mount ahead of the old unmount (scenes.ts remountNode order: mount THEN unmount) leaves the board view under the fresh wrapper, not torn out', async () => {
+    const ctx = new Context();
+    await ctx.plugin(assetsService);
+    await ctx.plugin(runtime, { config: { grid: { cols: 5, rows: 3, cellSize: 100, gap: 10 } } });
+    const nodeTypes = createNodeTypes();
+    ctx.provide('nodeTypes', nodeTypes);
+    await vi.waitFor(() => expect(nodeTypes.get('reels')).toBeDefined());
+    const type = nodeTypes.get('reels')!;
+    const board = ctx.get('board')!;
+    const g = board.grid.geometry!;
+
+    // center -> cell: the fresh (cell) wrapper mounts first, taking board.view
+    // out of the old (center) wrapper; only then does the old one unmount.
+    const a = type.mount({ row: 'reels1', origin: 'center' }, ctx);
+    const b = type.mount({ row: 'reels1', origin: 'cell' }, ctx);
+    type.unmount!(a);
+    expect(board.view.parent).toBe(b);
+    expect(board.view.position.x).toBe(0);
+    expect(board.view.position.y).toBe(0);
+    expect(a.destroyed).toBe(true);
+    expect(b.destroyed).toBe(false);
+    type.unmount!(b);
+
+    // cell -> center: same hazard, reverse origins.
+    const c = type.mount({ row: 'reels1', origin: 'cell' }, ctx);
+    const d = type.mount({ row: 'reels1', origin: 'center' }, ctx);
+    type.unmount!(c);
+    expect(board.view.parent).toBe(d);
+    expect(board.view.position.x).toBeCloseTo(-g.centerX);
+    expect(board.view.position.y).toBeCloseTo(-g.centerY);
+    expect(c.destroyed).toBe(true);
+    expect(d.destroyed).toBe(false);
   });
 
   it('a hot re-apply registers again (a new board) and the disposer takes the old registration back', async () => {

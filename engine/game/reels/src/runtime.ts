@@ -78,6 +78,17 @@ export function apply(ctx: Context, config: Partial<CreateReelSystemOptions>): v
   ctx.effect(() => () => board.destroy(), 'reels:board');
   ctx.provide('board', board);
 
+  // `origin: 'center'` positions `board.view` at the legacy grid's own
+  // centre (`ReelGrid.geometry`) instead of reel 0's cell centre; `'cell'`
+  // (the default) is the identity placement, `(0, 0)`.
+  const place = (props: { origin?: 'cell' | 'center' }) => {
+    const g = props.origin === 'center' ? board.grid.geometry : undefined;
+    // `g ? -g.centerX : 0`, not `-(g?.centerX ?? 0)` — the latter negates the
+    // `?? 0` fallback itself and hands back `-0`, which fails a strict
+    // `toBe(0)` (Object.is) even though it moves the view nowhere.
+    board.view.position.set(g ? -g.centerX : 0, g ? -g.centerY : 0);
+  };
+
   // The board reaches the screen only through a `reels` scene node
   // (`@energy8engine/scenes`): registered whenever `nodeTypes` is on the
   // context, again on a hot re-apply (a new board), taken back on dispose.
@@ -92,21 +103,36 @@ export function apply(ctx: Context, config: Partial<CreateReelSystemOptions>): v
               .default('cell')
               .description("what x/y name: reel 0's cell centre (the board's own origin) or the board's centre"),
           }),
+          // `board.view` is one persistent singleton — it cannot sit in two
+          // mounted entries at once. `remountNode`/`setProps` (scenes.ts)
+          // mount the FRESH entry before unmounting the old one whenever a
+          // type has no `update`; for this type that ordering would tear
+          // `board.view` back out of whichever wrapper just took it in (or,
+          // going the other way, rip it out of the scene entirely). So both
+          // origins get a wrapper (never a bare `board.view` mount), and an
+          // origin toggle goes through `update` on the SAME wrapper instead
+          // of a remount — the scenes runtime calls `update` in place of
+          // mount+unmount for a type that declares one (`setProps`/
+          // `applyVariant`, same file).
           mount: (props) => {
             board.view.parent?.removeChild(board.view);
-            if (props.origin !== 'center') return board.view;
-            const g = board.grid.geometry;
-            board.view.position.set(-(g?.centerX ?? 0), -(g?.centerY ?? 0));
             const wrap = new Container();
-            wrap.label = 'reels:center';
+            wrap.label = 'reels:origin';
             wrap.addChild(board.view);
+            place(props);
             return wrap;
           },
+          update: (_view, props) => place(props),
           unmount: (view) => {
             view.parent?.removeChild(view);
-            if (view === board.view) return;
-            board.view.position.set(0, 0);
-            board.view.parent?.removeChild(board.view);
+            // Only touch `board.view` while it is still THIS wrapper's
+            // child — a stale `unmount` (remount hazard above, or any
+            // other type without `update` mounted fresh ahead of this
+            // call landing) must not reach into a wrapper it no longer owns.
+            if (board.view.parent === view) {
+              view.removeChild(board.view);
+              board.view.position.set(0, 0);
+            }
             view.destroy();
           },
         }),
