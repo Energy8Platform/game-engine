@@ -756,6 +756,11 @@ export async function apply(ctx: Context, config: DevGameConfig): Promise<void> 
    * `readGameConfig`; NOT the compiled `.spin`'s `bet_levels`, a different
    * (server-side) declaration of the same idea. `balance`/`currency` are
    * fixed: nothing about this dev host has an opinion on either yet.
+   *
+   * `actions` (name → cost, `session-host`'s per-action charge) comes from
+   * `ctx.spinSchema`, read leniently (`reflect.get(…, false)`) since this
+   * plugin does not inject it — a composition with no `schema` row, or one
+   * whose `.spin` failed to parse, omits the key rather than send `{}`.
    */
   preview.get('/api/session', async (_req, res) => {
     // One source for both fields: `defaultBet` is `betLevels[0]`, never a
@@ -763,6 +768,14 @@ export async function apply(ctx: Context, config: DevGameConfig): Promise<void> 
     // itself doesn't have — see `project-scope.ts`'s `readGameConfig`,
     // which already keeps the two in step for a real project either way.
     const betLevels = config.betLevels ?? [config.betLevel];
+    const schema = (
+      ctx.reflect.get('spinSchema', false) as
+        | { schema?: { actions?: { name: string; cost: number }[] } | null }
+        | undefined
+    )?.schema;
+    const actions = schema?.actions?.length
+      ? Object.fromEntries(schema.actions.map((a) => [a.name, a.cost]))
+      : undefined;
     res.json({
       // `session-host` keys its persisted dev wallet on this
       // (`sessionStorage['e8:wallet:<gameId>']`).
@@ -771,6 +784,7 @@ export async function apply(ctx: Context, config: DevGameConfig): Promise<void> 
       currency: { code: 'USD', symbol: '$', decimals: 2, position: 'left' },
       betLevels,
       defaultBet: betLevels[0],
+      ...(actions ? { actions } : {}),
     });
   });
 

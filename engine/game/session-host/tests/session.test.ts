@@ -124,6 +124,27 @@ describe('session-host', () => {
     await ctx.fiber.dispose();
   });
 
+  it("an opening play charges betLevel × the action's cost from init.actions; an unknown action × 1; a step charges nothing", async () => {
+    const withActions = () => ok({ ...INIT, actions: { spin: 1, tournament: 100 } });
+
+    const tournament = await boot(fakeFetch({ session: withActions }));
+    const { result: r1 } = await tournament.get('session')!.play({ action: 'tournament', betLevel: 2 });
+    expect(r1!.balance).toBe(1000 - 2 * 100 + 2);
+    await tournament.fiber.dispose();
+
+    const mystery = await boot(fakeFetch({ session: withActions }));
+    const { result: r2 } = await mystery.get('session')!.play({ action: 'mystery', betLevel: 2 });
+    expect(r2!.balance).toBe(1000 - 2 * 1 + 2);
+    await mystery.fiber.dispose();
+
+    const freeSpin = await boot(fakeFetch({ session: withActions }));
+    const { result: r3 } = await freeSpin
+      .get('session')!
+      .play({ action: 'free_spin', betLevel: 2, roundId: 'r' });
+    expect(r3!.balance).toBe(1000 - 0 + 2);
+    await freeSpin.fiber.dispose();
+  });
+
   it('a 502 with { diagnostics } returns those diagnostics, no result', async () => {
     const provided = [diagnostic('error', 'session-dev', 'session', 'the math engine is not running')];
     const ctx = await boot(fakeFetch({ spin: () => fail(502, { diagnostics: provided }) }));

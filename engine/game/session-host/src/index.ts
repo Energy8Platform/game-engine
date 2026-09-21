@@ -32,6 +32,10 @@
  * `sessionStorage` (a node test) nothing persists. A real ledger is
  * `session-sdk`'s platform.
  *
+ * What an opening play charges is `betLevel × init.actions[req.action]`, not
+ * `betLevel` alone — an unpriced action (no `init.actions`, or one that
+ * names no entry for it) charges `× 1`, same as before `actions` existed.
+ *
  * **Why every diagnostic here names `'session-host'`, not `'session'`.**
  * `session` is the cordis *service key* both candidates behind this seam
  * provide — `session-sdk` (Task 4) answers to the exact same name, on a
@@ -155,7 +159,7 @@ export async function apply(ctx: Context, config: SessionHostConfig = {}): Promi
     // is charged, a failed one too), but a store written before the fetch
     // drained the persisted balance one bet per reload against a dead
     // server — reload, charge, nothing answers, reload, charge again.
-    if (req.roundId === undefined) balance -= req.betLevel ?? 0;
+    if (req.roundId === undefined) balance -= (req.betLevel ?? 0) * (init.actions?.[req.action] ?? 1);
 
     try {
       const res = await fetchFn('/api/spin', {

@@ -534,6 +534,37 @@ describe('dev-game — the spin route', () => {
     });
   });
 
+  it('/api/session carries `actions` from the spin schema (name → cost) and omits it with no schema', async () => {
+    await bare();
+    await ctx!.plugin({
+      name: 'spin-schema-stub',
+      apply(c: Context) {
+        c.provide('spinSchema', {
+          schema: {
+            actions: [
+              { name: 'spin', stage: 'base_game', cost: 1 },
+              { name: 'tournament', stage: 'free_spins', cost: 100 },
+            ],
+          },
+          diagnostics: [],
+          reload: async () => {},
+        });
+      },
+    });
+    await ctx!.plugin(devGame, {
+      root: WEB_ROOT,
+      gamesDir: GAME,
+      gameId: 'first-slot',
+      betLevel: 1,
+      betLevels: [1],
+      port: 0,
+      previewPort: 0,
+    });
+
+    const body = await (await fetch(`${preview(ctx!)}/api/session`)).json();
+    expect(body.actions).toEqual({ spin: 1, tournament: 100 });
+  });
+
   it('/api/session falls back to [betLevel] when the plugin config carries no betLevels', async () => {
     await bare();
     await ctx!.plugin(devGame, {
