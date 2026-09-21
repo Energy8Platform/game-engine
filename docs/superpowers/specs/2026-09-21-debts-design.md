@@ -39,10 +39,10 @@ two test repairs in §7.
   service answers `doc() === null`, `busy() === false`). Closes: `base_game`
   drawn under any other edited scene (21-11), the `reset` warning on the
   editor page (26-7), the spec's old `ui.tap` suppression stays.
-- **Skip fan-out.** The latched re-fan keeps calling `board.skip?.()` per
-  later step (a tumble chain re-arms its controller on every step), but
-  the reels board's `skip()` destroys the `fx` overlay's children at most
-  once per latch (the board remembers it did, until its next `spinTo`).
+- **Skip fan-out** — DROPPED to bucket B: `ReelSystem.skip()` (in
+  `packages/*`) bundles the per-round tween kill (needed per step for a
+  tumble chain) with the `fx` overlay destroy; sweeping once per latch
+  needs `ReelSystem.skip({ overlays: false })` there.
 - **`once` races.** `SymbolView`'s `playWin` (symbols) races a node type's
   `once` against the wrapper's `'destroyed'`; `strip`/`spritesheet`'s `once`
   queues a second call behind the first (both promises settle).
@@ -82,8 +82,10 @@ two test repairs in §7.
   service re-reads `game/spec.json`'s list when the frame lands, not only
   on GET/PUT answers).
 - **`SymbolsProperties.write` goes through the document's commit chain**:
-  `ctx.symbols.update(next)` serialises writes (the chain moves into the
-  service; `SymbolsDocument` and `SymbolsProperties` both call it).
+  `ctx.symbols.update(reducer)` queues the reducer behind the previous
+  update and runs it against the latest document (the chain moved into
+  the service; `SymbolsDocument` and `SymbolsProperties` both call it; the
+  plain `update(doc)` form is queued too).
 - **Flow palette drop position**: a new node lands at the centre of the
   visible viewport (React Flow's `screenToFlowPosition` of the pane's
   centre) instead of `80 + 40n`; `flow.spec`'s add-wait case loses its
@@ -96,8 +98,11 @@ two test repairs in §7.
 
 - **`config.action` in `dev-game`** is removed (the flow always posts an
   action); the doc line goes with it.
-- **`.e8/shots` is visible in the Explorer**: `SKIPPED_DIRS` skips
-  `.e8/game` (the assembled spin) but lists `.e8/shots/*.png`.
+- **`.e8/shots` is visible in the Explorer**: a path rule (`isScratch`)
+  keeps `.e8/game/**` and `.e8` itself protected while `.e8/shots/**` is
+  LISTED and READABLE only — write, mkdir, create, remove and move into it
+  are refused (`e8 shot` writes the PNGs itself); the `.e8` row shows only
+  when `.e8/shots` exists.
 - **`e8 check` on a broken spec** answers the `spec` error alone (no
   `schema` block from the authored file); the CLI help's
   `incompleteRounds` line names the no-action case too.
@@ -109,19 +114,26 @@ two test repairs in §7.
   after the spin settles, before the screenshot.
 - **`session-sdk` handshake timeout** is row config `handshakeMs`
   (default 15000; the page outside a casino frame falls back sooner when
-  set); **Artube's** `config.artube.currencyMinimalUnit` (decimals) and
+  set); **Artube's** `config.artube.currencyMinimalUnit` (a rounding
+  STEP, `0.01` → 2 decimals via `ceil(−log10(unit))`) and
   `defaultBetIndex` (an index into the ladder) are read leniently into
   `init`.
-- **The dev wallet persists** in `sessionStorage` (`e8:wallet:<gameId>`)
-  so a reload keeps the balance; `GET /api/session` still seeds 1000 when
-  nothing is stored.
+- **The dev wallet persists** in `sessionStorage` (`e8:wallet:<gameId>`,
+  the id from `GET /api/session`) so a reload keeps the balance; `GET
+  /api/session` still seeds 1000 when nothing is stored; the store is
+  written after a RESPONSE, so a play that fails is charged for the tab's
+  life, not durably (a dead server cannot drain the wallet across reloads).
 
 ## 5. Tests
 
 - **Quadrant checks** in `composition.spec.ts`/`schema.spec.ts` become
   "the board region's hash changes after a spin" (the canvas box clipped
   to the design's reel area, before vs after `__e8.spin()`).
-- **`symbols.spec.ts:96`** polls 15 s.
+- **`symbols.spec.ts:96`** polls 15 s — and its `reportNodeTypes` waits
+  for the HOST to hold the node types (`GET /api/scenes` `nodeTypes`), not
+  for the page's `#status`, which reads `ready` before the dev bridge's
+  socket opens (the real flake: the symbols canvas never applies the
+  bridge, so a navigation before the socket left the IDE without types).
 - Every fix above: a unit test in its package (named per task in the
   plan).
 
