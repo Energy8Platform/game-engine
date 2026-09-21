@@ -117,7 +117,6 @@ export function apply(ctx: Context, config: Partial<CreateReelSystemOptions>): v
           mount: (props) => {
             board.view.parent?.removeChild(board.view);
             const wrap = new Container();
-            wrap.label = 'reels:origin';
             wrap.addChild(board.view);
             place(props);
             return wrap;
