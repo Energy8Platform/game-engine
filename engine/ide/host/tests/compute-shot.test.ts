@@ -104,6 +104,9 @@ function fake(options: { hang?: boolean; statuses?: string[]; gotoThrows?: strin
           status = statuses.shift()!;
         }
       },
+      async addStyleTag({ content }) {
+        f.calls.push(`style ${content}`);
+      },
       async screenshot({ path, fullPage }) {
         f.shots.push(path);
         f.fullPages.push(fullPage);
@@ -171,6 +174,8 @@ describe('shot over a real host, with a fake browser', () => {
       'click #spin',
       'wait',
       'text #status',
+      // The dev chrome goes after the spin settled and before the shot.
+      'style #controls,#log{display:none}',
       'screenshot',
       'page.close',
       'browser.close',

@@ -160,8 +160,33 @@ async function readProject(
 
   return {
     composition: resolved.composition,
-    diagnostics: [...diagnostics, ...resolved.diagnostics],
+    diagnostics: [...diagnostics, ...resolved.diagnostics, ...tumblePair(resolved.composition)],
   };
+}
+
+/**
+ * Tumble needs two switches: `game-runtime`'s `tumble` makes the cascade
+ * mechanic present tumbles, and the reel system only animates them when
+ * ITS `cascade.enabled` is on — with one and not the other the tumble
+ * lands instantly and nothing says why. Rows are found by package name,
+ * not by the bundle's ids.
+ */
+function tumblePair(composition: ResolvedComposition): Diagnostic[] {
+  const mechanics = composition.rows.find((r) => r.name === '@energy8engine/game-runtime');
+  const reels = composition.rows.find((r) => r.name === '@energy8engine/reels');
+  if (!mechanics || !reels || mechanics.config.tumble !== true) return [];
+  const inner = isRecord(reels.config.config) ? reels.config.config : {};
+  const cascade = isRecord(inner.cascade) ? inner.cascade : {};
+  if (cascade.enabled === true) return [];
+  return [
+    diagnostic(
+      'warning',
+      'composition',
+      reels.id,
+      `${mechanics.id}.config.tumble is on but ${reels.id}.config.config.cascade.enabled is off — the tumble is instant`,
+      `enable ${reels.id}.config.config.cascade`,
+    ),
+  ];
 }
 
 /** Reads and shape-checks `<cwd>/e8.profile.yml`. Never throws. */

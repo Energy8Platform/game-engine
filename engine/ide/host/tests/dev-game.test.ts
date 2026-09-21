@@ -526,6 +526,7 @@ describe('dev-game — the spin route', () => {
     const res = await fetch(`${preview(ctx!)}/api/session`);
     expect(res.status).toBe(200);
     expect(await res.json()).toEqual({
+      gameId: 'first-slot',
       balance: 1000,
       currency: { code: 'USD', symbol: '$', decimals: 2, position: 'left' },
       betLevels: [1, 2, 5],
@@ -545,7 +546,7 @@ describe('dev-game — the spin route', () => {
     });
 
     const res = await fetch(`${preview(ctx!)}/api/session`);
-    expect(await res.json()).toMatchObject({ betLevels: [2], defaultBet: 2 });
+    expect(await res.json()).toMatchObject({ gameId: 'first-slot', betLevels: [2], defaultBet: 2 });
   });
 
   it("forwards a POSTed action/betLevel to session.play, over the plugin's own config defaults — a buy mode or bet ladder the flow names", async () => {
@@ -554,7 +555,6 @@ describe('dev-game — the spin route', () => {
       root: WEB_ROOT,
       gamesDir: GAME,
       gameId: 'first-slot',
-      action: 'spin',
       betLevel: 1.0,
       port: 0,
       previewPort: 0,
@@ -583,7 +583,8 @@ describe('dev-game — the spin route', () => {
     expect(res.status).toBe(200);
     expect(play).toHaveBeenLastCalledWith({ gameId: 'first-slot', action: 'buy', betLevel: 5 });
 
-    // An empty body falls back to the plugin's own config, unchanged.
+    // An empty body falls back to 'spin' and the plugin's own betLevel —
+    // there is no `config.action`: the flow always posts one.
     expect((await fetch(`${preview(ctx!)}/api/spin`, { method: 'POST' })).status).toBe(200);
     expect(play).toHaveBeenLastCalledWith({ gameId: 'first-slot', action: 'spin', betLevel: 1.0 });
 
@@ -614,7 +615,6 @@ describe('dev-game — the spin route', () => {
       root: WEB_ROOT,
       gamesDir: GAME,
       gameId: 'first-slot',
-      action: 'spin',
       betLevel: 1.0,
       port: 0,
       previewPort: 0,

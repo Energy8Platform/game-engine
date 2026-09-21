@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { Context } from 'cordis';
 import { diagnostic, type SessionInit, type SpinResult } from '@energy8engine/contracts';
 import * as sessionHost from '../src/index';
@@ -203,5 +203,67 @@ describe('session-host', () => {
     expect(getter()).toMatchObject({ balance: 1001 });
 
     await ctx.fiber.dispose();
+  });
+});
+
+/**
+ * The persisted wallet — `sessionStorage['e8:wallet:<gameId>']`, keyed by
+ * the `gameId` `GET /api/session` answers. vitest's node environment has
+ * no `sessionStorage`, which is the "nothing persists" case the suite
+ * above runs in; these install a Map-backed fake and remove it after.
+ */
+describe('session-host — the wallet survives a reload', () => {
+  const g = globalThis as { sessionStorage?: unknown };
+  const storage = new Map<string, string>();
+  const fake = {
+    getItem: (k: string) => storage.get(k) ?? null,
+    setItem: (k: string, v: string) => void storage.set(k, v),
+  };
+  const withGameId = () => ok({ ...INIT, gameId: 'first-slot' });
+  afterEach(() => {
+    delete g.sessionStorage;
+    storage.clear();
+  });
+
+  it('a play writes the balance under the game id; init itself carries no gameId', async () => {
+    g.sessionStorage = fake;
+    const ctx = await boot(fakeFetch({ session: withGameId }));
+    expect(ctx.get('session')!.init).toEqual(INIT);
+    await ctx.get('session')!.play({ action: 'spin', betLevel: 1 });
+    expect(storage.get('e8:wallet:first-slot')).toBe('1001');
+    await ctx.fiber.dispose();
+  });
+
+  it('a stored balance wins over the seed on the next load', async () => {
+    g.sessionStorage = fake;
+    storage.set('e8:wallet:first-slot', '250');
+    const ctx = await boot(fakeFetch({ session: withGameId }));
+    const { result } = await ctx.get('session')!.play({ action: 'spin', betLevel: 1 });
+    expect(result!.balance).toBe(251);
+    await ctx.fiber.dispose();
+  });
+
+  it('a stored value that is not a number, or another game’s, is ignored', async () => {
+    g.sessionStorage = fake;
+    storage.set('e8:wallet:first-slot', 'lots');
+    storage.set('e8:wallet:other', '5');
+    const ctx = await boot(fakeFetch({ session: withGameId }));
+    const { result } = await ctx.get('session')!.play({ action: 'spin', betLevel: 1 });
+    expect(result!.balance).toBe(1001);
+    await ctx.fiber.dispose();
+  });
+
+  it('no gameId from the host (or no sessionStorage at all): nothing is stored', async () => {
+    g.sessionStorage = fake;
+    const ctx = await boot(fakeFetch({}));
+    await ctx.get('session')!.play({ action: 'spin', betLevel: 1 });
+    expect(storage.size).toBe(0);
+    await ctx.fiber.dispose();
+
+    delete g.sessionStorage;
+    const bare = await boot(fakeFetch({ session: withGameId }));
+    const { result } = await bare.get('session')!.play({ action: 'spin', betLevel: 1 });
+    expect(result!.balance).toBe(1001);
+    await bare.fiber.dispose();
   });
 });

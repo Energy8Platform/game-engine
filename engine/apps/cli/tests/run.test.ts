@@ -77,7 +77,13 @@ describe('run', () => {
     }
     expect(USAGE.split('\n')[0]).toContain('help is text');
     expect(USAGE).toContain('output:');
-    for (const field of ['incompleteRounds', 'loadMs', 'rtp', 'npx playwright install chromium']) {
+    for (const field of [
+      'incompleteRounds',
+      'or answered no next action',
+      'loadMs',
+      'rtp',
+      'npx playwright install chromium',
+    ]) {
       expect(USAGE).toContain(field);
     }
   });

@@ -107,14 +107,11 @@ export const inject = ['server'];
 /**
  * Directory names a project tree never shows. Not tidiness — a tree that
  * is mostly other people's packages, or git's own bookkeeping, is not a
- * useful answer to "what does this project contain", so all three are
- * skipped wherever they occur, not only at the root. `.e8` is the host's
- * own scratch (the assembled `prelude ⧺ logic` .spin, `e8 shot`'s PNGs):
- * already unwritable through this service — see `PROTECTED_DIRS` — and
- * listing a generated file the editor refuses to open is worse than not
- * listing it.
+ * useful answer to "what does this project contain", so both are skipped
+ * wherever they occur, not only at the root. The host's own scratch,
+ * `.e8`, is decided by PATH instead — see `isScratch`.
  */
-const SKIPPED_DIRS = new Set(['node_modules', '.git', '.e8']);
+const SKIPPED_DIRS = new Set(['node_modules', '.git']);
 
 /**
  * Directory names no read, write, mkdir, create or remove may reach
@@ -124,9 +121,23 @@ const SKIPPED_DIRS = new Set(['node_modules', '.git', '.e8']);
  * at their next commit. `node_modules` is not the project, and this
  * editor never writes into it — reinstalling it is one `npm install`
  * away, but nothing here should be the reason a reinstall is needed.
- * `.e8` is the host's own scratch, not project source.
+ * `.e8` is the host's own scratch, not project source — `isScratch`.
  */
-const PROTECTED_DIRS = new Set(['.git', 'node_modules', '.e8']);
+const PROTECTED_DIRS = new Set(['.git', 'node_modules']);
+
+/**
+ * `.e8` is the host's scratch: `.e8/game` holds the assembled `prelude ⧺
+ * logic` .spin (hidden from the tree, untouchable through this service —
+ * a generated file the editor must not edit), while `.e8/shots` holds the
+ * PNGs `e8 shot` writes, which ARE worth opening in the Explorer. So the
+ * rule is by path, not by name: everything under `.e8` (and `.e8` itself,
+ * so a remove cannot take the assembly with it) is scratch, except what
+ * sits under `.e8/shots`. Segments are compared lowercased, like
+ * `matches`.
+ */
+function isScratch(segments: string[]): boolean {
+  return segments[0]?.toLowerCase() === '.e8' && segments[1]?.toLowerCase() !== 'shots';
+}
 
 /**
  * Both sets are matched against a lowercased segment. This repo's own
@@ -427,10 +438,15 @@ async function readTree(cwd: string): Promise<FileTreeResponse> {
     // Sorted, so the tree is the same on every run regardless of what
     // order the filesystem happens to hand entries back in.
     for (const dirent of [...dirents].sort((a, b) => a.name.localeCompare(b.name))) {
-      if (dirent.isDirectory() && matches(SKIPPED_DIRS, dirent.name)) continue;
-
       const relPath = relDir ? `${relDir}/${dirent.name}` : dirent.name;
       const absPath = join(absDir, dirent.name);
+      // `.e8` itself is listed (it is the parent of `.e8/shots`); only its
+      // scratch children are not.
+      if (
+        (dirent.isDirectory() && matches(SKIPPED_DIRS, dirent.name)) ||
+        (relDir !== '' && isScratch(relPath.split('/')))
+      )
+        continue;
 
       if (dirent.isDirectory()) {
         entries.push({ path: relPath, kind: 'dir' });
@@ -873,10 +889,11 @@ function describeRefusal(
   // going through with no diagnostics at all, and the leaf-symlink check
   // below does not reach it, because the symlink is the ancestor and not
   // the leaf.
-  const protectedSegment = [
-    ...relative(cwd, target).split(sep),
-    ...relative(realRoot, realAncestor).split(sep),
-  ].find((segment) => matches(PROTECTED_DIRS, segment));
+  const spelled = relative(cwd, target).split(sep);
+  const landed = relative(realRoot, realAncestor).split(sep);
+  const protectedSegment =
+    [...spelled, ...landed].find((segment) => matches(PROTECTED_DIRS, segment)) ??
+    ([spelled, landed].some(isScratch) ? '.e8' : undefined);
   if (protectedSegment !== undefined) {
     return fileDiagnostic(
       'error',

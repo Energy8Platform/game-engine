@@ -41,11 +41,6 @@
  *   subscribed: the `PlatformSession` that would own them is never
  *   constructed, so there is nothing here to `destroy()`. That leak is
  *   inside platform-core, out of reach.
- * - Artube's `config.artube.currencyMinimalUnit` (the currency's rounding
- *   step) and `config.artube.defaultBetIndex` (the default bet as an INDEX
- *   into `betLevels`) go unread: `init` rounds nothing and takes the
- *   default bet from `config.stake.defaultBetLevel` or the first rung. A
- *   debt for the first Artube launch.
  */
 import type { Context } from 'cordis';
 import {
@@ -76,6 +71,13 @@ declare module 'cordis' {
 export interface SessionSdkConfig {
   /** The casino shell's origin — `sdk.parentOrigin` when `sdk` is not given. */
   parentOrigin?: string;
+  /**
+   * How long the handshake (and every other SDK request) waits for the
+   * casino shell before the row boots on the fallback init — the SDK's
+   * `timeout`, default 15000. A page opened outside a casino frame falls
+   * back sooner when this is set lower; `sdk.timeout` wins when given.
+   */
+  handshakeMs?: number;
   /** An in-process `DevBridge` as the platform (tests, offline runs) — see `DevBridgeConfig`. */
   dev?: DevBridgeConfig;
   /** SDK options verbatim; `false` skips the handshake (the row then boots on the fallback init). */
@@ -98,15 +100,32 @@ const FALLBACK_INIT: SessionInit = {
 /** Spec §3: `init` from `initData`. `report` takes the one warning this can raise. */
 function initFrom(initData: InitData, report: (d: Diagnostic) => void): SessionInit {
   const { config } = initData;
+  // Artube's block, untyped on `GameConfigData` like `stake` below — read
+  // leniently. `currencyMinimalUnit` is the currency's rounding STEP
+  // (`0.01`, not `2`; see `packages/artube-bridge`'s `bridge.ts`), turned
+  // into the decimals the shell formats with; `defaultBetIndex` is an
+  // index into the ladder.
+  const artube = config.artube as
+    { currencyMinimalUnit?: unknown; defaultBetIndex?: unknown } | undefined;
+  const unit = artube?.currencyMinimalUnit;
+  const unitDecimals =
+    typeof unit === 'number' && unit > 0 && unit <= 1
+      ? Math.ceil(-Math.log10(unit) - 1e-9)
+      : undefined;
   const meta = config.currency;
   const currency: SessionInit['currency'] = meta?.symbol
     ? {
         code: meta.code,
         symbol: meta.symbol,
-        decimals: meta.decimals ?? 2,
+        decimals: unitDecimals ?? meta.decimals ?? 2,
         position: meta.symbolAfter ? 'right' : 'left',
       }
-    : { code: initData.currency, symbol: initData.currency, decimals: 2, position: 'left' };
+    : {
+        code: initData.currency,
+        symbol: initData.currency,
+        decimals: unitDecimals ?? 2,
+        position: 'left',
+      };
 
   let betLevels = config.betLevels;
   if (
@@ -130,7 +149,13 @@ function initFrom(initData: InitData, report: (d: Diagnostic) => void): SessionI
   // (its index signature) — read leniently, then snapped to the ladder:
   // `defaultBet` must be a rung the shell's stepper can select.
   const stake = config.stake as { defaultBetLevel?: unknown } | undefined;
-  const wanted = typeof stake?.defaultBetLevel === 'number' ? stake.defaultBetLevel : betLevels[0];
+  const index = artube?.defaultBetIndex;
+  const wanted =
+    typeof index === 'number' && Number.isInteger(index) && index >= 0 && index < betLevels.length
+      ? betLevels[index]
+      : typeof stake?.defaultBetLevel === 'number'
+        ? stake.defaultBetLevel
+        : betLevels[0];
   const defaultBet = betLevels.reduce((a, b) =>
     Math.abs(b - wanted) < Math.abs(a - wanted) ? b : a,
   );
@@ -158,7 +183,14 @@ export async function apply(ctx: Context, config: SessionSdkConfig = {}): Promis
   try {
     session = await createPlatformSession({
       dev: config.dev,
-      sdk: config.sdk ?? { parentOrigin: config.parentOrigin },
+      sdk:
+        config.sdk === false
+          ? false
+          : {
+              parentOrigin: config.parentOrigin,
+              timeout: config.handshakeMs ?? 15000,
+              ...config.sdk,
+            },
     });
     if (!session.initData) throw new Error('no SDK handshake ran (sdk: false)');
     init = initFrom(session.initData, report);

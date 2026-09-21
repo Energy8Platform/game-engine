@@ -148,6 +148,29 @@ describe('files service — tree', () => {
     const { entries } = await ctx.files.tree();
     expect(entries.filter((e) => e.path.startsWith('node_modules'))).toEqual([]);
   });
+  it('lists .e8/shots (e8 shot’s PNGs) and reads them, but never .e8/game (the assembled spin)', async () => {
+    const dir = fixture('plain');
+    mkdirSync(join(dir, '.e8', 'game'), { recursive: true });
+    writeFileSync(join(dir, '.e8', 'game', 'script.spin'), 'game "x" {}\n');
+    mkdirSync(join(dir, '.e8', 'shots'), { recursive: true });
+    writeFileSync(join(dir, '.e8', 'shots', 'x.png'), 'png');
+    const ctx = await hostFor(dir);
+    const { entries } = await ctx.files.tree();
+    const paths = entries.map((e) => e.path);
+    expect(paths).toContain('.e8');
+    expect(paths).toContain('.e8/shots');
+    expect(paths).toContain('.e8/shots/x.png');
+    expect(paths.filter((p) => p.startsWith('.e8/game'))).toEqual([]);
+    // Listed means openable: the image viewer fetches the PNG through `read`.
+    const { bytes: png, diagnostics } = await ctx.files.read('.e8/shots/x.png');
+    expect(diagnostics).toEqual([]);
+    expect(new TextDecoder().decode(png)).toBe('png');
+    // The assembly stays untouchable, listed or not.
+    expect((await ctx.files.read('.e8/game/script.spin')).diagnostics[0]).toMatchObject({
+      code: 'protected-path',
+    });
+  });
+
   it('does not list git’s bookkeeping under a name that is only cased differently', async () => {
     // macOS APFS, this repo's own platform, is case-insensitive by
     // default: `.GIT` and `.git` are ONE directory on disk and two

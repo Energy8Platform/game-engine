@@ -101,6 +101,44 @@ describe('project plugin', () => {
     await host.stop();
   });
 
+  it('warns when game-runtime’s tumble is on but the reels’ cascade is off — rows found by package name', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'ide-host-project-tumble-'));
+    writeFileSync(join(dir, 'e8.yml'), '[]\n');
+    writeFileSync(join(dir, 'e8.profile.yml'), 'bundles:\n  - e8-t\n');
+    mkdirSync(join(dir, 'bundles', 'e8-t'), { recursive: true });
+    writeFileSync(
+      join(dir, 'bundles', 'e8-t', 'e8.bundle.yml'),
+      [
+        'name: e8-t',
+        'rows:',
+        '  - id: r1',
+        "    name: '@energy8engine/reels'",
+        '  - id: m1',
+        "    name: '@energy8engine/game-runtime'",
+        '    config: { tumble: true }',
+        '',
+      ].join('\n'),
+    );
+    const host = await createIdeHost({ root: dir, port: 0 });
+    expect(host.ctx.project.diagnostics).toEqual([
+      {
+        severity: 'warning',
+        plugin: 'composition',
+        where: 'r1',
+        message: 'm1.config.tumble is on but r1.config.config.cascade.enabled is off — the tumble is instant',
+        fix: 'enable r1.config.config.cascade',
+      },
+    ]);
+    // The pair agrees once the reel system's own cascade is switched on.
+    writeFileSync(
+      join(dir, 'e8.patch.yml'),
+      'rows:\n  - id: r1\n    config: { config: { cascade: { enabled: true } } }\n',
+    );
+    await host.ctx.project.reload();
+    expect(host.ctx.project.diagnostics).toEqual([]);
+    await host.stop();
+  });
+
   it('a bundle that fails to parse reports only that, not a false "not found" too', async () => {
     const host = await createIdeHost({ root: fixture('project-broken-bundle'), port: 0 });
     const messages = host.ctx.project.diagnostics.map((d) => d.message);

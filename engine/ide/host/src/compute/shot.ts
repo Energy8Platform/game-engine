@@ -32,9 +32,13 @@ export interface PageLike {
     arg: string,
     options: { timeout: number },
   ): Promise<unknown>;
+  addStyleTag(options: { content: string }): Promise<unknown>;
   screenshot(options: { path: string; fullPage: boolean }): Promise<unknown>;
   close(): Promise<void>;
 }
+
+/** The dev toolbar and the diagnostics log a game page draws under `import.meta.env.DEV` — not the game. */
+const HIDE_DEV_CHROME = '#controls,#log{display:none}';
 
 export interface BrowserLike {
   newPage(options: { viewport: { width: number; height: number } }): Promise<PageLike>;
@@ -243,6 +247,9 @@ export async function shot(input: ShotInput): Promise<ShotResult> {
     );
     try {
       await mkdir(dirname(path), { recursive: true });
+      // After the spin settled (its `#status` was read above), before the
+      // shot: the PNG is the game, not the page's dev chrome.
+      await page.addStyleTag({ content: HIDE_DEV_CHROME });
       await page.screenshot({ path, fullPage: true });
     } catch (error) {
       diagnostics.push(

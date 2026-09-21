@@ -35,15 +35,18 @@ export interface CheckResult {
 
 export async function check(input: CheckInput): Promise<CheckResult> {
   // `assemble` only runs for the default file: an explicit path is checked
-  // exactly as given, and never writes anything. Its own diagnostics lead
-  // the list — a `game/spec.json` that could not produce a prelude is the
-  // first thing wrong with this project — but its `spinFile` is NOT what
-  // gets read below: the default `file` is always the authored
+  // exactly as given, and never writes anything. Its own diagnostics ARE
+  // the verdict — a `game/spec.json` that could not produce a prelude is
+  // what is wrong with this project, and the authored logic, which still
+  // parses on its own, would otherwise put a `schema` beside that error
+  // that reads as "the game is fine". Its `spinFile` is NOT what gets read
+  // below either: the default `file` is always the authored
   // `game/script.spin`, GameSpec or not (see `CheckInput.file`'s doc).
   const cwd = input.cwd ?? process.cwd();
   const assembled = input.file === undefined ? await assemble(cwd) : null;
   const file = input.file ?? join(cwd, 'game', 'script.spin');
   const fromSpec = assembled?.diagnostics ?? [];
+  if (fromSpec.length) return { file, diagnostics: fromSpec };
   let source: string;
   try {
     source = await readFile(file, 'utf8');
@@ -51,7 +54,6 @@ export async function check(input: CheckInput): Promise<CheckResult> {
     return {
       file,
       diagnostics: [
-        ...fromSpec,
         diagnostic(
           'error',
           'compute',
@@ -62,5 +64,5 @@ export async function check(input: CheckInput): Promise<CheckResult> {
     };
   }
   const checked = checkSource(source, file);
-  return { file, ...checked, diagnostics: [...fromSpec, ...checked.diagnostics] };
+  return { file, ...checked };
 }

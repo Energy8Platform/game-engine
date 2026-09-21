@@ -1,4 +1,4 @@
-import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { cpSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
@@ -8,6 +8,8 @@ import { checkSource } from '../src/plugins/schema';
 
 const SPIN = join(__dirname, '..', '..', '..', 'examples', 'first-slot', 'game', 'script.spin');
 const STAGE_TYPO = join(__dirname, 'fixtures', 'project-stage-typo', 'game', 'script.spin');
+/** A GameSpec project (`spec.json` + logic-only `script.spin`) — see spec.test.ts. */
+const SPEC_PROJECT = join(__dirname, 'fixtures', 'project-spec');
 
 describe('check', () => {
   it('reads a valid .spin: no error diagnostics, the schema names the game', async () => {
@@ -51,6 +53,20 @@ describe('check', () => {
     } finally {
       await host.stop();
     }
+  });
+
+  it('a GameSpec that cannot be assembled is the one spec error — no schema from the authored logic', async () => {
+    const cwd = mkdtempSync(join(tmpdir(), 'e8-check-spec-'));
+    cpSync(SPEC_PROJECT, cwd, { recursive: true });
+    const specPath = join(cwd, 'game', 'spec.json');
+    const spec = JSON.parse(readFileSync(specPath, 'utf8')) as Record<string, unknown>;
+    delete spec.maxWin;
+    writeFileSync(specPath, JSON.stringify(spec));
+    const result = await check({ cwd });
+    expect(result.diagnostics).toEqual([
+      expect.objectContaining({ severity: 'error', plugin: 'spec', where: 'game/spec.json' }),
+    ]);
+    expect(result.schema).toBeUndefined();
   });
 
   it('a missing file is one compute diagnostic naming the path, not a throw', async () => {

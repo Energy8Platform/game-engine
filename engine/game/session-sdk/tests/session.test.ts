@@ -87,6 +87,39 @@ describe('session-sdk — init from the handshake', () => {
     await ctx.fiber.dispose();
   });
 
+  it("Artube's currencyMinimalUnit (a rounding step) becomes decimals; defaultBetIndex picks the rung", async () => {
+    const { ctx, session } = await boot({
+      dev: {
+        ...DEV,
+        gameConfig: {
+          betLevels: [0.2, 0.5, 1],
+          currency: { code: 'PLN', symbol: 'zł', decimals: 2 },
+          artube: { currencyMinimalUnit: 0.001, defaultBetIndex: 2 },
+        },
+      },
+      sdk: { devMode: true },
+    });
+    expect(session.init.currency.decimals).toBe(3);
+    expect(session.init.defaultBet).toBe(1);
+    await ctx.fiber.dispose();
+  });
+
+  it('Artube fields that make no sense are ignored, not trusted', async () => {
+    const { ctx, session } = await boot({
+      dev: {
+        ...DEV,
+        gameConfig: {
+          betLevels: [0.2, 0.5, 1],
+          artube: { currencyMinimalUnit: 'cent', defaultBetIndex: 7 },
+        },
+      },
+      sdk: { devMode: true },
+    });
+    expect(session.init.currency.decimals).toBe(2);
+    expect(session.init.defaultBet).toBe(0.2);
+    await ctx.fiber.dispose();
+  });
+
   it('no bet levels from the platform: one warning, and [1] so the shell still has a ladder', async () => {
     const { ctx, session, report } = await boot({
       dev: { ...DEV, gameConfig: {} },
@@ -258,6 +291,17 @@ describe('session-sdk — a handshake that never lands', () => {
     const { result, diagnostics } = await session.play({ action: 'spin', betLevel: 1 });
     expect(result).toBeUndefined();
     expect(diagnostics).toEqual([reported]);
+    await ctx.fiber.dispose();
+  });
+
+  it('handshakeMs is the SDK timeout: a page outside a casino frame falls back that soon', async () => {
+    const t0 = Date.now();
+    const { ctx, session, report } = await boot({ handshakeMs: 50, sdk: { devMode: true } });
+    expect(Date.now() - t0).toBeLessThan(5000);
+    expect(session.init).toEqual(FALLBACK);
+    expect(report).toHaveBeenCalledWith(
+      expect.objectContaining({ where: 'handshake', message: expect.stringContaining('50ms') }),
+    );
     await ctx.fiber.dispose();
   });
 

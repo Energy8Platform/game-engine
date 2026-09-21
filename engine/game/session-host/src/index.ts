@@ -23,11 +23,13 @@
  * the HOST to track one — would mean a wallet that outlives the tab it
  * belongs to, survives a restart of `e8-server`, and needs its own reset
  * story. None of that is wanted for a DEV wallet: this one is exactly as
- * durable as the page, which is the right amount for the composition editor
- * and `first-slot`'s local loop. A reload starts over at `init.balance`
- * (1000, or whatever `/api/session` answered) — see `debts` in the design
- * spec for where a real one (`session-sdk`, a platform's own ledger) picks
- * this up instead.
+ * durable as the TAB — `sessionStorage['e8:wallet:<gameId>']`, written
+ * after every play and read back on the next load, so a reload keeps the
+ * balance and a new tab starts over at `init.balance` (1000, or whatever
+ * `/api/session` answered). The game id comes with that answer; without
+ * one (a host that predates it, the fallback init) or without
+ * `sessionStorage` (a node test) nothing persists. A real ledger is
+ * `session-sdk`'s platform.
  *
  * **Why every diagnostic here names `'session-host'`, not `'session'`.**
  * `session` is the cordis *service key* both candidates behind this seam
@@ -82,6 +84,29 @@ const FALLBACK_INIT: SessionInit = {
   defaultBet: 1,
 };
 
+/**
+ * The persisted wallet, or `undefined` when there is nowhere to keep one.
+ * `typeof sessionStorage` is inside the try on purpose: in a browser the
+ * property is a getter that throws when storage is denied to the frame.
+ */
+function walletStore(gameId: string | undefined) {
+  try {
+    if (!gameId || typeof sessionStorage === 'undefined') return undefined;
+    const key = `e8:wallet:${gameId}`;
+    return {
+      read(): number | undefined {
+        const stored = Number(sessionStorage.getItem(key) ?? NaN);
+        return Number.isFinite(stored) ? stored : undefined;
+      },
+      write(balance: number): void {
+        sessionStorage.setItem(key, String(balance));
+      },
+    };
+  } catch {
+    return undefined;
+  }
+}
+
 export const name = 'session';
 export const inject = [];
 
@@ -91,10 +116,13 @@ export async function apply(ctx: Context, config: SessionHostConfig = {}): Promi
     (ctx.reflect.get('diagnostics', false) as DiagnosticsService | undefined)?.report(d);
 
   let init: SessionInit;
+  let gameId: string | undefined;
   try {
     const res = await fetchFn('/api/session');
     if (!res.ok) throw new Error(`the host answered ${res.status}`);
-    init = (await res.json()) as SessionInit;
+    // `gameId` is the wallet's key, not part of `init` — the flow's
+    // `$session` root is the seam's shape and nothing more.
+    ({ gameId, ...init } = (await res.json()) as SessionInit & { gameId?: string });
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     report(
@@ -110,14 +138,17 @@ export async function apply(ctx: Context, config: SessionHostConfig = {}): Promi
   }
 
   // The dev wallet (see the module doc). Charged/credited by `play` below;
-  // read fresh by the live root's getter on every `$session.balance`.
-  let balance = init.balance;
+  // read fresh by the live root's getter on every `$session.balance`. A
+  // stored balance (this tab's earlier load) wins over the seed.
+  const store = walletStore(gameId);
+  let balance = store?.read() ?? init.balance;
 
   async function play(req: PlayRequest): Promise<{ result?: SpinResult; diagnostics: Diagnostic[] }> {
     // A step of an OPEN round (a `roundId` carried forward from the result
     // that started it) costs nothing — the bet was already charged when the
     // round started. Only a fresh round (`roundId` absent) debits.
     if (req.roundId === undefined) balance -= req.betLevel ?? 0;
+    store?.write(balance);
 
     try {
       const res = await fetchFn('/api/spin', {
@@ -150,6 +181,7 @@ export async function apply(ctx: Context, config: SessionHostConfig = {}): Promi
 
       const result = withAmounts((await res.json()) as SpinResult);
       balance += result.winAmount ?? 0;
+      store?.write(balance);
       result.balance = balance;
       return { result, diagnostics: [] };
     } catch (error) {

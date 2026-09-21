@@ -156,12 +156,6 @@ export interface DevGameConfig {
   gamesDir: string;
   /** `game_id` from the `.spin`'s `game "..." { }` declaration. */
   gameId: string;
-  /**
-   * Entry action name for a spin request (see the `.spin`'s `action spin { }`). Defaults to `'spin'`.
-   * Unreachable in practice now that the flow always posts an `action` of its own — kept as the
-   * fallback for a body without one (a hand-made `POST /api/spin`).
-   */
-  action?: string;
   /** Default bet level, used when `POST /api/spin`'s body doesn't specify one. */
   betLevel: number;
   /**
@@ -675,14 +669,15 @@ export async function apply(ctx: Context, config: DevGameConfig): Promise<void> 
     try {
       body = (await req.json()) as typeof body;
     } catch {
-      // An empty or absent body is fine — falls back to config.action/betLevel.
+      // An empty or absent body is fine — falls back to 'spin'/config.betLevel.
     }
 
     const { result, diagnostics } = await ctx.session.play({
       gameId: config.gameId,
-      action: body.action ?? config.action ?? 'spin',
+      // The flow always posts an action; `'spin'` only covers a hand-made POST.
+      action: body.action ?? 'spin',
       betLevel: body.betLevel ?? config.betLevel,
-      // No config fallback, unlike action/betLevel, and deliberately none:
+      // No config fallback, unlike betLevel, and deliberately none:
       // a round id is never a default. It is the page handing back the
       // `roundId` of a result whose `roundComplete` was `false`, to step
       // that round; absent, session-dev starts a fresh round.
@@ -769,6 +764,9 @@ export async function apply(ctx: Context, config: DevGameConfig): Promise<void> 
     // which already keeps the two in step for a real project either way.
     const betLevels = config.betLevels ?? [config.betLevel];
     res.json({
+      // `session-host` keys its persisted dev wallet on this
+      // (`sessionStorage['e8:wallet:<gameId>']`).
+      gameId: config.gameId,
       balance: 1000,
       currency: { code: 'USD', symbol: '$', decimals: 2, position: 'left' },
       betLevels,
