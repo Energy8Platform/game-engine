@@ -96,6 +96,28 @@ describe('flow row', () => {
     expect(ctx.get('flow')!.doc()).toBeNull();
   });
 
+  it('an editor page (`editorPage` provided) gets events/flowNodes/flow but no GET and no document (slice 28)', async () => {
+    const fetchFn = fetchOk({ doc, diagnostics: [], kinds: [] });
+    const ctx = new Context();
+    ctx.provide('editorPage', true);
+    const fiber = ctx.plugin(runtime, { fetchFn });
+    await fiber;
+    expect(ctx.get('events')!.on).toBeTypeOf('function');
+    expect(ctx.get('flowNodes')!.list().map((k) => k.kind)).toContain('boot');
+    const flow = ctx.get('flow')!;
+    await expect(flow.ready).resolves.toBeUndefined();
+    expect(fetchFn).not.toHaveBeenCalled();
+    expect(flow.doc()).toBeNull();
+    // A `flow` frame from the IDE (the bridge's `replace`) arms nothing either.
+    flow.replace(doc);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(flow.doc()).toBeNull();
+    expect(flow.busy()).toBe(false);
+    expect(flow.trace()).toEqual([]);
+    flow.stop();
+    await fiber.dispose();
+  });
+
   it('dispose stops the run', async () => {
     const { ctx, fiber } = boot();
     await fiber;

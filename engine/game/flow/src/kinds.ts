@@ -273,7 +273,7 @@ const step: FlowNodeKind<{ roundId: string; action: string }> = {
   outs: ['result', 'failed'],
   async run(p, { ctx, vars, report }) {
     const roundId = resolve(p.roundId, vars);
-    if (roundId == null || roundId === '') {
+    if (typeof roundId !== 'string' || roundId === '') {
       report(`'step' has no roundId to send (resolved from '${p.roundId}')`);
       return { out: 'failed', vars: { error: "'step' has no roundId" } };
     }
@@ -282,7 +282,7 @@ const step: FlowNodeKind<{ roundId: string; action: string }> = {
       report(`'step' has no action to send (resolved from '${p.action}')`);
       return { out: 'failed', vars: { error: "'step' has no action" } };
     }
-    const request: PlayRequest = { action, roundId: roundId as string };
+    const request: PlayRequest = { action, roundId };
     return playThrough(ctx, request, report);
   },
 };
@@ -297,15 +297,17 @@ const present: FlowNodeKind<{ turbo: string }> = {
       ),
   }),
   outs: ['next', 'failed'],
-  async run(p, { ctx, vars }) {
+  async run(p, { ctx, vars, report }) {
     const result = vars.result as { stage: string; data: Record<string, unknown> } | undefined;
     if (!result) throw new Error('vars.result is missing — run `spin` first');
     const { plan, diagnostics } = service<MechanicsLike>(ctx, 'mechanics').present(result.stage, result.data);
     const play = service<PlayService>(ctx, 'play');
     const turbo = resolve(p.turbo, vars);
-    const opts = {
-      turbo: turbo === true || turbo === 'true' || (typeof turbo === 'number' && turbo > 0),
-    };
+    const on = turbo === true || turbo === 'true' || (typeof turbo === 'number' && turbo > 0);
+    // `''` is what the form's empty option commits: absent, like `undefined`.
+    const off = turbo === false || turbo === 'false' || turbo === 0 || turbo == null || turbo === '';
+    if (!on && !off) report(`turbo "${turbo}" is not true/false`, 'warning');
+    const opts = { turbo: on };
     const problems = diagnostics.length
       ? diagnostics
       : await play.execute(plan, ctx.reflect.get('board', false), undefined, opts);

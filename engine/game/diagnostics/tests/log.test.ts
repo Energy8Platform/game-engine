@@ -236,3 +236,44 @@ describe('a repeat is not a second entry', () => {
     expect(log.own()).toEqual([]);
   });
 });
+
+/**
+ * Slice 28 — retraction. A producer that re-validates and finds a complaint
+ * gone (the flow's `unknown kind` once the kind registers) takes back its
+ * OWN entries by `plugin`/`where`; nothing else moves, and subscribers hear
+ * one change when anything was removed and none when nothing was.
+ */
+describe('retract', () => {
+  it('drops every entry with that plugin/where pair — reported or seeded — and nothing else', () => {
+    const log = createDiagnostics();
+    log.report({ severity: 'error', plugin: 'flow', where: 'x', message: "unknown kind 'sound'" });
+    log.report({ severity: 'warning', plugin: 'flow', where: 'x', message: 'another on x' });
+    log.report({ severity: 'error', plugin: 'flow', where: 'y', message: 'on y' });
+    log.report({ severity: 'error', plugin: 'scenes', where: 'x', message: 'same where, other plugin' });
+    log.seed({ severity: 'error', plugin: 'flow', where: 'x', message: 'seeded on x' });
+    log.retract('flow', 'x');
+    expect(log.list().map((d) => `${d.plugin}/${d.where}`)).toEqual(['flow/y', 'scenes/x']);
+  });
+
+  it('notifies once when something was removed, not at all when nothing matched', () => {
+    const log = createDiagnostics();
+    log.report(d('one'));
+    const seen = vi.fn();
+    log.subscribe(seen);
+    log.retract('p', 'nowhere');
+    expect(seen).not.toHaveBeenCalled();
+    log.retract('p', 'w');
+    expect(seen).toHaveBeenCalledTimes(1);
+    expect(log.list()).toEqual([]);
+  });
+
+  it('never throws, and does not count a retraction as a drop', () => {
+    const log = createDiagnostics();
+    log.report(d('one'));
+    log.subscribe(() => {
+      throw new Error('listener blew up');
+    });
+    expect(() => log.retract('p', 'w')).not.toThrow();
+    expect(log.dropped()).toBe(0);
+  });
+});

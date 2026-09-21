@@ -277,6 +277,14 @@ describe('built-in kinds', () => {
     expect(out2).toEqual({ out: 'failed', vars: { error: "'step' has no action" } });
   });
 
+  it('step: a `$path` roundId that resolves to a non-string (a number) is refused the same way — never on the wire (slice 28)', async () => {
+    const session = fakeSession();
+    const { rc } = runCtx({ session }, { result: { roundId: 7, nextActions: ['spin'] } });
+    expect(await kind('step').run!(stepProps(), rc)).toEqual({ out: 'failed', vars: { error: "'step' has no roundId" } });
+    expect(rc.report).toHaveBeenCalledWith("'step' has no roundId to send (resolved from '$result.roundId')");
+    expect(session.play).not.toHaveBeenCalled();
+  });
+
   it('step: a `$path` action that resolves to a non-string is refused, same as spin — no play is made', async () => {
     const session = fakeSession();
     const { rc } = runCtx({ session }, { result: { roundId: 'r-1', nextActions: [{ id: 'free_spin' }] } });
@@ -355,6 +363,33 @@ describe('built-in kinds', () => {
 
       await kind('present').run!(presentProps(), runCtx({ mechanics, play }, { result, turbo: 0 }).rc);
       expect(play.execute).toHaveBeenLastCalledWith([], undefined, undefined, { turbo: false });
+    });
+
+    it("a literal other than 'true'/'false', or a `$path` to a non-boolean/non-number, is a warning and no turbo (slice 28)", async () => {
+      const mechanics = { present: vi.fn(() => ({ plan: [], diagnostics: [] })) };
+      const play = { execute: vi.fn(async () => []), record: vi.fn() };
+      const result = { stage: 'base_game', data: {} };
+
+      const { rc } = runCtx({ mechanics, play }, { result });
+      await kind('present').run!(presentProps({ turbo: 'yes' }), rc);
+      expect(play.execute).toHaveBeenLastCalledWith([], undefined, undefined, { turbo: false });
+      expect(rc.report).toHaveBeenCalledWith('turbo "yes" is not true/false', 'warning');
+
+      const { rc: viaPath } = runCtx({ mechanics, play }, { result, turbo: { level: 1 } });
+      await kind('present').run!(presentProps(), viaPath);
+      expect(play.execute).toHaveBeenLastCalledWith([], undefined, undefined, { turbo: false });
+      expect(viaPath.report).toHaveBeenCalledWith('turbo "[object Object]" is not true/false', 'warning');
+
+      // The silent falses: `'false'`, `false`, `0`, `null`, an absent var, and the form's empty `''`.
+      for (const turbo of ['false', false, 0, null, undefined, '']) {
+        const { rc: quiet } = runCtx({ mechanics, play }, { result, turbo });
+        await kind('present').run!(presentProps({ turbo: '$turbo' }), quiet);
+        expect(play.execute).toHaveBeenLastCalledWith([], undefined, undefined, { turbo: false });
+        expect(quiet.report).not.toHaveBeenCalled();
+      }
+      const { rc: emptyLiteral } = runCtx({ mechanics, play }, { result });
+      await kind('present').run!(presentProps({ turbo: '' }), emptyLiteral);
+      expect(emptyLiteral.report).not.toHaveBeenCalled();
     });
   });
 

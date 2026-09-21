@@ -18,6 +18,14 @@ export interface CreateFlowOptions {
   kinds: FlowNodesService;
   ctx: Context;
   report(d: Diagnostic): void;
+  /**
+   * Takes back every diagnostic reported as `plugin`/`where` — the
+   * `DiagnosticsService.retract` device. Called for each node a refused
+   * `replace` complained about once the same document arms (the stale
+   * `unknown kind` after the kind registers). Optional: a caller with
+   * nowhere to retract from just keeps the entries.
+   */
+  retract?(plugin: string, where: string): void;
   now?: () => number;
   /** A `run` past this is reported and abandoned. */
   timeoutMs?: number;
@@ -56,6 +64,8 @@ export interface FlowService {
 }
 
 const TRACE_LIMIT = 500;
+/** `step` hops one run may take; the CLI's cap, mirrored. The cap-th hop is refused before the seam. */
+const STEP_CAP = 500;
 
 /** `v` with every object's keys sorted, so two docs that differ only in key order stringify the same. */
 const stable = (v: unknown): unknown =>
@@ -135,6 +145,8 @@ export function createFlow(o: CreateFlowOptions): FlowService {
     epoch: Epoch;
     /** `merge` arrivals this run, by node: the edges that have landed since its last pass. */
     arrived: Map<string, Set<FlowEdge>>;
+    /** `step` nodes entered this run — a round that never completes would loop forever. */
+    hops: number;
   }
 
   const runCtx = (run: Run, node: FlowNode): RunCtx => ({
@@ -170,6 +182,10 @@ export function createFlow(o: CreateFlowOptions): FlowService {
       return leave(doc, run, node, kind, kind.outs[0], undefined);
     }
     if (!kind.run) return fail(node, `kind '${node.kind}' has no run`);
+    if (kind.kind === 'step' && ++run.hops >= STEP_CAP) {
+      fail(node, `step loop: ${STEP_CAP} hops in one run`);
+      return leave(doc, run, node, kind, 'failed', { error: 'step loop' });
+    }
     let timer: ReturnType<typeof setTimeout> | undefined;
     try {
       const props = kind.schema(node.props ?? {}) as Record<string, unknown>;
@@ -224,13 +240,13 @@ export function createFlow(o: CreateFlowOptions): FlowService {
       }
       const start = (vars: Record<string, unknown> | undefined) => {
         if (own.controller.signal.aborted) return; // fired after stop()
-        const run: Run = { no: ++runNo, vars: Object.create(view), epoch: own, arrived: new Map() };
+        const run: Run = { no: ++runNo, vars: Object.create(view), epoch: own, arrived: new Map(), hops: 0 };
         record(run.no, node.id, null);
         leave(doc, run, node, kind, kind.outs[0], vars);
       };
       try {
         const props = kind.schema(node.props ?? {}) as Record<string, unknown>;
-        const armRun: Run = { no: 0, vars: Object.create(view), epoch: own, arrived: new Map() };
+        const armRun: Run = { no: 0, vars: Object.create(view), epoch: own, arrived: new Map(), hops: 0 };
         disposers.push(kind.arm(props, start, runCtx(armRun, node)));
       } catch (e) {
         fail(node, e instanceof Error ? e.message : String(e));
@@ -246,8 +262,17 @@ export function createFlow(o: CreateFlowOptions): FlowService {
     disposers = [];
   };
 
-  /** The last refusal named a kind nothing had registered — the one refusal a later registration can lift. */
-  let missingKind = false;
+  /**
+   * The last `replace` was refused for a reason no registration can lift —
+   * an error other than `unknown kind` (a cycle, a bad edge). Retrying such
+   * a doc on every registry change would only re-report it, so the watcher
+   * below leaves it alone until the next `replace`. A doc refused for BOTH
+   * a cycle and a missing kind is stuck too: the cycle is reported once,
+   * at the attempt, and not again on every registration.
+   */
+  let stuck = false;
+  /** The `where`s of every refusal since the last successful arm — retracted by it (the stale `unknown kind`). */
+  const refused = new Set<string>();
   const doReplace = (doc: FlowDoc | null): void => {
     if (doc && armed && current && shape(doc) === shape(current)) {
       current = doc;
@@ -259,9 +284,19 @@ export function createFlow(o: CreateFlowOptions): FlowService {
     runNo = 0;
     if (!doc) return;
     const problems = validateFlow(doc, kinds.list(), null);
+    const ok = !problems.some((d) => d.severity === 'error');
+    // Before this attempt's own reports land: a warning re-stated on the
+    // same node must survive the retraction of its stale error.
+    if (ok) {
+      for (const where of refused) o.retract?.('flow', where);
+      refused.clear();
+    }
     for (const d of problems) report(d);
-    missingKind = problems.some((d) => d.message.startsWith('unknown kind'));
-    if (problems.some((d) => d.severity === 'error')) return;
+    stuck = problems.some((d) => d.severity === 'error' && !d.message.startsWith('unknown kind'));
+    if (!ok) {
+      for (const d of problems) refused.add(d.where);
+      return;
+    }
     arm(doc);
     armed = true;
   };
@@ -269,26 +304,26 @@ export function createFlow(o: CreateFlowOptions): FlowService {
   // A doc that names a kind nothing has registered yet (a project row after
   // `flow1` — `fx1`'s `tween`/`sound`, say — still importing when the boot
   // GET wins the race `runtime.ts`/`e8.bundle.yml` describe) is reported
-  // once by `doReplace` above and stays unarmed. `report` has no retraction
-  // (`DiagnosticsService` only ever appends — see its doc comment), so that
-  // first "unknown kind" diagnostic is never taken back; this only stops
-  // the doc from staying stuck. Re-running `doReplace` on every registry
-  // change catches it up the moment the missing kind lands. Guarded by
-  // `current && !armed && missingKind`: `current` null means nothing was
-  // ever handed to `replace` (nothing to catch up), `armed` true means a
-  // LIVE run is in progress — an unrelated kind registering elsewhere must
-  // not stop and restart it — and a doc refused for some OTHER reason (a
-  // cycle, a bad edge) would only be re-reported, never armed, so it is
-  // left alone. Subscribed here, once, for the service's whole life,
-  // via `o.ctx.effect` rather than inside `stop`/`doReplace`: those run on
-  // every ordinary doc swap, but this subscription has to outlive all of
-  // them and only die with the row itself — `o.ctx` is the exact fiber
-  // scope `runtime.ts`'s own `flow:run` effect (`flow.stop()` on dispose)
-  // is torn down on, so both go together.
+  // once by `doReplace` above and stays unarmed. Re-running `doReplace` on
+  // every registry change catches it up the moment the missing kind lands
+  // (and takes the stale "unknown kind" back, via `retract`). The same
+  // retry re-arms a doc after a bare `stop()` — held, valid, unarmed.
+  // Guarded by `current && !armed && !stuck`: `current` null means nothing
+  // was ever handed to `replace` (nothing to catch up), `armed` true means
+  // a LIVE run is in progress — an unrelated kind registering elsewhere
+  // must not stop and restart it — and `stuck` is a doc refused for some
+  // OTHER reason (a cycle, a bad edge) that would only be re-reported,
+  // never armed, so it is left alone. Subscribed here, once, for the
+  // service's whole life, via `o.ctx.effect` rather than inside
+  // `stop`/`doReplace`: those run on every ordinary doc swap, but this
+  // subscription has to outlive all of them and only die with the row
+  // itself — `o.ctx` is the exact fiber scope `runtime.ts`'s own
+  // `flow:run` effect (`flow.stop()` on dispose) is torn down on, so both
+  // go together.
   o.ctx.effect(
     () =>
       kinds.subscribe(() => {
-        if (current && !armed && missingKind) doReplace(current);
+        if (current && !armed && !stuck) doReplace(current);
       }),
     'flow:kinds-watch',
   );

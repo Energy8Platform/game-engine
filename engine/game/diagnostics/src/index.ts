@@ -146,7 +146,21 @@ export interface DiagnosticsService {
    * notifies subscribers, never throws.
    */
   seed(diagnostic: Diagnostic): void;
-  /** Called after every `report` or `seed`. Returns a disposer. */
+  /**
+   * Takes back every entry — reported or seeded — whose `plugin` AND `where`
+   * are exactly these, and notifies subscribers once if anything went.
+   * Nothing matching is a no-op: no notification. Never throws.
+   *
+   * The one way an entry leaves this list other than by the bound. A
+   * producer that RE-VALIDATES and finds a complaint gone (the flow's
+   * `unknown kind` once the kind registers) calls this for the places it
+   * complained about, so the panel does not keep showing a failure that no
+   * longer exists. The retraction is by `plugin`/`where`, not by message:
+   * the producer knows where it spoke, and is the only one who should take
+   * its words back — so it names its own `plugin`.
+   */
+  retract(plugin: string, where: string): void;
+  /** Called after every `report`, `seed` or effective `retract`. Returns a disposer. */
   subscribe(listener: () => void): () => void;
   /**
    * How many the bound has forgotten. A panel that lies about completeness
@@ -243,16 +257,19 @@ export function createDiagnostics(options: DiagnosticsOptions = {}): Diagnostics
       // the game down.
       return;
     }
-    // A snapshot, not the live set: a listener that subscribes or
-    // disposes itself mid-notification must not change who else hears
-    // THIS report.
+    notify();
+  };
+
+  // A snapshot, not the live set: a listener that subscribes or disposes
+  // itself mid-notification must not change who else hears THIS change.
+  const notify = (): void => {
     for (const listener of [...listeners]) {
       try {
         listener();
       } catch {
         // A panel blowing up while rendering is that panel's failure,
-        // not this service's — the diagnostic already has its place in
-        // the list (above), and the next listener still gets called.
+        // not this service's — the change already stands in the list,
+        // and the next listener still gets called.
       }
     }
   };
@@ -269,6 +286,16 @@ export function createDiagnostics(options: DiagnosticsOptions = {}): Diagnostics
     },
     seed(diagnostic) {
       add(diagnostic, false);
+    },
+    retract(plugin, where) {
+      const before = records.length;
+      for (let i = records.length - 1; i >= 0; i -= 1) {
+        const { diagnostic } = records[i];
+        if (diagnostic.plugin === plugin && diagnostic.where === where) records.splice(i, 1);
+      }
+      // Not a drop: `dropped()` counts what the bound FORGOT, and a
+      // retraction is the producer saying the entry was never true.
+      if (records.length !== before) notify();
     },
     subscribe(listener) {
       listeners.add(listener);

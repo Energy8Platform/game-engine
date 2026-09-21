@@ -17,6 +17,14 @@
  * `flow.replace()` with what comes back. A failed GET is one error
  * diagnostic — the row still applies, running nothing, rather than failing
  * the whole composition over a route that is down.
+ *
+ * **Not on the editor page.** `editor.ts` provides `editorPage: true`; here
+ * that means the services are still provided (`events`, `flowNodes` — the
+ * IDE's `flow-kinds` report reads the registry — and a `flow` with no
+ * document: `doc()` null, `busy()` false, `ready` resolved, `replace` a
+ * no-op) but nothing is fetched and nothing armed. A flow running under the scene being edited
+ * drew `base_game` over every other scene and warned about a shell that
+ * page deliberately composes without.
  */
 import type { Context } from 'cordis';
 import { diagnostic, type Diagnostic, type FlowResponse } from '@energy8engine/contracts';
@@ -63,7 +71,18 @@ export function apply(ctx: Context, config: FlowConfig = {}): void {
   // Only the boot GET below: a node's play goes through `ctx.session`
   // (`kinds.ts`'s `playThrough`), so the interpreter takes no fetch.
   const fetchFn = config.fetchFn ?? ((...a: Parameters<typeof fetch>) => fetch(...a));
-  const flow = createFlow({ kinds: flowNodes, ctx, report });
+  const retract = (plugin: string, where: string) =>
+    (ctx.reflect.get('diagnostics', false) as DiagnosticsService | undefined)?.retract?.(plugin, where);
+  const flow = createFlow({ kinds: flowNodes, ctx, report, retract });
+
+  if (ctx.reflect.get('editorPage', false)) {
+    // The editor page: the services, no document — see the module doc. The
+    // IDE re-broadcasts the document to every connected page (`ide-bridge`'s
+    // `flow` frame calls `replace`), so `replace` is inert here too.
+    flow.replace = () => {};
+    ctx.provide('flow', flow);
+    return;
+  }
 
   // Same race, same fix, as `scenes/runtime.ts`'s own `replaced`/`alive`
   // pair — see that module's doc for the full argument. `ide-bridge`'s own

@@ -27,9 +27,10 @@ function harness(opts: Partial<CreateFlowOptions> = {}, extraKinds: FlowNodeKind
   const kinds = createFlowNodes();
   for (const k of [...BUILTIN_KINDS, ...extraKinds]) kinds.register(k);
   const report = vi.fn();
-  const flow = createFlow({ kinds, ctx, report, ...opts });
+  const retract = vi.fn();
+  const flow = createFlow({ kinds, ctx, report, retract, ...opts });
   const exits = () => flow.trace().filter((e) => e.out !== null).map((e) => `${e.node}.${e.out}`);
-  return { ctx, events, scenes, mechanics, play, board, session, kinds, report, flow, exits };
+  return { ctx, events, scenes, mechanics, play, board, session, kinds, report, retract, flow, exits };
 }
 
 /** A flow that has settled: no branch will trace anything more. */
@@ -393,9 +394,11 @@ describe('createFlow', () => {
       run: async () => ({ out: 'next' }),
     });
     await settled(f, ['start.next', 'x.next']);
-    // The earlier diagnostic is not retracted, but the now-valid doc has
-    // nothing left to report either — still just the one call.
+    // The now-valid doc has nothing left to report — still just the one
+    // call; the stale `unknown kind` is taken back (slice 28, `retract`).
     expect(f.report).toHaveBeenCalledTimes(1);
+    expect(f.retract).toHaveBeenCalledTimes(1);
+    expect(f.retract).toHaveBeenCalledWith('flow', 'x');
 
     const traceLength = f.flow.trace().length;
     f.kinds.register({
@@ -436,6 +439,105 @@ describe('createFlow', () => {
     await new Promise((r) => setTimeout(r, 5));
     expect(f.report).toHaveBeenCalledTimes(reports);
     expect(f.exits()).toEqual([]);
+  });
+
+  it('a bare stop() (no replace) then a registration re-arms the held doc (slice 28)', async () => {
+    const f = harness();
+    f.flow.replace(doc([{ id: 'start', kind: 'boot' }], []));
+    await settled(f, ['start.next']);
+    f.flow.stop();
+    f.kinds.register({
+      kind: 'late',
+      schema: BUILTIN_KINDS[0].schema,
+      outs: ['next'],
+      run: async () => ({ out: 'next' }),
+    });
+    // A fresh run, not run 1 continued: `replace` restarts the trace.
+    await settled(f, ['start.next']);
+    expect(f.flow.trace().every((e) => e.run === 1)).toBe(true);
+    expect(f.report).not.toHaveBeenCalled();
+    expect(f.retract).not.toHaveBeenCalled();
+  });
+
+  it('a doc refused for BOTH a cycle and a missing kind reports the cycle once per replace; a registration re-reports nothing and arms nothing', async () => {
+    const f = harness();
+    const d = doc(
+      [
+        { id: 'start', kind: 'boot' },
+        { id: 'x', kind: 'sound' },
+        { id: 'a', kind: 'set', props: { name: 'a', value: 1 } },
+        { id: 'b', kind: 'set', props: { name: 'b', value: 1 } },
+      ],
+      [
+        { from: 'start', to: 'x' },
+        { from: 'x', to: 'a' },
+        { from: 'a', to: 'b' },
+        { from: 'b', to: 'a' },
+      ],
+    );
+    f.flow.replace(d);
+    const messages = () => f.report.mock.calls.map(([r]) => (r as { message: string }).message);
+    expect(messages().filter((m) => m.startsWith('unknown kind'))).toHaveLength(1);
+    expect(messages().filter((m) => m.startsWith('cycle without a wait'))).toHaveLength(1);
+    const reports = f.report.mock.calls.length;
+    const late = { kind: 'sound', schema: BUILTIN_KINDS[0].schema, outs: ['next'], run: async () => ({ out: 'next' }) };
+    f.kinds.register(late);
+    f.kinds.register({ ...late, kind: 'unrelated' });
+    await new Promise((r) => setTimeout(r, 5));
+    expect(f.report).toHaveBeenCalledTimes(reports);
+    expect(f.retract).not.toHaveBeenCalled();
+    expect(f.exits()).toEqual([]);
+    // The next `replace` is a fresh attempt: the cycle once more, the kind no longer missing.
+    f.flow.replace({ ...d });
+    expect(messages().filter((m) => m.startsWith('cycle without a wait'))).toHaveLength(2);
+    expect(messages().filter((m) => m.startsWith('unknown kind'))).toHaveLength(1);
+  });
+
+  it('the 500th `step` hop in one run reports `step loop` and leaves by failed without playing (slice 28)', async () => {
+    const f = harness();
+    // A round that never completes and always offers `spin` again: the
+    // example's `done → step → draw` loop with the draw left out.
+    const open = { stage: 'base_game', data: {}, roundId: 'r-1', roundComplete: false, nextActions: ['spin'] };
+    f.session.play.mockResolvedValue({ result: open, diagnostics: [] });
+    let seen: Record<string, unknown> = {};
+    f.kinds.register({
+      kind: 'peek',
+      schema: BUILTIN_KINDS[0].schema,
+      outs: ['next'],
+      run: async (_p, c) => {
+        seen = { ...c.vars };
+        return { out: 'next' };
+      },
+    });
+    f.flow.replace(
+      doc(
+        [
+          { id: 'start', kind: 'boot' },
+          { id: 'spin', kind: 'spin' },
+          { id: 'done', kind: 'if', props: { when: '$result.roundComplete' } },
+          { id: 'step', kind: 'step' },
+          { id: 'bad', kind: 'peek' },
+        ],
+        [
+          { from: 'start', to: 'spin' },
+          { from: 'spin', to: 'done' },
+          { from: 'done', out: 'false', to: 'step' },
+          { from: 'step', to: 'done' },
+          { from: 'step', out: 'failed', to: 'bad' },
+        ],
+      ),
+    );
+    await vi.waitFor(() => expect(f.exits().at(-1)).toBe('bad.next'), { timeout: 5000 });
+    // One spin, then 499 steps played; the 500th hop is refused before the
+    // seam. (The trace is bounded to 500 entries, so the seam is counted.)
+    expect(f.session.play).toHaveBeenCalledTimes(500);
+    expect(f.exits().at(-2)).toBe('step.failed');
+    expect(seen.error).toBe('step loop');
+    expect(f.report).toHaveBeenCalledTimes(1);
+    expect(f.report).toHaveBeenCalledWith(
+      expect.objectContaining({ severity: 'error', plugin: 'flow', where: 'step', message: 'step loop: 500 hops in one run' }),
+    );
+    expect(f.flow.busy()).toBe(false);
   });
 
   it('replace with a cycle-without-wait reports and starts nothing; a warning-only doc runs', async () => {
