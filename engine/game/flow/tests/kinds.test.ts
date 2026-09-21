@@ -884,7 +884,7 @@ describe('built-in kinds', () => {
     }
   });
 
-  it('boot fires once on the next microtask; wait opts out of the run timeout', async () => {
+  it('boot fires once on the next microtask; wait and emit opt out of the run timeout', async () => {
     const fire = vi.fn();
     const { rc } = runCtx();
     kind('boot').arm!({}, fire, rc);
@@ -892,6 +892,6 @@ describe('built-in kinds', () => {
     await Promise.resolve();
     expect(fire).toHaveBeenCalledTimes(1);
     expect(kind('wait').timeout).toBe(false);
-    expect(BUILTIN_KINDS.filter((k) => k.timeout === false).map((k) => k.kind)).toEqual(['wait']);
+    expect(BUILTIN_KINDS.filter((k) => k.timeout === false).map((k) => k.kind)).toEqual(['wait', 'emit']);
   });
 });

@@ -57,7 +57,8 @@ export interface FlowNodeKind<P = Record<string, unknown>> {
   trigger?: boolean;
   /** `false` opts `run` out of the interpreter's 30 s limit (a `wait` for a human, say). */
   timeout?: false;
-  arm?(props: P, fire: (vars?: Record<string, unknown>) => void, ctx: RunCtx): () => void;
+  /** `fire` starts a run with `vars`; its promise settles once that run has no live branch (`stop()` settles it too). */
+  arm?(props: P, fire: (vars?: Record<string, unknown>) => Promise<void>, ctx: RunCtx): () => void;
   run?(props: P, ctx: RunCtx): Promise<{ out: string; vars?: Record<string, unknown> }>;
 }
 
@@ -134,13 +135,13 @@ const boot: FlowNodeKind = {
   },
 };
 
-const on: FlowNodeKind<{ event: string; busy: 'ignore' | 'queue' }> = {
+const on: FlowNodeKind<{ event: string; busy: 'ignore' | 'queue' | 'parallel' }> = {
   kind: 'on',
   schema: Schema.object({
     event: Schema.string().required().description('event name'),
-    busy: Schema.union(['ignore', 'queue'])
+    busy: Schema.union(['ignore', 'queue', 'parallel'])
       .default('ignore')
-      .description('a fire while a run is live: drop it, or fire once after the runs drain'),
+      .description('a fire while a run is live: drop it, fire once after the runs drain, or start a concurrent run at once'),
   }),
   outs: ['next'],
   trigger: true,
@@ -157,13 +158,16 @@ const on: FlowNodeKind<{ event: string; busy: 'ignore' | 'queue' }> = {
         if (busy()) return drain();
         const vars = queued;
         queued = undefined;
-        fire(vars);
+        void fire(vars);
       });
+    // The run's promise goes back to the bus, so an `emit { wait }` can hold
+    // for it; a queued fire is nobody's to wait for.
     return service<EventsService>(ctx, 'events').on(p.event, (event) => {
-      if (!busy()) return fire({ event });
-      if (p.busy !== 'queue') return;
+      if (!busy() || p.busy === 'parallel') return fire({ event });
+      if (p.busy !== 'queue') return undefined;
       if (queued === undefined) drain();
       queued = { event }; // coalesce: the latest payload wins
+      return undefined;
     });
   },
 };
@@ -413,15 +417,19 @@ const set: FlowNodeKind<{ name: string; value?: unknown }> = {
   },
 };
 
-const emit: FlowNodeKind<{ event: string; payload?: unknown }> = {
+/** `timeout: false` is for `wait`: a branch held for a human-paced run must not hit the 30 s limit. */
+const emit: FlowNodeKind<{ event: string; payload?: unknown; wait: boolean }> = {
   kind: 'emit',
   schema: Schema.object({
     event: Schema.string().required().description('event name'),
     payload: Schema.any().description('literal, or `$path` to read a var'),
+    wait: Schema.boolean().default(false).description('hold this branch until every run the event started has ended'),
   }),
   outs: ['next'],
+  timeout: false,
   async run(p, { ctx, vars }) {
-    service<EventsService>(ctx, 'events').emit(p.event, resolve(p.payload, vars));
+    const done = service<EventsService>(ctx, 'events').emit(p.event, resolve(p.payload, vars));
+    if (p.wait) await done;
     return { out: 'next' };
   },
 };

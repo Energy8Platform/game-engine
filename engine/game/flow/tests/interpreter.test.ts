@@ -743,6 +743,110 @@ describe('createFlow', () => {
     expect(f.flow.busy()).toBe(false);
   });
 
+  it('on { busy: parallel } fires while a run is live; the branch sees $event and the live roots, not the parent run’s vars', async () => {
+    const { f, play, release } = gated();
+    let seen: Record<string, unknown> | undefined;
+    f.kinds.register({
+      kind: 'peek',
+      schema: BUILTIN_KINDS[0].schema,
+      outs: ['next'],
+      run: async (_p, c) => {
+        seen = { ...c.vars };
+        return { out: 'next' };
+      },
+    });
+    f.flow.provideRoot('shell', () => ({ bet: 2 }));
+    const d = spinDoc('ignore');
+    d.nodes.push(
+      { id: 'beat', kind: 'on', props: { event: 'pd.round', busy: 'parallel' } },
+      { id: 'note', kind: 'set', props: { name: 'seen', value: '$event.n' } },
+      { id: 'root', kind: 'set', props: { name: 'bet', value: '$shell.bet' } },
+      { id: 'parent', kind: 'set', props: { name: 'res', value: '$result' } },
+      { id: 'look', kind: 'peek' },
+    );
+    d.edges.push(
+      { from: 'beat', to: 'note' },
+      { from: 'note', to: 'root' },
+      { from: 'root', to: 'parent' },
+      { from: 'parent', to: 'look' },
+    );
+    f.flow.replace(d);
+    f.events.emit('ui.spin');
+    expect(f.flow.busy()).toBe(true);
+    const done = f.events.emit('pd.round', { n: 7 });
+    await done;
+    expect(f.flow.trace().filter((e) => e.node === 'beat' && e.out === null)).toHaveLength(1);
+    // The parallel run's own vars: `$event` and the root read, `$result` is the other run's and not here.
+    expect(seen).toEqual({ event: { n: 7 }, seen: 7, bet: 2, res: null });
+    expect(f.flow.busy()).toBe(true); // the spin run is still held
+    release[0]();
+    await settled(f, ['idle.next', 'beat.next', 'note.next', 'root.next', 'parent.next', 'look.next', 'spin.result']);
+    expect(play).toHaveBeenCalledTimes(1);
+    expect(f.flow.busy()).toBe(false);
+  });
+
+  it('the promise a listener returns settles when the run it started has no live branch; stop() settles the rest', async () => {
+    const f = harness();
+    let release!: () => void;
+    const hold = new Promise<{ out: string }>((r) => (release = () => r({ out: 'next' })));
+    f.kinds.register({ kind: 'hold', schema: BUILTIN_KINDS[0].schema, outs: ['next'], timeout: false, run: () => hold });
+    const d = doc(
+      [
+        { id: 'go', kind: 'on', props: { event: 'x' } },
+        { id: 'h', kind: 'hold' },
+      ],
+      [{ from: 'go', to: 'h' }],
+    );
+    f.flow.replace(d);
+    let settledAt = 0;
+    const p = f.events.emit('x').then(() => (settledAt = Date.now()));
+    await new Promise((r) => setTimeout(r, 20));
+    expect(settledAt).toBe(0);
+    expect(f.exits()).toEqual(['go.next']);
+    release();
+    await p;
+    expect(settledAt).toBeGreaterThan(0);
+    expect(f.exits()).toEqual(['go.next', 'h.next']);
+    // A second run held for good, then stop(): the promise settles without the node finishing.
+    const hold2 = new Promise<{ out: string }>(() => {});
+    f.kinds.register({ kind: 'hold', schema: BUILTIN_KINDS[0].schema, outs: ['next'], timeout: false, run: () => hold2 });
+    f.flow.stop();
+    f.flow.replace(d);
+    const p2 = f.events.emit('x');
+    expect(f.flow.busy()).toBe(true);
+    f.flow.stop();
+    await expect(p2).resolves.toBeUndefined();
+    expect(f.exits()).toEqual(['go.next']);
+  });
+
+  it('emit { wait: true } holds its branch until the listeners’ runs end; wait: false does not', async () => {
+    const f = harness();
+    const d = (wait: boolean) =>
+      doc(
+        [
+          { id: 'start', kind: 'boot' },
+          { id: 'e', kind: 'emit', props: { event: 'beat', wait } },
+          { id: 'after', kind: 'set', props: { name: 'after', value: 1 } },
+          { id: 'hear', kind: 'on', props: { event: 'beat', busy: 'parallel' } },
+          { id: 'w', kind: 'wait', props: { ms: 30 } },
+          { id: 'inner', kind: 'set', props: { name: 'inner', value: 1 } },
+        ],
+        [
+          { from: 'start', to: 'e' },
+          { from: 'e', to: 'after' },
+          { from: 'hear', to: 'w' },
+          { from: 'w', to: 'inner' },
+        ],
+      );
+    f.flow.replace(d(true));
+    // The inner run leaves its last node BEFORE the emitting branch moves on.
+    await settled(f, ['start.next', 'hear.next', 'w.next', 'inner.next', 'e.next', 'after.next']);
+    f.flow.replace(d(false));
+    // Without `wait` the emitting branch moves on at once; the inner run finishes on its own later.
+    await settled(f, ['start.next', 'hear.next', 'e.next', 'after.next', 'w.next', 'inner.next']);
+    expect(f.report).not.toHaveBeenCalled();
+  });
+
   it('a run returning a port not in outs, and a trigger without arm, are diagnostics', async () => {
     const f = harness({}, [
       { kind: 'odd', schema: BUILTIN_KINDS[0].schema, outs: ['next'], run: async () => ({ out: 'sideways' }) },

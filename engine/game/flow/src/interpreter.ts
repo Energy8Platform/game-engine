@@ -87,13 +87,17 @@ export function createFlow(o: CreateFlowOptions): FlowService {
   const now = o.now ?? Date.now;
   const timeoutMs = o.timeoutMs ?? 30_000;
 
-  /** Everything `stop()` throws away: the abort signal, the live-branch count, whoever waits for idle. */
+  /**
+   * Everything `stop()` throws away: the abort signal, the live-branch count,
+   * whoever waits for idle, the runs whose `fire` promise is still pending.
+   */
   interface Epoch {
     controller: AbortController;
     live: number;
     idlers: (() => void)[];
+    runs: Set<Run>;
   }
-  const fresh = (): Epoch => ({ controller: new AbortController(), live: 0, idlers: [] });
+  const fresh = (): Epoch => ({ controller: new AbortController(), live: 0, idlers: [], runs: new Set() });
 
   let current: FlowDoc | null = null;
   /** The last `replace` armed its triggers without an error, and no `stop()` came since. */
@@ -147,6 +151,9 @@ export function createFlow(o: CreateFlowOptions): FlowService {
     arrived: Map<string, Set<FlowEdge>>;
     /** `step` nodes entered this run — a round that never completes would loop forever. */
     hops: number;
+    /** This run's live branches; at zero the run is over and its `settlers` (the trigger's `fire` promise) resolve. */
+    live: number;
+    settlers: (() => void)[];
   }
 
   const runCtx = (run: Run, node: FlowNode): RunCtx => ({
@@ -160,9 +167,14 @@ export function createFlow(o: CreateFlowOptions): FlowService {
 
   const branch = async (doc: FlowDoc, run: Run, node: FlowNode, via: FlowEdge): Promise<void> => {
     run.epoch.live++;
+    run.live++;
     try {
       await step(doc, run, node, via);
     } finally {
+      if (--run.live === 0) {
+        run.epoch.runs.delete(run);
+        run.settlers.splice(0).forEach((fn) => fn());
+      }
       if (--run.epoch.live === 0) run.epoch.idlers.splice(0).forEach((fn) => fn());
     }
   };
@@ -238,15 +250,28 @@ export function createFlow(o: CreateFlowOptions): FlowService {
         fail(node, `trigger kind "${kind.kind}" has no arm`);
         continue;
       }
-      const start = (vars: Record<string, unknown> | undefined) => {
-        if (own.controller.signal.aborted) return; // fired after stop()
-        const run: Run = { no: ++runNo, vars: Object.create(view), epoch: own, arrived: new Map(), hops: 0 };
+      const newRun = (no: number): Run => ({
+        no,
+        vars: Object.create(view),
+        epoch: own,
+        arrived: new Map(),
+        hops: 0,
+        live: 0,
+        settlers: [],
+      });
+      /** Starts a run; the promise settles when it has no live branch left (at once after `stop()`, or by it). */
+      const start = (vars: Record<string, unknown> | undefined): Promise<void> => {
+        if (own.controller.signal.aborted) return Promise.resolve(); // fired after stop()
+        const run = newRun(++runNo);
         record(run.no, node.id, null);
         leave(doc, run, node, kind, kind.outs[0], vars);
+        if (run.live === 0) return Promise.resolve(); // no edge out of the trigger
+        own.runs.add(run);
+        return new Promise((resolve) => run.settlers.push(resolve));
       };
       try {
         const props = kind.schema(node.props ?? {}) as Record<string, unknown>;
-        const armRun: Run = { no: 0, vars: Object.create(view), epoch: own, arrived: new Map(), hops: 0 };
+        const armRun = newRun(0);
         disposers.push(kind.arm(props, start, runCtx(armRun, node)));
       } catch (e) {
         fail(node, e instanceof Error ? e.message : String(e));
@@ -257,6 +282,8 @@ export function createFlow(o: CreateFlowOptions): FlowService {
   const stop = () => {
     armed = false;
     epoch.controller.abort();
+    // Whoever awaits a `fire` of an abandoned run hears it end now; its branches are left to the abort signal.
+    for (const run of epoch.runs) run.settlers.splice(0).forEach((fn) => fn());
     epoch = fresh();
     disposers.forEach((off) => off());
     disposers = [];
