@@ -125,7 +125,7 @@ describe('session-host', () => {
   });
 
   it("an opening play charges betLevel × the action's cost from init.actions; an unknown action × 1; a step charges nothing", async () => {
-    const withActions = () => ok({ ...INIT, actions: { spin: 1, tournament: 100 } });
+    const withActions = () => ok({ ...INIT, actions: { spin: 1, tournament: 100, gift: 0 } });
 
     const tournament = await boot(fakeFetch({ session: withActions }));
     const { result: r1 } = await tournament.get('session')!.play({ action: 'tournament', betLevel: 2 });
@@ -143,6 +143,12 @@ describe('session-host', () => {
       .play({ action: 'free_spin', betLevel: 2, roundId: 'r' });
     expect(r3!.balance).toBe(1000 - 0 + 2);
     await freeSpin.fiber.dispose();
+
+    // A declared cost of 0 is a free OPENING play — `?? 1` covers a missing action only.
+    const gift = await boot(fakeFetch({ session: withActions }));
+    const { result: r4 } = await gift.get('session')!.play({ action: 'gift', betLevel: 2 });
+    expect(r4!.balance).toBe(1000 - 2 * 0 + 2);
+    await gift.fiber.dispose();
   });
 
   it('a 502 with { diagnostics } returns those diagnostics, no result', async () => {
