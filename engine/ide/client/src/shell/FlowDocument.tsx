@@ -1,4 +1,12 @@
-import { useCallback, useEffect, useReducer, useRef, useState, type DragEvent } from 'react';
+import {
+  useCallback,
+  useEffect,
+  useReducer,
+  useRef,
+  useState,
+  type DragEvent,
+  type RefObject,
+} from 'react';
 import type { Context } from 'cordis';
 import {
   applyEdgeChanges,
@@ -40,8 +48,9 @@ import {
  * clicking it would silently overwrite whatever the user has half-written
  * in the file with the one-boot starter doc.
  *
- * With a doc: a palette (one button per registered kind — click adds on a
- * diagonal, drag drops where the pointer is) and the React Flow canvas.
+ * With a doc: a palette (one button per registered kind — click adds at
+ * the pane's centre, stepped on a small diagonal for consecutive clicks;
+ * drag drops where the pointer is) and the React Flow canvas.
  * The doc is the source of truth; `flow-graph.ts` projects it and every
  * edit is a reducer over it PUT through `ctx.flow.update`. React Flow
  * still needs its own copy of the nodes (`measured` sizes, drag
@@ -98,6 +107,9 @@ function E8NodeView({ data }: NodeProps<E8Node>) {
 }
 const NODE_TYPES = { e8: E8NodeView };
 
+type Reduce = (doc: FlowDoc) => FlowDoc;
+type ToFlowPosition = (client: { x: number; y: number }) => { x: number; y: number };
+
 interface CanvasProps {
   ctx: Context;
   doc: FlowDoc;
@@ -106,12 +118,18 @@ interface CanvasProps {
   selected: string | null;
   /** Queues one write; resolves `true` once the host took it. The document shows a refusal. */
   commit: (reduce: Reduce) => Promise<boolean>;
+  /** The pane's own element — the palette's click-add reads its box to centre a new node in it, same as a drag drop already does with the pointer's. */
+  paneRef: RefObject<HTMLDivElement>;
+  /** Hands `screenToFlowPosition` up to the palette, which renders outside this `ReactFlowProvider` subtree. */
+  onReady: (toFlowPosition: ToFlowPosition) => void;
 }
-type Reduce = (doc: FlowDoc) => FlowDoc;
 
 /** Inside `ReactFlowProvider` so `useReactFlow` (the drop's coordinates) is in reach. */
-function Canvas({ ctx, doc, kinds, trace, selected, commit }: CanvasProps) {
+function Canvas({ ctx, doc, kinds, trace, selected, commit, paneRef, onReady }: CanvasProps) {
   const { screenToFlowPosition } = useReactFlow();
+  useEffect(() => {
+    onReady(screenToFlowPosition);
+  }, [onReady, screenToFlowPosition]);
   const [nodes, setNodes] = useState<E8Node[]>([]);
   const [edges, setEdges] = useState<E8Edge[]>([]);
   // Moves whose PUT has not answered yet: id → position. The projection
@@ -214,6 +232,7 @@ function Canvas({ ctx, doc, kinds, trace, selected, commit }: CanvasProps) {
     <div
       className="e8-flow-canvas"
       data-testid="flow-canvas"
+      ref={paneRef}
       onDragOver={(e) => {
         e.preventDefault();
         e.dataTransfer.dropEffect = 'move';
@@ -261,6 +280,23 @@ export function FlowDocument({ ctx }: { ctx: Context }) {
     [ctx],
   );
 
+  // The palette's click-add centres a new node in the pane — the pane's
+  // own box (`paneRef`, attached to `Canvas`'s wrapper div) converted to a
+  // flow position through `screenToFlowPosition` (`toFlowRef`, handed up
+  // by `Canvas` once it mounts inside `ReactFlowProvider` — the palette
+  // renders outside that subtree, so it cannot call `useReactFlow` itself).
+  // `addCount` steps each consecutive click by a small amount so two adds
+  // in a row don't land on the exact same point; it does NOT grow with the
+  // doc's own node count the way the old `80 + 40 * d.nodes.length` did —
+  // that made the Nth add of a large document land further and further
+  // from the pane, eventually off it.
+  const paneRef = useRef<HTMLDivElement>(null);
+  const toFlowRef = useRef<ToFlowPosition | null>(null);
+  const addCount = useRef(0);
+  const onCanvasReady = useCallback((toFlowPosition: ToFlowPosition) => {
+    toFlowRef.current = toFlowPosition;
+  }, []);
+
   return (
     <div className="e8-explorer e8-flow-doc" data-testid="flow-screen">
       {doc === null && broken ? (
@@ -298,12 +334,20 @@ export function FlowDocument({ ctx }: { ctx: Context }) {
                   e.dataTransfer.setData(KIND_MIME, info.kind);
                   e.dataTransfer.effectAllowed = 'move';
                 }}
-                onClick={() =>
-                  void commit((d) => {
-                    const n = d.nodes.length;
-                    return addNode(d, info.kind, info, { x: 80 + 40 * n, y: 80 + 40 * n });
-                  })
-                }
+                onClick={() => {
+                  const box = paneRef.current?.getBoundingClientRect();
+                  const center =
+                    box && toFlowRef.current
+                      ? toFlowRef.current({
+                          x: box.left + box.width / 2,
+                          y: box.top + box.height / 2,
+                        })
+                      : { x: 80, y: 80 };
+                  const n = addCount.current++;
+                  void commit((d) =>
+                    addNode(d, info.kind, info, { x: center.x + 40 * n, y: center.y + 40 * n }),
+                  );
+                }}
               >
                 {info.kind}
               </button>
@@ -323,6 +367,8 @@ export function FlowDocument({ ctx }: { ctx: Context }) {
                 trace={trace}
                 selected={selected}
                 commit={commit}
+                paneRef={paneRef}
+                onReady={onCanvasReady}
               />
             </ReactFlowProvider>
             <ul className="e8-explorer-tree" data-testid="flow-diagnostics">

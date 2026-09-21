@@ -43,10 +43,11 @@ import { addSymbol, EMPTY, nodeForDrop, removeSymbol, setState, STATES } from '.
  * selected — the canvas keeps whatever it last showed); the same two
  * calls follow every later doc/selection change.
  *
- * Every write is a REDUCER over the doc through one promise chain (the
- * Flow document's `commit`): each reduces `ctx.symbols.doc()` as it
- * stands when its turn comes — `EMPTY` when there is no symbols.yml yet,
- * so the first add creates the file — and PUTs unless nothing changed.
+ * Every write is a REDUCER over the doc, queued through `ctx.symbols.update`
+ * (the Flow document's `commit`, moved into the service so `SymbolsProperties`
+ * shares the same chain): each reduces `ctx.symbols.doc()` as it stands
+ * when its turn comes — `EMPTY` when there is no symbols.yml yet, so the
+ * first add creates the file — and PUTs unless nothing changed.
  *
  * A drop from the Explorer (`text/x-e8-path`) onto a chip sets that
  * state, onto a row its `static`, onto the empty area below the list a
@@ -183,22 +184,14 @@ export function SymbolsDocument({ ctx }: { ctx: Context }) {
     return () => observer.disconnect();
   }, [design.width, design.height, previewUrl]);
 
-  // The write queue: one PUT at a time, each reducing the doc as it stands then.
-  const chain = useRef<Promise<unknown>>(Promise.resolve());
+  // The write queue lives in `ctx.symbols.update` now — see that module's
+  // top comment — so this only needs to report the answer.
   const commit = useCallback(
-    (reduce: Reduce) => {
-      const run = chain.current.then(async () => {
-        const current = ctx.symbols.doc() ?? EMPTY;
-        const next = reduce(current);
-        if (next === current) return true;
-        const answer = await ctx.symbols.update(next);
+    (reduce: Reduce) =>
+      ctx.symbols.update(reduce).then((answer) => {
         setStatus(answer[0] ? `${answer[0].where} — ${answer[0].message}` : null);
         return answer.length === 0;
-      });
-      // A reducer that throws must not jam the queue for every write after it.
-      chain.current = run.catch(() => {});
-      return run;
-    },
+      }),
     [ctx],
   );
 

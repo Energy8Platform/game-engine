@@ -8,6 +8,7 @@ import {
   type SymbolsResponse,
 } from '@energy8engine/contracts';
 import type { ConnectionConfig } from './connection';
+import { EMPTY } from '../shell/symbols-doc';
 import { SymbolsDocument } from '../shell/SymbolsDocument';
 import { SymbolsProperties } from '../shell/SymbolsProperties';
 
@@ -15,12 +16,21 @@ import { SymbolsProperties } from '../shell/SymbolsProperties';
  * The symbols document (`symbols.yml`), client half — `flow.tsx` with
  * `symbols` in place of `flow`: one document (`GET`/`PUT /api/symbols`),
  * `null` until the project has the file, its diagnostics, and `known` —
- * the reel board's registered symbol ids/names (`game/spec.json`), which
- * only the GET and a write's answer carry (a `symbols` frame has the doc
- * and diagnostics alone). The boot GET is the snapshot; a frame or a
+ * the reel board's registered symbol ids/names (`game/spec.json`). The
+ * GET and a write's answer carry `known` outright; a `symbols` frame
+ * carries only the doc and diagnostics (same shape as `FlowMessage`), so
+ * this re-reads `game/spec.json` itself on one — the host broadcasts the
+ * frame on either file changing, and a stale `known` would otherwise sit
+ * until the next write. The boot GET is the snapshot; a frame or a
  * write's answer that lands before it is the newer fact and wins.
  *
  * `PUT` sends an envelope, `{ doc }` — the host refuses a bare document.
+ * `update` also takes a REDUCER, `(doc) => doc`, queued behind whatever
+ * write is already in flight and run against `doc()` as it stands at its
+ * turn — `SymbolsDocument` and `SymbolsProperties` both write this way, so
+ * two edits close together (two blur-commits, a click racing a blur)
+ * serialise through the one chain instead of one reducing a doc the other
+ * has already made stale.
  *
  * `select` is state only, as flow's: the document's canvas reads
  * `selected()` off this service. The three inspectors share the right
@@ -49,8 +59,16 @@ export interface SymbolsClientService {
   diagnostics(): readonly Diagnostic[];
   selected(): SymbolSelection | null;
   select(sel: SymbolSelection | null): void;
-  /** `PUT /api/symbols` `{ doc }`; `[]` on success, the host's refusal (or one transport diagnostic) otherwise. */
+  /**
+   * `PUT /api/symbols` `{ doc }`; `[]` on success, the host's refusal (or
+   * one transport diagnostic) otherwise. A reducer is queued behind
+   * whatever write is already in flight and run against `doc()` as it
+   * stands at its turn — a no-op reduce (returns the same doc) skips the
+   * PUT. A plain doc still PUTs unconditionally, same as always, but
+   * through the same queue, so it never races a reducer write either.
+   */
   update(doc: SymbolsDoc): Promise<Diagnostic[]>;
+  update(reduce: (doc: SymbolsDoc) => SymbolsDoc): Promise<Diagnostic[]>;
   subscribe(listener: () => void): () => void;
 }
 
@@ -80,6 +98,9 @@ function ownDiagnostic(where: string, message: string): Diagnostic {
 function reason(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
+
+const isRecord = (v: unknown): v is Record<string, unknown> =>
+  typeof v === 'object' && v !== null && !Array.isArray(v);
 
 const same = (a: SymbolSelection | null, b: SymbolSelection | null) =>
   a === b || (a !== null && b !== null && a.id === b.id && a.state === b.state);
@@ -112,6 +133,81 @@ export function apply(ctx: Context, config: SymbolsConfig) {
     knownLive = true;
   }
 
+  /**
+   * `game/spec.json`'s own `symbols` field, `[]` on any failure — the
+   * same read the host's `known()` does (`ide/host/src/plugins/symbols.ts`),
+   * so a `symbols` frame (doc + diagnostics only, see this module's top
+   * comment) can refresh `known` too.
+   */
+  async function readKnown(): Promise<{ id: string; name: string }[]> {
+    const { bytes } = await ctx.files.read('game/spec.json');
+    if (!bytes) return [];
+    try {
+      const spec = JSON.parse(new TextDecoder().decode(bytes)) as {
+        symbols?: { id?: unknown; name?: unknown }[];
+      };
+      if (!Array.isArray(spec.symbols)) return [];
+      return spec.symbols
+        .filter((s): s is { id: unknown; name?: unknown } => isRecord(s) && s.id !== undefined)
+        .map((s) => ({
+          id: String(s.id),
+          name: typeof s.name === 'string' ? s.name : String(s.id),
+        }));
+    } catch {
+      return [];
+    }
+  }
+
+  async function putDoc(next: SymbolsDoc): Promise<Diagnostic[]> {
+    let res: Response;
+    let answer: Partial<SymbolsResponse> & { diagnostics?: unknown };
+    try {
+      res = await fetchFn(`${origin}/api/symbols`, {
+        method: 'PUT',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ doc: next }),
+      });
+      answer = await res.json();
+    } catch (error) {
+      const own = ownDiagnostic('/api/symbols', `PUT failed: ${reason(error)}`);
+      ctx.connection.report(own);
+      return [own];
+    }
+    const host = Array.isArray(answer.diagnostics) ? (answer.diagnostics as Diagnostic[]) : [];
+    if (!res.ok) {
+      if (host.length) return host;
+      const own = ownDiagnostic('/api/symbols', `PUT failed: the host answered ${res.status}`);
+      ctx.connection.report(own);
+      return [own];
+    }
+    applyDoc(answer.doc ?? null, host);
+    if (Array.isArray(answer.known)) applyKnown(answer.known);
+    notify();
+    return [];
+  }
+
+  // The write queue, moved in from `SymbolsDocument`'s own `commit`: one
+  // PUT at a time, so a reducer always reduces the doc as it stands when
+  // its turn comes rather than the one its caller last saw. `SymbolsProperties`
+  // used to reduce eagerly at call time and PUT straight away — two
+  // blur-commits close together could each start from the same stale doc
+  // and the second write would silently drop the first's change; routing
+  // it through this same queue is the fix.
+  let chain: Promise<unknown> = Promise.resolve();
+  function queuedUpdate(
+    arg: SymbolsDoc | ((doc: SymbolsDoc) => SymbolsDoc),
+  ): Promise<Diagnostic[]> {
+    const run = chain.then(() => {
+      if (typeof arg !== 'function') return putDoc(arg);
+      const current = doc ?? EMPTY;
+      const next = arg(current);
+      return next === current ? [] : putDoc(next);
+    });
+    // A reducer that throws must not jam the queue for every write after it.
+    chain = run.catch(() => {});
+    return run;
+  }
+
   const service: SymbolsClientService = {
     doc: () => doc,
     known: () => known,
@@ -126,33 +222,7 @@ export function apply(ctx: Context, config: SymbolsConfig) {
         ctx.flow.select(null);
       }
     },
-    async update(next) {
-      let res: Response;
-      let answer: Partial<SymbolsResponse> & { diagnostics?: unknown };
-      try {
-        res = await fetchFn(`${origin}/api/symbols`, {
-          method: 'PUT',
-          headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({ doc: next }),
-        });
-        answer = await res.json();
-      } catch (error) {
-        const own = ownDiagnostic('/api/symbols', `PUT failed: ${reason(error)}`);
-        ctx.connection.report(own);
-        return [own];
-      }
-      const host = Array.isArray(answer.diagnostics) ? (answer.diagnostics as Diagnostic[]) : [];
-      if (!res.ok) {
-        if (host.length) return host;
-        const own = ownDiagnostic('/api/symbols', `PUT failed: the host answered ${res.status}`);
-        ctx.connection.report(own);
-        return [own];
-      }
-      applyDoc(answer.doc ?? null, host);
-      if (Array.isArray(answer.known)) applyKnown(answer.known);
-      notify();
-      return [];
-    },
+    update: queuedUpdate,
     subscribe(listener) {
       listeners.add(listener);
       return () => listeners.delete(listener);
@@ -180,6 +250,10 @@ export function apply(ctx: Context, config: SymbolsConfig) {
         if (frame.type !== 'symbols') return;
         applyDoc(frame.doc, frame.diagnostics);
         notify();
+        void readKnown().then((next) => {
+          applyKnown(next);
+          notify();
+        });
       }),
     'symbols:frames',
   );

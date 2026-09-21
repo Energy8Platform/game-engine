@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { Diagnostic, SymbolsDoc } from '@energy8engine/contracts';
-import { EMPTY } from '../src/shell/symbols-doc';
+import { addSymbol, EMPTY } from '../src/shell/symbols-doc';
 import { accept, boot, harness, KNOWN, TWO, type Answer } from './symbols-harness';
 
 /** The service's own tests; the harness is shared with the document and Properties tests. */
@@ -28,9 +28,37 @@ describe('symbols service', () => {
     socket.receive({ type: 'symbols', doc: EMPTY, diagnostics: [] });
     expect(ctx.symbols.doc()).toEqual(EMPTY);
     expect(ctx.symbols.diagnostics()).toEqual([]);
-    // A frame carries no `known`: the last one read stays.
-    expect(ctx.symbols.known()).toEqual(KNOWN);
+    // A frame carries no `known` of its own (unlike the GET/PUT answers
+    // above) — the harness's default `game/spec.json` still answers
+    // `KNOWN`, so the re-read this frame triggers lands the same value.
     expect(listener).toHaveBeenCalledTimes(1);
+    await vi.waitFor(() => expect(ctx.symbols.known()).toEqual(KNOWN));
+  });
+
+  it('a `symbols` frame re-reads `game/spec.json` and refreshes `known`', async () => {
+    const grape = [{ id: '3', name: 'grape' }];
+    const { ctx, socket } = await harness({
+      'GET /api/symbols': boot({ doc: TWO, known: KNOWN, diagnostics: [] }),
+      'GET /api/files/game/spec.json': () => ({ body: { symbols: grape } }),
+    });
+    await vi.waitFor(() => expect(ctx.symbols.known()).toEqual(KNOWN));
+    const listener = vi.fn();
+    ctx.symbols.subscribe(listener);
+    socket.receive({ type: 'symbols', doc: TWO, diagnostics: [] });
+    // The doc/diagnostics half of the frame applies at once...
+    expect(listener).toHaveBeenCalledTimes(1);
+    // ...`known` lands once the re-read resolves, same shape `game/spec.json`'s own field answers with.
+    await vi.waitFor(() => expect(ctx.symbols.known()).toEqual(grape));
+  });
+
+  it('a `symbols` frame with no readable `game/spec.json` (missing, bad JSON) empties `known`, same as the host would report it', async () => {
+    const { ctx, socket } = await harness({
+      'GET /api/symbols': boot({ doc: TWO, known: KNOWN, diagnostics: [] }),
+      'GET /api/files/game/spec.json': () => ({ status: 404, body: { diagnostics: [] } }),
+    });
+    await vi.waitFor(() => expect(ctx.symbols.known()).toEqual(KNOWN));
+    socket.receive({ type: 'symbols', doc: TWO, diagnostics: [] });
+    await vi.waitFor(() => expect(ctx.symbols.known()).toEqual([]));
   });
 
   it("a frame that arrives before the boot GET resolves wins; the GET's `known` still lands", async () => {
@@ -45,6 +73,28 @@ describe('symbols service', () => {
     await vi.waitFor(() => expect(ctx.symbols.known()).toEqual(KNOWN));
     expect(ctx.symbols.doc()).toEqual(TWO);
     expect(ctx.symbols.diagnostics()).toEqual([]);
+  });
+
+  it('two overlapping reducer `update`s apply in order on the latest doc — neither drops the other', async () => {
+    const { ctx } = await harness({
+      'GET /api/symbols': boot({ doc: EMPTY, known: KNOWN, diagnostics: [] }),
+      'PUT /api/symbols': accept,
+    });
+    await vi.waitFor(() => expect(ctx.symbols.doc()).toEqual(EMPTY));
+    const first = ctx.symbols.update((d) => addSymbol(d, '1', 'cherry'));
+    const second = ctx.symbols.update((d) => addSymbol(d, '2', 'lemon'));
+    await Promise.all([first, second]);
+    expect(ctx.symbols.doc()!.symbols.map((s) => s.id)).toEqual(['1', '2']);
+  });
+
+  it('a reducer that reduces to the same doc (by reference) skips the PUT', async () => {
+    const { ctx, calls } = await harness({
+      'GET /api/symbols': boot({ doc: TWO, known: KNOWN, diagnostics: [] }),
+    });
+    await vi.waitFor(() => expect(ctx.symbols.doc()).toEqual(TWO));
+    const before = calls.length;
+    expect(await ctx.symbols.update((d) => d)).toEqual([]);
+    expect(calls).toHaveLength(before);
   });
 
   it('a failed boot GET is one diagnostic of its own; doc stays null, known empty', async () => {

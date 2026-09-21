@@ -138,6 +138,10 @@ export async function harness(
   const defaults: Record<string, Route> = {
     'GET /api/files': () => ({ body: { entries: FILES, diagnostics: [] } }),
     'GET /api/flow': () => ({ body: { doc: null, diagnostics: [], kinds: [] } }),
+    // A `symbols` frame re-reads this — same list `boot()` defaults `known`
+    // to, so a frame landing in a test that doesn't care about the refresh
+    // doesn't drift `known()` away from what the boot GET already set.
+    'GET /api/files/game/spec.json': () => ({ body: { symbols: KNOWN } }),
   };
   const fetchFn = vi.fn(async (url: string, init?: RequestInit) => {
     const method = init?.method ?? 'GET';

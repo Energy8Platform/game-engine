@@ -142,13 +142,11 @@ test('the Flow document shows the twenty-two nodes of flow.yml, with their ports
 test('the palette adds wait-1 and a drag connects draw → wait-1, both landing in flow.yml', async ({
   page,
 }) => {
-  // A taller window than Playwright's default 1280×720: the palette drops
-  // the twenty-third node at (960, 960) — `80 + 40 × n` — and the canvas
-  // is ~400 px tall at 720 with the graph already fitted at React Flow's
-  // 0.5 minimum zoom, so `wait-1`'s handle would land below it, where no
-  // drag can reach (measured with nineteen nodes: handle y 557, canvas
-  // bottom 440).
-  await page.setViewportSize({ width: 1280, height: 1200 });
+  // The palette drops a new node at the CENTRE of the visible pane
+  // (`screenToFlowPosition` of the canvas element's own box), not at a
+  // fixed doc-space offset that grew with the existing node count — so
+  // `wait-1` lands inside the canvas at Playwright's default 1280×720,
+  // where the twenty-third node's old `80 + 40 × n` spot did not.
   await openComposition(page);
   await openFlow(page);
 

@@ -6,7 +6,7 @@ import { useScenes } from '../plugins/scenes';
 import { useSymbols } from '../plugins/symbols';
 import { SchemaForm } from '../schema-form/SchemaForm';
 import { mergedSchema, useAssetPicker, useNodePicker } from './PropertiesSidebar';
-import { EMPTY, setState, setStateType, setSymbol } from './symbols-doc';
+import { setState, setStateType, setSymbol } from './symbols-doc';
 
 /**
  * The right-hand inspector over `ctx.symbols.selected()`: the symbol's
@@ -16,8 +16,12 @@ import { EMPTY, setState, setStateType, setSymbol } from './symbols-doc';
  * common props (the state's wrapper applies them, so a symbol can be
  * nudged without new art). A state the def has not got yet is one
  * `Create <state>` button. Changing the type keeps the props the new
- * schema also has. Holds no draft of the document: every edit reduces
- * `ctx.symbols.doc()` as it stands and is one `ctx.symbols.update`.
+ * schema also has. Holds no draft of the document: every edit is a
+ * reducer through `ctx.symbols.update`, queued behind whatever write
+ * (here or in `SymbolsDocument`) is already in flight — two blur-commits
+ * close together each reduce the doc as it stands at THEIR turn, not the
+ * one read when the field was blurred, so the second never overwrites
+ * the first's change.
  */
 export function SymbolsProperties({ ctx }: { ctx: Context }) {
   const { doc, selected } = useSymbols(ctx);
@@ -65,9 +69,7 @@ function Body({
   const asset = useAssetPicker(ctx);
   const node = useNodePicker(ctx);
   const write = (reduce: (doc: SymbolsDoc) => SymbolsDoc) =>
-    void ctx.symbols
-      .update(reduce(ctx.symbols.doc() ?? EMPTY))
-      .then((refused) => setError(refused[0]?.message ?? null));
+    void ctx.symbols.update(reduce).then((refused) => setError(refused[0]?.message ?? null));
 
   const current = def[state];
   const info = current ? nodeTypes.find((t) => t.type === current.type) : undefined;
@@ -111,9 +113,14 @@ function Body({
             id="prop-symbol-fit"
             data-testid="prop-symbol-fit"
             value={def.fit ?? 'contain'}
-            onChange={(e) =>
-              write((d) => setSymbol(d, def.id, { fit: e.target.value as 'contain' | 'none' }))
-            }
+            onChange={(e) => {
+              // Captured now, not read inside the reducer: the reducer runs
+              // later, its turn in `ctx.symbols.update`'s queue, and by then
+              // a re-render may have reset this controlled select back to
+              // `def.fit` — `e.target` would no longer say what was picked.
+              const fit = e.target.value as 'contain' | 'none';
+              write((d) => setSymbol(d, def.id, { fit }));
+            }}
           >
             <option value="contain">contain</option>
             <option value="none">none</option>
