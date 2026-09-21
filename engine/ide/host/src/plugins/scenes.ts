@@ -444,8 +444,19 @@ export function apply(ctx: Context): void {
   // says "nothing wrong", which a client with no game yet must not hear
   // from a speaker that never spoke).
   let reported = '';
+  // Refreshes are re-entrant and unordered: a `game/node-types`-triggered
+  // refresh that read the OLD bytes can finish after a PUT's own refresh
+  // read the new ones, and would then broadcast the pre-write set over
+  // the written one. The newest call wins — an older one that finishes
+  // last drops its result. Which is why every refresh broadcasts, a
+  // route's own included: `files.write` emits `files/written` before it
+  // returns, so the refresh that event triggers is always the OLDER of
+  // the pair and is dropped; the route's is the one that speaks.
+  // `symbols.ts`/`flow.ts` guard the same way.
+  let gen = 0;
 
-  const refresh = async (broadcast: boolean): Promise<void> => {
+  const refresh = async (): Promise<void> => {
+    const mine = ++gen;
     const paths = new Set((await ctx.files.tree()).entries.map((e) => e.path));
     const { docs, diagnostics } = await readAll(ctx.files, [...paths]);
     const hasReelsRow = ctx.project.composition.rows.some(
@@ -458,18 +469,19 @@ export function apply(ctx: Context): void {
     ];
     // The file name wins for lookup — the mismatch is already a warning above.
     const scenes = docs.map((d) => ({ ...d.doc, id: sceneId(d.file) }));
+    if (mine !== gen) return;
     state = { scenes, diagnostics: found, nodeTypes };
     const key = found.length ? JSON.stringify(found) : '';
     if (key !== reported) ctx.ideRpc.reportGameDiagnostics('scenes', found);
     reported = key;
-    if (broadcast) ctx.ideRpc.broadcastScenes({ scenes, diagnostics: found });
+    ctx.ideRpc.broadcastScenes({ scenes, diagnostics: found });
   };
-  // Every refresh is `void refresh(true)`, the boot one too: a project
+  // Every refresh broadcasts, the boot one too: a project
   // switch re-applies this plugin while root sockets stay connected, and
   // the frame is what replaces their stale set (to zero sockets it is a
   // no-op). `refresh` itself never throws (`tree`/`read` do not); the
   // catch covers a refresh racing a dispose.
-  const again = () => void refresh(true).catch(() => {});
+  const again = () => void refresh().catch(() => {});
   again();
   ctx.on('files/written', again);
   ctx.on('files/removed', again);
@@ -524,7 +536,7 @@ export function apply(ctx: Context): void {
       yaml.dump({ id, nodes: doc.nodes, ...(doc.portrait && { portrait: doc.portrait }) }, { noRefs: true }),
     );
     if (relay(res, (await ctx.files.write(file(id), bytes)).diagnostics)) return;
-    await refresh(false);
+    await refresh();
     res.json(state);
   };
 
@@ -544,7 +556,7 @@ export function apply(ctx: Context): void {
     }
     const write = await ctx.files.write(path, Buffer.from(`id: ${id.id}\nnodes: []\n`));
     if (relay(res, write.diagnostics)) return;
-    await refresh(false);
+    await refresh();
     res.json(state);
   };
 
@@ -552,7 +564,7 @@ export function apply(ctx: Context): void {
     const { id } = req.params;
     if (!ID.test(id)) return refuse(res, 404, id, `"${id}" is not a scene id`);
     if (relay(res, (await ctx.files.remove(file(id))).diagnostics)) return;
-    await refresh(false);
+    await refresh();
     res.json(state);
   };
 

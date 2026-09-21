@@ -444,11 +444,13 @@ async function readTree(cwd: string): Promise<FileTreeResponse> {
     for (const dirent of [...dirents].sort((a, b) => a.name.localeCompare(b.name))) {
       const relPath = relDir ? `${relDir}/${dirent.name}` : dirent.name;
       const absPath = join(absDir, dirent.name);
-      // `.e8` itself is listed (it is the parent of `.e8/shots`); only its
-      // scratch children are not.
+      // `.e8` itself is listed only as the parent of `.e8/shots` — a scratch
+      // holding nothing but the hidden `.e8/game` would be an empty row.
+      // Its scratch children are never listed.
       if (
         (dirent.isDirectory() && matches(SKIPPED_DIRS, dirent.name)) ||
-        (relDir !== '' && isScratch(relPath.split('/'), true))
+        (relDir !== '' && isScratch(relPath.split('/'), true)) ||
+        (relDir === '' && isScratch([dirent.name], false) && !existsSync(join(absPath, 'shots')))
       )
         continue;
 

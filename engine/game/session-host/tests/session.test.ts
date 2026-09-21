@@ -253,6 +253,34 @@ describe('session-host — the wallet survives a reload', () => {
     await ctx.fiber.dispose();
   });
 
+  it('a thrown fetch charges the tab but not the store; a 502 (an answer) charges both', async () => {
+    g.sessionStorage = fake;
+    storage.set('e8:wallet:first-slot', '1000');
+    const down = await boot(
+      fakeFetch({
+        session: withGameId,
+        spin: () => {
+          throw new Error('network down');
+        },
+      }),
+    );
+    const provideRoot = vi.fn((_name: string, _getter: () => unknown) => () => {});
+    down.provide('flow', { provideRoot });
+    await down.get('session')!.play({ action: 'spin', betLevel: 1 });
+    // Charged for the tab's life (slice 26) — but nothing answered, so a
+    // reload against the same dead server starts from the same 1000.
+    expect(provideRoot.mock.calls[0][1]()).toMatchObject({ balance: 999 });
+    expect(storage.get('e8:wallet:first-slot')).toBe('1000');
+    await down.fiber.dispose();
+
+    const answered = await boot(
+      fakeFetch({ session: withGameId, spin: () => fail(502, { diagnostics: [] }) }),
+    );
+    await answered.get('session')!.play({ action: 'spin', betLevel: 1 });
+    expect(storage.get('e8:wallet:first-slot')).toBe('999');
+    await answered.fiber.dispose();
+  });
+
   it('no gameId from the host (or no sessionStorage at all): nothing is stored', async () => {
     g.sessionStorage = fake;
     const ctx = await boot(fakeFetch({}));

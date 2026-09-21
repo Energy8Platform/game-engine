@@ -133,6 +133,8 @@ export function apply(ctx: Context): void {
   let state: FlowResponse = { doc: null, diagnostics: [], kinds: [] };
   // The last list handed to `ideRpc`, by value — see `scenes.ts` for the rule.
   let reported = '';
+  // Refresh generation — see `scenes.ts` for the rule.
+  let gen = 0;
 
   /**
    * Every scene document that parses, with its id — what `check`'s own
@@ -200,7 +202,8 @@ export function apply(ctx: Context): void {
     );
   };
 
-  const refresh = async (broadcast: boolean): Promise<void> => {
+  const refresh = async (): Promise<void> => {
+    const mine = ++gen;
     const { bytes } = await ctx.files.read(FILE);
     let doc: FlowDoc | null = null;
     const found: Diagnostic[] = [];
@@ -215,13 +218,14 @@ export function apply(ctx: Context): void {
       }
     }
     if (doc) found.push(...(await check(doc)));
+    if (mine !== gen) return;
     state = { doc, diagnostics: found, kinds: kinds() };
     const key = found.length ? JSON.stringify(found) : '';
     if (key !== reported) ctx.ideRpc.reportGameDiagnostics('flow', found);
     reported = key;
-    if (broadcast) ctx.ideRpc.broadcastFlow({ doc, diagnostics: found });
+    ctx.ideRpc.broadcastFlow({ doc, diagnostics: found });
   };
-  const again = () => void refresh(true).catch(() => {});
+  const again = () => void refresh().catch(() => {});
   const onFile = ({ path }: { path: string }) => {
     if (path === FILE || path === 'game/spec.json' || path.startsWith('scenes/')) again();
   };
@@ -256,7 +260,7 @@ export function apply(ctx: Context): void {
     if (found.some((d) => d.severity === 'error')) return refuse(res, found);
     const write = await ctx.files.write(FILE, Buffer.from(yaml.dump(doc, { noRefs: true })));
     if (write.diagnostics.length) return refuse(res, write.diagnostics);
-    await refresh(false);
+    await refresh();
     res.json(state);
   };
 

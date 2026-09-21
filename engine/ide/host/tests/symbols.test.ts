@@ -5,7 +5,7 @@ import Server from '@cordisjs/plugin-server';
 import Schema from 'schemastery';
 import yaml from 'js-yaml';
 import { WebSocket } from 'ws';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import type {
   NodeTypeInfo,
   ServerMessage,
@@ -13,7 +13,9 @@ import type {
   SymbolsDoc,
   SymbolsResponse,
 } from '@energy8engine/contracts';
+import { Context } from 'cordis';
 import { createIdeHost, type IdeHost } from '../src/index';
+import * as symbolsPlugin from '../src/plugins/symbols';
 import { checkSymbols } from '../src/plugins/symbols';
 
 const json = (s: Schema): unknown => JSON.parse(JSON.stringify(s));
@@ -500,5 +502,72 @@ describe('/api/symbols', () => {
         expect.objectContaining({ where: 'symbols/2' }),
       ],
     });
+  });
+});
+
+/**
+ * The refresh generation guard (`gen`/`mine` in `apply`), against stubbed
+ * `files`/`ideRpc`/`server` so ONE read can be held open — the real
+ * `files.read` is sync-under-promise and cannot be made to finish late.
+ * `flow.ts` and `scenes.ts` carry the same guard, line for line.
+ */
+describe('refresh generations', () => {
+  it('an older refresh that read the pre-write bytes and finishes last neither overwrites the state nor broadcasts it', async () => {
+    const OLD: SymbolsDoc = { version: 1, symbols: [{ id: '1', name: 'Old' } as SymbolDef] };
+    const NEW: SymbolsDoc = { version: 1, symbols: [{ id: '2', name: 'New' } as SymbolDef] };
+    const disk = new Map<string, string>([['symbols.yml', yaml.dump(OLD)]]);
+    // Set for exactly one `read` — the older refresh's — and awaited AFTER
+    // the bytes are taken, so it holds the pre-write document.
+    let gate: Promise<void> | undefined;
+    let release!: () => void;
+
+    const ctx = new Context();
+    type Put = (req: { json(): Promise<unknown>; path: string }, res: { status?: number; json(v: unknown): void }) => Promise<void>;
+    let put!: Put;
+    ctx.provide('server', { get() {}, put: (_path: string, handler: Put) => void (put = handler) });
+    const broadcastSymbols = vi.fn();
+    ctx.provide('ideRpc', { nodeTypes: () => [], reportGameDiagnostics() {}, broadcastSymbols });
+    ctx.provide('files', {
+      tree: async () => ({
+        entries: [...disk.keys()].map((path) => ({ path, kind: 'file' as const, size: 0 })),
+        diagnostics: [],
+      }),
+      read: async (path: string) => {
+        const text = disk.get(path);
+        await gate;
+        return { bytes: text === undefined ? undefined : Buffer.from(text), diagnostics: [] };
+      },
+      write: async (path: string, bytes: Uint8Array) => {
+        disk.set(path, Buffer.from(bytes).toString('utf8'));
+        ctx.emit('files/written', { path });
+        return { diagnostics: [] };
+      },
+    });
+    await ctx.plugin(symbolsPlugin);
+    await vi.waitFor(() => expect(ctx.symbolsHost.state().doc).toEqual(OLD));
+
+    // The older refresh: a `game/node-types` frame, its read held open on the OLD bytes.
+    gate = new Promise((resolve) => (release = resolve));
+    ctx.emit('game/node-types', []);
+    gate = undefined;
+
+    // The newer: a PUT of NEW, which writes and refreshes to completion.
+    let answered: SymbolsResponse | undefined;
+    await put(
+      { json: async () => ({ doc: NEW }), path: '/api/symbols' },
+      { json: (v: unknown) => void (answered = v as SymbolsResponse) },
+    );
+    expect(answered?.doc).toEqual(NEW);
+    expect(ctx.symbolsHost.state().doc).toEqual(NEW);
+    expect(broadcastSymbols).toHaveBeenLastCalledWith(expect.objectContaining({ doc: NEW }));
+
+    // The older one finishes now, with OLD in hand — and is dropped.
+    release();
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    expect(ctx.symbolsHost.state().doc).toEqual(NEW);
+    expect(broadcastSymbols).toHaveBeenLastCalledWith(expect.objectContaining({ doc: NEW }));
+    // OLD went out exactly once: the boot read, before any of this.
+    expect(broadcastSymbols.mock.calls.filter(([f]) => (f as { doc: unknown }).doc).map(([f]) => (f as { doc: SymbolsDoc }).doc)).toEqual([OLD, NEW]);
+    await ctx.fiber.dispose();
   });
 });

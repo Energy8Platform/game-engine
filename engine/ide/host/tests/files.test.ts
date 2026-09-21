@@ -170,6 +170,14 @@ describe('files service — tree', () => {
       code: 'protected-path',
     });
   });
+  it('does not list .e8 at all when it holds no shots — an empty row for the hidden assembly is not a row', async () => {
+    const dir = fixture('plain');
+    mkdirSync(join(dir, '.e8', 'game'), { recursive: true });
+    writeFileSync(join(dir, '.e8', 'game', 'script.spin'), 'game "x" {}\n');
+    const ctx = await hostFor(dir);
+    const { entries } = await ctx.files.tree();
+    expect(entries.filter((e) => e.path.startsWith('.e8'))).toEqual([]);
+  });
 
   it('does not list git’s bookkeeping under a name that is only cased differently', async () => {
     // macOS APFS, this repo's own platform, is case-insensitive by

@@ -184,6 +184,8 @@ export function apply(ctx: Context): void {
   let state: SymbolsResponse = { doc: null, known: [], diagnostics: [] };
   // The last list handed to `ideRpc`, by value — see `scenes.ts` for the rule.
   let reported = '';
+  // Refresh generation — see `scenes.ts` for the rule.
+  let gen = 0;
 
   /** `game/spec.json`'s own `symbols` — `[]` on any failure (missing file, bad JSON, no/wrong-shaped field). */
   const known = async (): Promise<{ id: string; name: string }[]> => {
@@ -205,7 +207,8 @@ export function apply(ctx: Context): void {
     }
   };
 
-  const refresh = async (broadcast: boolean): Promise<void> => {
+  const refresh = async (): Promise<void> => {
+    const mine = ++gen;
     const { bytes } = await ctx.files.read(FILE);
     let doc: SymbolsDoc | null = null;
     const found: Diagnostic[] = [];
@@ -233,13 +236,14 @@ export function apply(ctx: Context): void {
         knownList,
       ),
     );
+    if (mine !== gen) return;
     state = { doc, known: knownList, diagnostics: found };
     const key = found.length ? JSON.stringify(found) : '';
     if (key !== reported) ctx.ideRpc.reportGameDiagnostics('symbols', found);
     reported = key;
-    if (broadcast) ctx.ideRpc.broadcastSymbols({ doc, diagnostics: found });
+    ctx.ideRpc.broadcastSymbols({ doc, diagnostics: found });
   };
-  const again = () => void refresh(true).catch(() => {});
+  const again = () => void refresh().catch(() => {});
   const onFile = ({ path }: { path: string }) => {
     if (path === FILE || path === 'game/spec.json') again();
   };
@@ -285,7 +289,7 @@ export function apply(ctx: Context): void {
     // create path that is dead while a game is connected.
     const write = await ctx.files.write(FILE, Buffer.from(yaml.dump(doc, { noRefs: true })));
     if (write.diagnostics.length) return refuse(res, write.diagnostics);
-    await refresh(false);
+    await refresh();
     res.json(state);
   };
 

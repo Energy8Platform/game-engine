@@ -24,7 +24,8 @@
  * belongs to, survives a restart of `e8-server`, and needs its own reset
  * story. None of that is wanted for a DEV wallet: this one is exactly as
  * durable as the TAB — `sessionStorage['e8:wallet:<gameId>']`, written
- * after every play and read back on the next load, so a reload keeps the
+ * after every play the host ANSWERED (see `play`: a fetch that throws
+ * charges the tab, not the store) and read back on the next load, so a reload keeps the
  * balance and a new tab starts over at `init.balance` (1000, or whatever
  * `/api/session` answered). The game id comes with that answer; without
  * one (a host that predates it, the fallback init) or without
@@ -147,8 +148,14 @@ export async function apply(ctx: Context, config: SessionHostConfig = {}): Promi
     // A step of an OPEN round (a `roundId` carried forward from the result
     // that started it) costs nothing — the bet was already charged when the
     // round started. Only a fresh round (`roundId` absent) debits.
+    //
+    // Charged in memory now, STORED only once the host has answered (ok or
+    // not — a 502 is an answer; a thrown fetch is not). The in-memory
+    // charge stands for the tab's life either way (slice 26: every play
+    // is charged, a failed one too), but a store written before the fetch
+    // drained the persisted balance one bet per reload against a dead
+    // server — reload, charge, nothing answers, reload, charge again.
     if (req.roundId === undefined) balance -= req.betLevel ?? 0;
-    store?.write(balance);
 
     try {
       const res = await fetchFn('/api/spin', {
@@ -165,6 +172,7 @@ export async function apply(ctx: Context, config: SessionHostConfig = {}): Promi
       });
 
       if (!res.ok) {
+        store?.write(balance);
         // `dev-game.ts`'s route answers `{ diagnostics }` on a failure it
         // understands (a session that never started, a bad request); a
         // status this row wasn't told the shape of still gets ONE
