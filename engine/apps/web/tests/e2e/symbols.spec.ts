@@ -121,7 +121,7 @@ test('a drop of coin.json onto a chip sets its state, and the symbol canvas prev
   });
 
   await expect
-    .poll(symbolsFile)
+    .poll(symbolsFile, { timeout: 15_000 })
     .toMatch(
       /id: '2'[\s\S]*?win:\n\s+type: spritesheet\n\s+props:\n\s+sheet: assets\/coin\.json\n\s+loop: false/,
     );

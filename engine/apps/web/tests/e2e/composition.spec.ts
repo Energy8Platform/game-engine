@@ -29,13 +29,21 @@
  * in-page `drawImage(canvas)` readback comes back empty (pixi runs with
  * `preserveDrawingBuffer: false` — measured, not assumed). What does work
  * is Playwright's own compositing screenshot. The trick that turns it
- * into an assertion with no image library at all: screenshot the canvas
- * in QUADRANTS and compare the PNG bytes to each other. A canvas with a
- * board on it has four different quadrants; a canvas with nothing on it
- * is a single flat fill, so all four quadrants are byte-identical. That
- * is an exact comparison, not a tolerance — same pixels, same encoder,
- * same dimensions — and it is measured within ONE screenshot pass, so no
- * GPU or antialiasing difference between runs can reach it.
+ * into an assertion with no image library at all: clip the screenshot to
+ * a REGION OF THE BOARD alone — the canvas's own box, offset by the
+ * scenes container's fit (`__e8.fit()`) and the `board` node's own
+ * position (`__e8.nodeProps('base_game', 'board')`), sized to the bottom
+ * row of the 5x3 grid (`BOARD_LOCAL`, below — not the whole grid; see its
+ * own doc for why) — and hash the PNG bytes before and after
+ * `__e8.spin()`. A quadrant-of-the-whole-canvas version of this used to
+ * stand in for "the board is drawn", comparing the four quarters of a
+ * full-canvas screenshot to each other; that is vacuous, because the
+ * in-canvas chrome around the board (the shell's bar along the bottom,
+ * the floating dev toolbar along the top) makes the four quarters differ
+ * even over an EMPTY board. Clipped to the grid and compared before/after
+ * a spin, the hashes can only match if the spin drew nothing there — an
+ * exact comparison, not a tolerance, measured across two screenshot
+ * passes of the identical region rather than within one.
  *
  * The project is **copied** before it is touched. `engine/examples
  * /first-slot` is checked in, this test writes a patch file, and writing
@@ -219,31 +227,69 @@ async function settled(page: Page): Promise<void> {
 }
 
 /**
- * The four quadrants of the game canvas, as PNG bytes. All four equal
- * means the canvas is one flat colour — nothing is drawn on it. See the
- * module doc for why this is the honest way to read a WebGL surface here.
+ * The BOTTOM ROW of the 5x3 reel grid, in the `board` scene node's OWN
+ * local space: cell (0,0)'s centre sits at local (0,0)
+ * (`@energy8platform/game-engine`'s `slot/grid/geometry.ts`), cellSize 96,
+ * gap 6 — so the full grid's bounding box would be x -48..456, y -48..252
+ * around wherever `nodeProps('base_game', 'board')` says the node itself
+ * sits, and row 2 (the third and last row) is y 156..252 of that.
+ *
+ * Only row 2, not the whole grid — measured, not guessed. `first-slot`'s
+ * own `index.html` floats the dev toolbar and the diagnostics log over the
+ * TOP of the canvas (`#controls` then `#log`, `top: 3.75rem` + `max-height:
+ * 6rem` — up to 156 screen px of chrome, however little or much is
+ * logged), and row 0 sits right under it: `board`'s own y is 0, so row 0's
+ * local -48..48 is the first 48 design px of the scene, no safe-area inset
+ * carves any of that out for the toolbar. Two `base_game.scene.yml` nodes
+ * — `logo` (a static image, harmless) and `coin` (an 8fps spritesheet that
+ * keeps looping with no spin at all — confirmed by diffing two idle
+ * screenshots 300ms apart) — sit in that same band too. Row 2 is clear of
+ * all three, so a hash of just it can only differ between two shots if a
+ * spin drew something there.
  */
-async function canvasQuadrants(page: Page): Promise<string[]> {
+const BOARD_LOCAL = { left: -48, top: 156, right: 456, bottom: 252 };
+
+/**
+ * A hash of the BOARD REGION of the game canvas — see the module doc for
+ * why this, rather than quadrants of the whole canvas, is the honest way
+ * to read a WebGL surface here.
+ *
+ * The clip is built from the game page's own hooks, not a guessed
+ * rectangle: the canvas's page-relative box
+ * (`page.locator('canvas').boundingBox()`) plus the scenes container's
+ * fit (`__e8.fit()` — `screen = fit.x + design·scale`) plus the `board`
+ * node's own design-space x/y (`__e8.nodeProps('base_game', 'board')`)
+ * plus the grid's local extents around that node's origin (`BOARD_LOCAL`).
+ * `sha1` because this is an identity check on PNG bytes, not a digest
+ * anyone verifies by hand.
+ */
+async function boardRegionHash(page: Page): Promise<string> {
   const box = await page.locator('canvas').boundingBox();
   if (!box) throw new Error('no canvas to read');
-  const hashes: string[] = [];
-  for (const [qx, qy] of [
-    [0, 0],
-    [1, 0],
-    [0, 1],
-    [1, 1],
-  ]) {
-    const shot = await page.screenshot({
-      clip: {
-        x: box.x + (qx * box.width) / 2,
-        y: box.y + (qy * box.height) / 2,
-        width: box.width / 2,
-        height: box.height / 2,
-      },
-    });
-    hashes.push(createHash('sha256').update(shot).digest('hex'));
-  }
-  return hashes;
+  const fit = (await page.evaluate(() => (window as any).__e8.fit())) as {
+    scale: number;
+    x: number;
+    y: number;
+  } | null;
+  if (!fit) throw new Error('no fit — the scenes row has not laid out yet');
+  const board = (await page.evaluate(() =>
+    (window as any).__e8.nodeProps('base_game', 'board'),
+  )) as { x: number; y: number } | null;
+  if (!board) throw new Error('no "board" node in the base_game scene');
+
+  const left = board.x + BOARD_LOCAL.left;
+  const top = board.y + BOARD_LOCAL.top;
+  const right = board.x + BOARD_LOCAL.right;
+  const bottom = board.y + BOARD_LOCAL.bottom;
+  const shot = await page.screenshot({
+    clip: {
+      x: box.x + fit.x + left * fit.scale,
+      y: box.y + fit.y + top * fit.scale,
+      width: (right - left) * fit.scale,
+      height: (bottom - top) * fit.scale,
+    },
+  });
+  return createHash('sha1').update(shot).digest('hex');
 }
 
 /**
@@ -304,16 +350,19 @@ test('removing the reels row from the patch takes the board off the screen', asy
     await expect(page.locator('canvas')).toBeVisible();
     await expect(page.locator('#status')).toHaveText('ready');
 
-    // The board is DRAWN: four quadrants of the canvas, four different
-    // pictures. This is the 5x3 grid of reel cells a person sees — after
-    // ONE spin, not before: the board is a node of the `base_game` scene
-    // (`scenes/base_game.scene.yml`), which `flow.yml`'s `show` node puts
-    // up at boot with its cells still empty; the spin is what fills them.
-    // Before it the canvas is one flat colour and measures nothing.
+    // The board CHANGES: a hash of the reel grid's bottom row, taken
+    // before and after ONE spin, has to differ. The board is a node of
+    // the `base_game` scene (`scenes/base_game.scene.yml`), which
+    // `flow.yml`'s `show` node puts up at boot with its cells still
+    // empty; the spin is what fills them, so a hash of only that board
+    // region — not the whole canvas, which also carries the shell's bar
+    // and the floating dev toolbar — can only come out the same if the
+    // spin drew nothing.
+    const beforeSpin = await boardRegionHash(page);
     await page.locator('#spin').click();
     await expect(page.locator('#status')).toHaveText('done', { timeout: 20_000 });
-    const withBoard = await canvasQuadrants(page);
-    expect(new Set(withBoard).size, 'the board should be drawn on the canvas').toBeGreaterThan(1);
+    const afterSpin = await boardRegionHash(page);
+    expect(afterSpin, 'the board should change on the canvas after a spin').not.toBe(beforeSpin);
 
     // The one edit in this test, and it is to a project FILE. No code
     // changes: not the engine's, not this project's own `src/main.ts`.
