@@ -892,6 +892,65 @@ describe('live props', () => {
     expect(byId(scenes, 'base', 'bw')!.alpha).toBe(0.5);
   });
 
+  // What the flow's `prop` kind does — `nodeSchema(ref)` says the node has the
+  // prop, then `setProps(ref, { [prop]: value })` with the string as typed.
+  it("`prop` on a `scene` host's `scene` remounts the embedded document in place; show/hide bookkeeping holds", async () => {
+    const { scenes, report } = boot([
+      { id: 'big_win', nodes: [{ id: 'banner', type: 'container', props: {} }] },
+      { id: 'free_spins', nodes: [{ id: 'fs', type: 'container', props: {} }] },
+      {
+        id: 'base_game',
+        nodes: [
+          { id: 'under', type: 'container', props: {} },
+          { id: 'bw', type: 'scene', props: { scene: 'big_win', visible: false, x: 7 } },
+          { id: 'over', type: 'container', props: {} },
+        ],
+      },
+    ]);
+    await scenes.show('base_game');
+    await scenes.show('big_win');
+    const root = scenes.sceneView('base_game')!;
+    const ref = { scene: 'base_game', node: 'bw' };
+    const v1 = byId(scenes, 'base_game', 'bw')!;
+    expect(v1.visible).toBe(true);
+    expect(root.getChildByLabel('banner', true)).not.toBeNull();
+    expect(scenes.nodeSchema(ref)!.dict).toHaveProperty('scene');
+
+    expect(scenes.setProps(ref, { scene: 'free_spins' })).toBe(true);
+    const v2 = byId(scenes, 'base_game', 'bw')!;
+    expect(v2).not.toBe(v1);
+    expect(v1.parent).toBeNull();
+    expect(root.children.map((c) => c.label)).toEqual(['under', 'bw', 'over']);
+    expect(root.getChildByLabel('fs', true)).not.toBeNull();
+    expect(root.getChildByLabel('banner', true)).toBeNull();
+    // The common props ride along; the document is untouched.
+    expect(v2.x).toBe(7);
+    expect(scenes.docs().get('base_game')!.nodes[1].props.scene).toBe('big_win');
+    // `free_spins` was never shown: the fresh host takes the document's `visible: false`.
+    expect(v2.visible).toBe(false);
+    await scenes.show('free_spins');
+    expect(v2.visible).toBe(true);
+    await scenes.hide('free_spins');
+    expect(v2.visible).toBe(false);
+    // A later common patch merges over the live `scene`: no remount, the same view.
+    expect(scenes.setProps(ref, { alpha: 0.5 })).toBe(true);
+    expect(byId(scenes, 'base_game', 'bw')).toBe(v2);
+    expect(v2.alpha).toBe(0.5);
+    // Pointing back at a document that IS shown: the fresh host comes up visible.
+    expect(scenes.setProps(ref, { scene: 'big_win' })).toBe(true);
+    const v3 = byId(scenes, 'base_game', 'bw')!;
+    expect(v3).not.toBe(v2);
+    expect(v3.visible).toBe(true);
+    expect(v3.alpha).toBe(0.5);
+    expect(root.getChildByLabel('banner', true)).not.toBeNull();
+    // A document that does not exist: refused, the old host stays, one diagnostic.
+    report.mockClear();
+    expect(scenes.setProps(ref, { scene: 'nope' })).toBe(false);
+    expect(byId(scenes, 'base_game', 'bw')).toBe(v3);
+    expect(report).toHaveBeenCalledTimes(1);
+    expect(report).toHaveBeenCalledWith(expect.objectContaining({ where: 'base_game/bw' }));
+  });
+
   it('patches EVERY copy of the node: the embedded one on screen, and the standalone mount', async () => {
     const { scenes, nodeTypes } = boot();
     nodeTypes.register(text);

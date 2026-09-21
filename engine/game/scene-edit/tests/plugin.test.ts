@@ -527,6 +527,55 @@ describe('scene-edit plugin', () => {
     expect(scenes.view({ scene: 'a', node: 'pinned' })!.position).toMatchObject({ x: 900, y: 456 });
   });
 
+  it("a pinned node's grid snap lands the OFFSET on the grid, not the absolute position", async () => {
+    // A 24px band at the top: the fit is 480×264 (scale 264/576 = 11/24), the
+    // design 440 wide letterboxed 20px each side, so the safe rect's left edge
+    // is design x −43.63… — OFF the 16-grid. `pinned` hangs off bottom-left at
+    // offset (0, −96): absolute (−43.63…, 480), screen (0, 244).
+    const docs: SceneDoc[] = [{ id: 'a', nodes: [{ id: 'pinned', type: 'box', props: { pin: 'bottom-left', x: 0, y: -96 } }] }, DOCS[1]];
+    const { edit, scenes, events, ready, gizmoLayer, call } = boot('a', docs, undefined, { top: 24, right: 0, bottom: 0, left: 0 });
+    await ready();
+    const left = scenes.fit()!.viewport.left;
+    expect(left).toBeCloseTo(-480 / 11, 6);
+    expect(scenes.view({ scene: 'a', node: 'pinned' })!.position.x).toBeCloseTo(left, 6);
+    await call('grid', { on: true, step: 16 });
+    edit().pickAndSelect(9, 251);
+    expect(events().at(-1)).toEqual({ event: 'selected', payload: { node: 'pinned' } });
+    const layer = gizmoLayer()!;
+    const body = layer.children[1];
+    const px = 11 / 24; // screen px per design px
+    body.emit('pointerdown', ev(9, 251));
+    layer.emit('globalpointermove', ev(9 + 21 * px, 251)); // +21 design in x: offset 21 → grid 16
+    layer.emit('pointerup', ev(9 + 21 * px, 251));
+    // Snapping the ABSOLUTE would have put it at design −16: an offset of 27.63…, written 28.
+    expect(events().at(-1)).toEqual({ event: 'edit', payload: { node: 'pinned', props: { x: 16, y: -96 }, variant: null } });
+    expect(scenes.view({ scene: 'a', node: 'pinned' })!.position.x).toBeCloseTo(left + 16, 6);
+  });
+
+  it('an edit is written whole-px, so the IDE echo (rounded by the same table) acknowledges it and a later edit survives', async () => {
+    const { edit, scenes, events, ready, frame, key, call, gizmoLayer } = boot();
+    await ready();
+    edit().pickAndSelect(65, 65); // hi, at design (120,120)
+    const layer = gizmoLayer()!;
+    const body = layer.children[1];
+    // +20.2 screen px is +40.4 design: a fractional drag, written 160 — not 160.4.
+    body.emit('pointerdown', ev(70, 70));
+    layer.emit('globalpointermove', ev(90.2, 70));
+    layer.emit('pointerup', ev(90.2, 70));
+    expect(events().at(-1)).toEqual({ event: 'edit', payload: { node: 'hi', props: { x: 160, y: 120 }, variant: null } });
+    expect(scenes.view({ scene: 'a', node: 'hi' })!.position.x).toBe(160);
+    // A nudge follows before the IDE answers the drag.
+    key('ArrowRight');
+    expect(events().at(-1)).toEqual({ event: 'edit', payload: { node: 'hi', props: { x: 161, y: 120 }, variant: null } });
+    // The IDE's echo of the DRAG: it reflects the pending edit exactly, so it
+    // acknowledges that one alone and the nudge is laid over it again. Had the
+    // canvas kept 160.4, nothing would have matched and the nudge would be lost.
+    await call('replace', { docs: withHi({ x: 160, y: 120 }) });
+    frame();
+    expect(scenes.view({ scene: 'a', node: 'hi' })!.position.x).toBe(161);
+    expect(scenes.docs().get('a')!.nodes[1].props).toEqual({ x: 161, y: 120 });
+  });
+
   it('under a portrait fit an edit carries variant: portrait and the optimistic patch writes portrait.nodes, leaving nodes[] alone', async () => {
     const { app, edit, scenes, events, ready, frame, key, call } = boot();
     await ready();

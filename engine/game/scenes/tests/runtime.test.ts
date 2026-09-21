@@ -173,6 +173,35 @@ describe('scenes row', () => {
     await fiber.dispose();
   });
 
+  it('the safe area is re-read every frame: insets that moved without a resize re-fit, unchanged ones do not', async () => {
+    const { ctx, app } = withScreen(480, 288);
+    const frames = new Set<() => void>();
+    const ticker = { add: (fn: () => void) => frames.add(fn), remove: (fn: () => void) => frames.delete(fn) };
+    (app as { ticker: unknown }).ticker = ticker;
+    const safeArea = { top: 0, right: 0, bottom: 100, left: 0 };
+    ctx.provide('shell', { safeArea });
+    const fiber = ctx.plugin(runtime, { design, fetchFn: empty() });
+    await fiber;
+    const scenes = ctx.get('scenes')!;
+    expect(scenes.container.scale.x).toBeCloseTo(188 / 288, 10);
+    const resize = vi.spyOn(scenes, 'resize');
+    const tick = () => frames.forEach((fn) => fn());
+    tick();
+    tick();
+    expect(resize).not.toHaveBeenCalled();
+    // The shell re-scaled its bar (`renderBar()`): no resize event, only the number moved.
+    safeArea.bottom = 50;
+    tick();
+    expect(resize).toHaveBeenCalledTimes(1);
+    expect(resize).toHaveBeenCalledWith(480, 288, safeArea);
+    expect(scenes.container.scale.x).toBeCloseTo(238 / 288, 10);
+    tick();
+    expect(resize).toHaveBeenCalledTimes(1);
+    // The frame check goes with the row.
+    await fiber.dispose();
+    expect(frames.size).toBe(0);
+  });
+
   it('the `shell` effect goes with the row: a shell provided after the dispose re-fits nothing', async () => {
     const { ctx } = withScreen(480, 288);
     const fiber = ctx.plugin(runtime, { design, fetchFn: empty() });

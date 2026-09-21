@@ -8,7 +8,7 @@
  * instead — no scene, no gizmo/grid/keyboard/drop.
  */
 import type { Context } from 'cordis';
-import type { SafeArea, SceneDoc, SymbolsDoc, SymbolState } from '@energy8engine/contracts';
+import { sceneRounding, type SafeArea, type SceneDoc, type SymbolsDoc, type SymbolState } from '@energy8engine/contracts';
 import type {} from '@energy8engine/scenes/runtime';
 import { COMMON, pinPoint, type Fit, type Orientation, type Pin } from '@energy8engine/scenes';
 import { Container, Graphics, type FederatedPointerEvent } from 'pixi.js';
@@ -367,7 +367,18 @@ export function apply(ctx: Context, config: SceneEditConfig): void {
       layer,
       // `getGlobalTransform`, not `worldTransform`: the latter is only refreshed by a render pass.
       designPerPixel: () => 1 / root.getGlobalTransform().a,
-      snap: (p, alt) => (alt ? p : snapPoint(p, { on: gridOn, step: gridStep, design: design() })),
+      // A pinned node's file value is its OFFSET from the pin point, so
+      // that is what lands on the grid — the absolute would put the offset
+      // off-grid by the pin point's own fraction. The centre snap is an
+      // absolute matter and does not apply to an offset.
+      snap: (p, alt) => {
+        if (alt) return p;
+        const o = { on: gridOn, step: gridStep, design: design() };
+        const at = pinOf(target?.node);
+        if (!at) return snapPoint(p, o);
+        const s = snapPoint({ x: p.x - at.x, y: p.y - at.y }, { ...o, centre: false });
+        return { x: s.x + at.x, y: s.y + at.y };
+      },
       onEdit: applyEdit,
       onBodyClick: (x, y) => pickAndSelect(x, y),
     });
@@ -388,20 +399,28 @@ export function apply(ctx: Context, config: SceneEditConfig): void {
     };
     const pickAndSelect = (x: number, y: number) => select(pickAt(views(), { x, y }));
 
+    /** The pin point a node's `x`/`y` are offsets from — `null` for an unpinned node, or before the first fit. */
+    const pinOf = (node: string | null | undefined): { x: number; y: number } | null => {
+      const pin = node ? (merged(node)?.pin as Pin | '' | undefined) : undefined;
+      const fit = scenes.fit();
+      return pin && fit ? pinPoint(pin, fit.viewport) : null;
+    };
+
     /**
-     * Rounded as the file should read (the IDE rounds the same), applied
-     * here, then told. The gizmo hands over the view's ABSOLUTE position;
-     * a pinned node's file value is the offset from its pin point, so
-     * `x`/`y` are converted before either. Into the current variant's layer.
+     * Rounded as the file should read (`sceneRounding` — the IDE rounds by
+     * the same table, so its echo matches and acknowledges the edit),
+     * applied here, then told. The gizmo hands over the view's ABSOLUTE
+     * position; a pinned node's file value is the offset from its pin
+     * point, so `x`/`y` are converted before either. Into the current
+     * variant's layer.
      */
     function applyEdit(node: string, props: Partial<GizmoTarget['props']>): void {
-      const pin = merged(node)?.pin as Pin | '' | undefined;
-      const fit = scenes.fit();
-      const at = pin && fit ? pinPoint(pin, fit.viewport) : { x: 0, y: 0 };
+      const at = pinOf(node) ?? { x: 0, y: 0 };
       const rounded: Record<string, number> = {};
       for (const [k, v] of Object.entries(props) as [string, number][]) {
         const value = k === 'x' ? v - at.x : k === 'y' ? v - at.y : v;
-        rounded[k] = Math.round(value * (k === 'rotation' ? 1e4 : 100)) / (k === 'rotation' ? 1e4 : 100);
+        const by = sceneRounding[k];
+        rounded[k] = by ? Math.round(value * by) / by : value;
       }
       const edit: EditPayload = { node, props: rounded, variant: variant() };
       if (pending.push(edit) > 100) pending.shift();

@@ -534,7 +534,7 @@ describe('SceneDocument', () => {
     expect(iframe.getAttribute('width')).toBe('390');
     expect(iframe.getAttribute('height')).toBe('844');
     expect(iframe.getAttribute('src')).toBe(
-      `${PREVIEW_URL}/editor.html?scene=base_game&safeBottom=${SAFE_BOTTOM.mobile}`,
+      `${PREVIEW_URL}/editor.html?scene=base_game&safeBottom=131`,
     );
     const frame = iframe.parentElement as HTMLElement;
     expect(frame.style.width).toBe('390px');
@@ -552,8 +552,9 @@ describe('SceneDocument', () => {
     expect(iframe.getAttribute('src')).toBe(
       `${PREVIEW_URL}/editor.html?scene=base_game&safeBottom=0`,
     );
-    // The pair the bar's constants add up to (BottomBar.ts:42 and :55).
-    expect(SAFE_BOTTOM).toEqual({ wide: 92, mobile: 142 });
+    // `wide` is what the bar's constants add up to (BottomBar.ts:42); `mobile`
+    // is the MEASURED bar on the example at 390×844, not the nominal 142 (:55) — the mobile bar scales.
+    expect(SAFE_BOTTOM).toEqual({ wide: 92, mobile: 131 });
   });
 
   it("the page says which orientation it edits: ready and orientation events set the scene's variant, never the preset; two tabs keep their own; unmount deletes", async () => {

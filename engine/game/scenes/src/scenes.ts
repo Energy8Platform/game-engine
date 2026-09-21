@@ -149,7 +149,9 @@ interface Entry {
    * What `setProps` patched on top of the node's document props, for this
    * mount only. It lives on the ENTRY rather than in a side map keyed by
    * one: a remount builds fresh entries, so the patch is gone with no
-   * bookkeeping — and nothing holds a destroyed entry alive.
+   * bookkeeping — and nothing holds a destroyed entry alive. The one
+   * remount that keeps it is `setProps`' own (an own prop of a type
+   * without `update`): the fresh entry is mounted with it.
    */
   live?: Record<string, unknown>;
   /** The document this node is declared in (`where`'s left half) and the host chain it was mounted under (`[]` for the document's own mount) — what a per-node remount needs. */
@@ -288,6 +290,8 @@ export function createScenes(options: CreateScenesOptions): ScenesService {
     top = true,
     /** A root of ITS document — `top`, or a root `mountDoc` mounts; `false` for children. */
     root = top,
+    /** A `setProps` patch the node carries into a remount (`remountNode` from `setProps`): the layer OVER the override. */
+    live?: Record<string, unknown>,
   ): Entry | undefined {
     const where = `${sceneId}/${node.id}`;
     if (seen.has(node.id)) {
@@ -316,7 +320,10 @@ export function createScenes(options: CreateScenesOptions): ScenesService {
     // the same verdict `applyVariant` gives a flip. `node.props` itself is
     // never written: `replace()`'s diff reads it.
     let variant = root ? overrideOf(sceneId, node.id) : undefined;
-    const merged = variant && tryVariant(where, type, node.props, variant);
+    // `live` was validated by `setProps` already; only the override can be the one refused.
+    const merged =
+      (variant || live) &&
+      tryVariant(where, type, node.props, { ...variant, ...live }, variant ?? live);
     if (variant && !merged) variant = undefined;
     const raw = merged ? merged.raw : node.props;
     let view: Container;
@@ -355,7 +362,19 @@ export function createScenes(options: CreateScenesOptions): ScenesService {
         );
       else parent.mask = view;
     }
-    const entry: Entry = { view, node, props, type, where, scene: sceneId, chain, top, root, variant };
+    const entry: Entry = {
+      view,
+      node,
+      props,
+      type,
+      where,
+      scene: sceneId,
+      chain,
+      top,
+      root,
+      variant,
+      live,
+    };
     building?.all.push(entry);
     if (building && chain.length === 0) building.nodes.set(node.id, entry);
     for (const child of node.children ?? []) mountNode(child, view, sceneId, chain, seen, false);
@@ -461,16 +480,19 @@ export function createScenes(options: CreateScenesOptions): ScenesService {
    * way `unmountTop` does. A throwing `mount` (an override `scene: 'nope'`)
    * is `mountNode`'s diagnostic and the old entry stays as it was, its
    * variant unset. The entry is replaced in `nodes`/`all`; a live patch on
-   * the subtree goes with the old one, as with any remount.
+   * the subtree goes with the old one, as with any remount. `live` is the
+   * patch the NODE itself keeps through the remount (`setProps` of an own
+   * prop — a `scene` host pointed at another document). Answers the fresh
+   * entry, or `undefined` when the old one stays.
    */
-  function remountNode(m: Mount, e: Entry): void {
+  function remountNode(m: Mount, e: Entry, live?: Record<string, unknown>): Entry | undefined {
     const parent = e.view.parent;
     if (!parent) return;
     const at = parent.getChildIndex(e.view);
     building = m;
     let fresh: Entry | undefined;
     try {
-      fresh = mountNode(e.node, parent, e.scene, e.chain, new Set(), e.top, true);
+      fresh = mountNode(e.node, parent, e.scene, e.chain, new Set(), e.top, e.root, live);
     } finally {
       building = null;
     }
@@ -485,6 +507,7 @@ export function createScenes(options: CreateScenesOptions): ScenesService {
     m.all = m.all.filter((x) => !gone.has(x));
     // ponytail: the fresh subtree may list a skipped node the old one listed too — dedupe by `where`; an entry the OTHER orientation's subtree alone had stays (it names a real skipped node of that layout).
     m.missing = m.missing.filter((x, i, a) => a.findIndex((y) => y.where === x.where) === i);
+    return fresh;
   }
 
   /**
@@ -900,7 +923,22 @@ export function createScenes(options: CreateScenesOptions): ScenesService {
       // document's own mount (`entryOf`), where `top` says whether the
       // node is a root — every copy shares that, so not per copy.
       if (patch.pin && entryOf(ref)?.top === false) nestedPin(`${ref.scene}/${ref.node}`, ref.node);
-      for (const { e, merged, props } of plan) {
+      for (const p of plan) {
+        const { e, merged, props } = p;
+        // A type without `update` whose OWN prop changed (a `scene` host's
+        // `scene`) can only be remounted — `applyVariant`'s device, with the
+        // patch carried into the fresh entry. A mount that throws is its
+        // own diagnostic and the old entry stays; the call answers `false`
+        // (a copy remounted before it stays remounted — the caveat below).
+        if (!e.type.update && ownOf(e.type, props) !== ownOf(e.type, e.props)) {
+          const m = [...mounted.values()].find((x) => x.all.includes(e))!;
+          const fresh = remountNode(m, e, { ...e.live, ...patch });
+          if (!fresh) return false;
+          // The common pass of the mount put the document's `visible` back on a host: a nested scene `show()`n stays shown.
+          showHosts(m);
+          p.e = fresh;
+          continue;
+        }
         try {
           e.type.update?.(e.view, props, mountCtx([]));
           applyCommon(e.view, merged, e.type, e.top ? lastFit : null);

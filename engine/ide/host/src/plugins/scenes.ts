@@ -66,6 +66,20 @@ const ID = /^[a-z0-9_]+$/;
  */
 const COMMON_PROPS = Object.keys(COMMON.dict ?? {});
 
+type Dict = Record<string, { type?: string; meta?: { required?: boolean } } | undefined>;
+/**
+ * A type's schema rehydrated ONCE per `NodeTypeInfo` (the props travel as
+ * schemastery JSON, and only a `Schema` has a readable `dict`): `checkNode`
+ * runs per node, and a set's nodes share their few types. Keyed by the
+ * info's identity — a fresh `game/node-types` frame is a fresh object.
+ */
+const schemas = new WeakMap<NodeTypeInfo, Schema>();
+const schemaOf = (info: NodeTypeInfo): Schema => {
+  let s = schemas.get(info);
+  if (!s) schemas.set(info, (s = new Schema(info.schema as Schema)));
+  return s;
+};
+
 export interface ParsedDoc {
   /** Project-relative, `scenes/<id>.scene.yml`. */
   file: string;
@@ -129,25 +143,19 @@ export function checkNode(
   // `assetProps` loop past the end of this branch, so a REQUIRED asset prop
   // (`image.src`) still needs a value and an OPTIONAL one (`text.font`) does
   // not — one rehydration, both readers.
-  let dict: Record<string, { type?: string; meta?: { required?: boolean } } | undefined> = {};
+  let dict: Dict = {};
   if (reported && schema === undefined) {
     err(`node type "${node.type}" is not one the game registered`, 'use a registered type');
   } else if (schema !== undefined) {
     const own: Record<string, unknown> = {};
     const common: Record<string, unknown> = {};
     try {
-      // Rehydrated first: the props travel as schemastery JSON (`{ uid, refs }`),
-      // so only the `Schema` has a readable `dict`. The TYPE's own prop wins the
-      // name — `shape` declares `width`/`height` itself (the geometry), so those
-      // go to its schema, not to `COMMON`; the runtime splits them the same way
-      // (`applyCommon`'s `commonOf`).
-      const ownSchema = new Schema(schema as Schema);
-      dict =
-        (
-          ownSchema as unknown as {
-            dict?: Record<string, { type?: string; meta?: { required?: boolean } } | undefined>;
-          }
-        ).dict ?? {};
+      // Rehydrated (`schemaOf`, memoised per info). The TYPE's own prop wins
+      // the name — `shape` declares `width`/`height` itself (the geometry), so
+      // those go to its schema, not to `COMMON`; the runtime splits them the
+      // same way (`applyCommon`'s `commonOf`).
+      const ownSchema = schemaOf(info!);
+      dict = (ownSchema as unknown as { dict?: Dict }).dict ?? {};
       for (const [k, v] of Object.entries(node.props)) {
         const target = COMMON_PROPS.includes(k) && !(k in dict) ? common : own;
         // A symbol state's `$cell.<field>` binding stands for a value of whatever
@@ -166,7 +174,7 @@ export function checkNode(
             `prop "${k}" binds "$cell." — only a symbols.yml state reads a cell`,
             'use a literal value',
           );
-        target[k] = bound ? emptyProp((dict[k] ?? COMMON.dict?.[k])?.type) : v;
+        target[k] = bound ? emptyProp(dict[k] ?? COMMON.dict?.[k]) : v;
       }
       COMMON(common as never);
       ownSchema(own);
@@ -197,6 +205,14 @@ export function checkNode(
       if (dict[prop]?.meta?.required === true) {
         err(`${node.type} has no ${prop}`, 'pick a file under the project');
       }
+    } else if (isCellBinding(v)) {
+      // A state's asset is loaded from the DOCUMENT before any cell is
+      // known (the runtime's `assets()` reads the props as written), so
+      // there is no moment a bound path could resolve to a file.
+      err(
+        `an asset prop cannot be bound to $cell (assets are preloaded from the document)`,
+        'name the file itself',
+      );
     } else if (!hasFile(v)) {
       err(`${node.type}.${prop} "${v}" is not in the project`, 'pick a file under the project');
     }

@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState, type DragEvent } from 'react'
 import Schema from 'schemastery';
 import {
   diagnostic,
+  sceneRounding,
   type NodeTypeInfo,
   type SceneDoc,
   type SceneNode,
@@ -224,25 +225,19 @@ export function renameVariant(doc: SceneDoc, from: string, to: string): SceneDoc
 
 /**
  * The bottom inset the Pixi shell's bar takes, per layout, as the editor
- * page is told (`?safeBottom=`) for a viewport preset: the bar's NOMINAL
- * heights, `packages/shell/src/ui/pixi/components/BottomBar.ts` —
- * `WIDE_BAR_H = WIDE_PAD_BOTTOM (8) + SPIN (84)` at `:42`, and
- * `MOBILE_BAR_H = M_PAD_BOTTOM (8) + SPIN (84) + M_GAP (10) + M_INFO_H (40)`
- * at `:55`. The shell picks `mobile` when the screen is taller than wide
- * (`ShellController.ts:120`), and so does the canvas. Not imported: the
- * client has no dependency on `packages/*`.
+ * page is told (`?safeBottom=`) for a viewport preset. `wide` is the bar's
+ * NOMINAL height, `packages/shell/src/ui/pixi/components/BottomBar.ts` —
+ * `WIDE_BAR_H = WIDE_PAD_BOTTOM (8) + SPIN (84)` at `:42`. `mobile` is
+ * NOT its nominal `MOBILE_BAR_H` (142, at `:55`): measured on the example
+ * at 390×844; the mobile bar scales below its nominal 142. The shell picks
+ * `mobile` when the screen is taller than wide (`ShellController.ts:120`),
+ * and so does the canvas. Not imported: the client has no dependency on
+ * `packages/*`.
  */
-export const SAFE_BOTTOM = { wide: 92, mobile: 142 } as const;
+export const SAFE_BOTTOM = { wide: 92, mobile: 131 } as const;
 
-/** What the canvas measures is a float (`279.99998474121094`); the file reads `280` — positions AND sizes whole (both are design px), scale to 0.01, rotation to 0.0001. */
-const DECIMALS: Record<string, number> = {
-  x: 1,
-  y: 1,
-  width: 1,
-  height: 1,
-  scale: 100,
-  rotation: 10_000,
-};
+/** What the canvas measures is a float (`279.99998474121094`); the file reads `280` — `sceneRounding`, the one table `scene-edit` rounds by too, so its pending edit and this echo agree. */
+const DECIMALS = sceneRounding;
 function roundProps(props: Record<string, unknown>): Record<string, unknown> {
   const out = { ...props };
   for (const [key, by] of Object.entries(DECIMALS))

@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import Server from '@cordisjs/plugin-server';
 import Schema from 'schemastery';
 import { WebSocket } from 'ws';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import type {
   NodeTypeInfo,
   SceneDoc,
@@ -13,7 +13,21 @@ import type {
   ServerMessage,
 } from '@energy8engine/contracts';
 import { createIdeHost, type IdeHost } from '../src/index';
-import { checkScenes } from '../src/plugins/scenes';
+import { checkNode, checkScenes } from '../src/plugins/scenes';
+
+/** Every `new Schema(…)` the plugin makes — the memo test counts them; the proxy is transparent otherwise. */
+const constructed = vi.hoisted(() => ({ n: 0 }));
+vi.mock('schemastery', async (importOriginal) => {
+  // `export =` in schemastery's types: the ESM namespace vitest hands over has the class on `default`.
+  const mod = await importOriginal<{ default: typeof Schema }>();
+  const Spied = new Proxy(mod.default, {
+    construct(target, args, newTarget) {
+      constructed.n += 1;
+      return Reflect.construct(target, args, newTarget);
+    },
+  });
+  return { ...mod, default: Spied };
+});
 
 const json = (s: Schema): unknown => JSON.parse(JSON.stringify(s));
 const types: NodeTypeInfo[] = [
@@ -185,6 +199,39 @@ describe('checkScenes', () => {
   // nothing would resolve it, and the string would be drawn as-is — so the
   // same prop is refused here and accepted only by `checkSymbols`
   // (`symbols.test.ts` has that half).
+  it('an ASSET prop bound to $cell is its own message: the file is preloaded from the document, so nothing could resolve it', () => {
+    const image = types.find((t) => t.type === 'image')!;
+    const out = checkNode(
+      'symbols',
+      'symbols/1/static',
+      { type: 'image', props: { src: '$cell.symbol' } },
+      image,
+      true,
+      () => true,
+      true,
+    );
+    expect(out).toEqual([
+      expect.objectContaining({
+        severity: 'error',
+        where: 'symbols/1/static',
+        message: 'an asset prop cannot be bound to $cell (assets are preloaded from the document)',
+      }),
+    ]);
+  });
+
+  it('checkNode rehydrates a type\'s schema once per NodeTypeInfo, not once per node', () => {
+    // Fresh infos: the memo is by identity, and the shared `types` above may be cached already.
+    const fresh: NodeTypeInfo = { type: 'container', schema: json(Schema.object({})) };
+    constructed.n = 0;
+    checkNode('scenes', 'a/one', { type: 'container', props: { x: 1 } }, fresh, true, () => true);
+    checkNode('scenes', 'a/two', { type: 'container', props: { x: 2 } }, fresh, true, () => true);
+    expect(constructed.n).toBe(1);
+    // Another info of the same type name is another object: rehydrated on its own.
+    const other: NodeTypeInfo = { type: 'container', schema: json(Schema.object({})) };
+    checkNode('scenes', 'a/three', { type: 'container', props: {} }, other, true, () => true);
+    expect(constructed.n).toBe(2);
+  });
+
   it('a `$cell.<field>` binding is refused on a scene node — only a symbols.yml state reads a cell', () => {
     const out = checkScenes(
       [doc('a', [{ id: 'n', type: 'text', props: { text: '$cell.x' } }])],

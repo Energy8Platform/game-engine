@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import { Color, Container, Graphics, Sprite } from 'pixi.js';
 import Schema from 'schemastery';
-import { COLOUR, COMMON, applyCommon, createNodeTypes, type NodeType } from '../src/node-types';
+import { COLOUR, COMMON, applyCommon, createNodeTypes, emptyProp, type NodeType } from '../src/node-types';
 import { container, image, shape } from '../src/builtin';
 
 const t = (type: string): NodeType => ({
@@ -111,10 +111,17 @@ describe('applyCommon', () => {
       '#abcdefa',
       '#FFF',
       'rgb(1,2,3)',
+      'rgb(1, 2, 3)',
       'rgba(1,2,3,0.5)',
       'rgb(1 2 3 / 50%)',
       'hsl(1,2%,3%)',
+      'hsl(120 50% 50%)',
       'hsla(1,2%,3%,.5)',
+      // A function form takes NUMBERS: a name inside the parens is a typo, not a colour.
+      'rgb(a,b,c)',
+      'rgb(1,2)',
+      'rgb(1,2,3,4,5)',
+      'rgb(red green blue)',
       'hwb(1 2% 3%)',
       'lab(1 2 3)',
       'cmyk(1,2,3,4)',
@@ -139,6 +146,22 @@ describe('applyCommon', () => {
     // callers skip it rather than handing it to `Color` (which throws).
     expect(COLOUR.test('')).toBe(true);
     expect(() => new Color('')).toThrow();
+  });
+
+  it('emptyProp: a number is 0, a boolean false, a string empty, a union its FIRST literal', () => {
+    expect(emptyProp('number')).toBe(0);
+    expect(emptyProp(Schema.boolean())).toBe(false);
+    expect(emptyProp(Schema.string())).toBe('');
+    expect(emptyProp(undefined)).toBe('');
+    const kind = Schema.union(['rect', 'roundRect', 'circle']).default('circle');
+    expect(emptyProp(kind)).toBe('rect');
+    // The host's copy is rehydrated from JSON — same answer.
+    const dict = (new Schema(JSON.parse(JSON.stringify(Schema.object({ kind })))) as unknown as { dict: Record<string, unknown> }).dict;
+    expect(emptyProp(dict.kind as never)).toBe('rect');
+    // COMMON's `pin` starts at '' — its first literal — so a bound `pin` still validates.
+    expect(emptyProp(COMMON.dict!.pin)).toBe('');
+    // A bare type name is all a caller may have: a union then falls to '' (no literal to read).
+    expect(emptyProp('union')).toBe('');
   });
 
   it('anchorX / anchorY override `anchor` per axis', () => {

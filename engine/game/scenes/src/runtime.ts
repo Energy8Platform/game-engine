@@ -165,9 +165,15 @@ export function apply(ctx: Context, config: ScenesConfig): void {
   const insets = (): SafeArea | undefined =>
     (ctx.reflect.get('safeArea', false) as SafeArea | undefined) ??
     (ctx.reflect.get('shell', false) as { safeArea?: SafeArea } | undefined)?.safeArea;
+  /** The four numbers the last fit was made with — what a frame compares against. */
+  let fitted = '';
+  const key = (i: SafeArea | undefined) => (i ? `${i.top},${i.right},${i.bottom},${i.left}` : '');
   const fit = (width = app.screen?.width, height = app.screen?.height) => {
     // `alive`: the deferred call may land after a dispose tore `scenes` down.
-    if (alive && width && height) scenes.resize(width, height, insets());
+    if (!alive || !width || !height) return;
+    const i = insets();
+    fitted = key(i);
+    scenes.resize(width, height, i);
   };
   fit();
   const onResize = (width: number, height: number) => queueMicrotask(() => fit(width, height));
@@ -176,6 +182,17 @@ export function apply(ctx: Context, config: ScenesConfig): void {
     return () => void app.renderer?.off('resize', onResize);
   }, 'scenes:fit');
   ctx.inject(['shell'], () => fit());
+  // The insets can move WITHOUT a resize — the shell's `renderBar()`
+  // re-scales its bar — and nothing announces that. So every frame reads
+  // the four numbers and re-fits when they differ from the last fit's:
+  // pinned nodes follow the bar at once.
+  const check = () => {
+    if (key(insets()) !== fitted) fit();
+  };
+  ctx.effect(() => {
+    app.ticker?.add(check);
+    return () => void app.ticker?.remove(check);
+  }, 'scenes:insets');
 
   // A tap anywhere on the canvas, in DESIGN units, on the flow bus — what
   // a `wait { event: ui.tap }` holds an intro card for. Lenient by design:

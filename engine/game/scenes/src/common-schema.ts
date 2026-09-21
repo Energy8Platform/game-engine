@@ -40,6 +40,11 @@ const NAMES = `
   .split(/\s+/)
   .join('|');
 
+/** One argument of a function form: `1`, `1.5`, `.5`, `50%` — a number, never a name (`rgb(a,b,c)`). */
+const NUM = '\\d*\\.?\\d+%?';
+/** Three arguments, comma- or space-separated, then an optional `, alpha` / `/ alpha`. */
+const FN = `(?:rgb|hsl)a?\\(\\s*${NUM}(?:\\s*[,\\s]\\s*${NUM}){2}(?:\\s*[,/]\\s*${NUM})?\\s*\\)`;
+
 /**
  * What the runtime reads as a colour, and so what a colour prop is allowed
  * to hold: empty (none / unset), `#` + 3, 4, 6 or 8 hex digits, an
@@ -59,7 +64,7 @@ const NAMES = `
  * Properties form still draws a text field instead of "unsupported".
  */
 export const COLOUR = new RegExp(
-  `^(?:|#(?:[\\da-f]{3,4}|[\\da-f]{6}|[\\da-f]{8})|(?:rgb|hsl)a?\\([^()]*\\)|${NAMES})$`,
+  `^(?:|#(?:[\\da-f]{3,4}|[\\da-f]{6}|[\\da-f]{8})|${FN}|${NAMES})$`,
   'i',
 );
 
@@ -78,9 +83,28 @@ export const isCellBinding = (value: unknown): value is string =>
 /** The cell field a binding reads: `'$cell.multiplier'` → `'multiplier'`. */
 export const cellField = (binding: string): string => binding.slice(CELL.length);
 
-/** What an unresolved binding stands in as, so neither a schema nor a type's `update` sees the raw string. */
-export const emptyProp = (type?: string): string | number | boolean =>
-  type === 'number' ? 0 : type === 'boolean' ? false : '';
+/**
+ * What an unresolved binding stands in as, so neither a schema nor a
+ * type's `update` sees the raw string. Takes the prop's schema (its live
+ * `Schema` or the host's rehydrated one — both carry `type`, and a union
+ * its `list` of literals), or the bare type name where that is all the
+ * caller has: a `union` stands at its FIRST literal, the one value every
+ * union accepts, where `''` would be refused by `shape.kind`.
+ */
+export const emptyProp = (
+  schema?: string | { type?: string; list?: { value?: unknown }[] },
+): string | number | boolean => {
+  const type = typeof schema === 'string' ? schema : schema?.type;
+  if (type === 'number') return 0;
+  if (type === 'boolean') return false;
+  // A live `Schema` is callable (`typeof` 'function'), the host's rehydrated one too: anything but the bare name.
+  if (type === 'union' && schema && typeof schema !== 'string') {
+    const first = schema.list?.[0]?.value;
+    if (typeof first === 'string' || typeof first === 'number' || typeof first === 'boolean')
+      return first;
+  }
+  return '';
+};
 
 /**
  * The nine points of the safe rect a node can `pin` to. Lives here (not
