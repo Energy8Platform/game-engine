@@ -255,8 +255,9 @@ const spin: FlowNodeKind<{ action: string; betLevel?: string }> = {
  * starts a fresh round), `step` carries the `roundId` a prior `result`
  * named and the `action` it offered in `nextActions` — the loop a `result.
  * roundComplete === false` puts the flow into. Both default to reading the
- * PREVIOUS response off `vars.result` (`readPath` follows the numeric
- * `nextActions.0` segment into the array), so a bare node needs no props;
+ * PREVIOUS response off `vars.result` (the expression's path token accepts
+ * a numeric segment — `nextActions.0` — while `readPath` itself only reads
+ * the leaf), so a bare node needs no props;
  * either can still be a literal or a different `$expr` for a flow that
  * wants to choose the next action itself (a bonus pick, say).
  *
@@ -292,6 +293,12 @@ const step: FlowNodeKind<{ roundId: string; action: string }> = {
   },
 };
 
+/**
+ * `timeout: false`, like `wait`/`emit`: a plan is as long as its board steps
+ * and its `emit { wait }` holds, so a board step that never resolves holds
+ * the flow until `ui.skip` or `stop()` — the interpreter's 30 s cap no
+ * longer nets it.
+ */
 const present: FlowNodeKind<{ turbo: string }> = {
   kind: 'present',
   schema: Schema.object({
@@ -302,6 +309,7 @@ const present: FlowNodeKind<{ turbo: string }> = {
       ),
   }),
   outs: ['next', 'failed'],
+  timeout: false,
   async run(p, { ctx, vars, report }) {
     const result = vars.result as { stage: string; data: Record<string, unknown> } | undefined;
     if (!result) throw new Error('vars.result is missing — run `spin` first');
@@ -418,7 +426,12 @@ const set: FlowNodeKind<{ name: string; value?: unknown }> = {
   },
 };
 
-/** `timeout: false` is for `wait`: a branch held for a human-paced run must not hit the 30 s limit. */
+/**
+ * `timeout: false` is for `wait`: a branch held for a human-paced run must not hit the 30 s limit.
+ * Inside one flow, a fire to a default `on { busy: ignore }` while that `on`'s run is live is
+ * DROPPED — nothing holds it; only `busy: parallel` (or an idle flow) gives a `wait { event }`
+ * something to wait for.
+ */
 const emit: FlowNodeKind<{ event: string; payload?: unknown; wait: boolean }> = {
   kind: 'emit',
   schema: Schema.object({
@@ -523,6 +536,10 @@ const prop: FlowNodeKind<{ target: string; prop: string; value: string }> = {
       // `setProps` to refuse, same as before this branch existed. A
       // template is always a string — a number prop refuses it there too.
       const type = dict?.[p.prop]?.type;
+      if (type === 'number' && typeof value === 'number' && Number.isNaN(value)) {
+        report(`value "${p.value}" is not a number for '${p.prop}'`);
+        return { out: 'next' };
+      }
       if (type === 'string' && (typeof value === 'number' || typeof value === 'boolean')) {
         value = String(value);
       }
@@ -601,7 +618,9 @@ const SHELL_MODES = ['base', 'bonus', 'freeSpins', 'replay'];
  * still apply, in schema order — a readout that cannot be set does not
  * stop the round. No `shell` service at all (the scene editor, composed
  * `without: ['ui.shell']`) is a
- * warning, and `next`.
+ * warning, and `next`. `freeSpinsCurrent`/`freeSpinsTotalWin` are applied
+ * together — either one refused (a NaN) refuses both, so it's one
+ * `setFreeSpins` call or none.
  */
 const shell: FlowNodeKind<ShellProps> = {
   kind: 'shell',
@@ -625,9 +644,17 @@ const shell: FlowNodeKind<ShellProps> = {
       .description('whether Buy Bonus can be pressed'),
     freeSpins: Schema.string()
       .default('')
-      .description('spins total (a number: a literal, `$expr`, or a `{…}` template), or `$expr` to `{ current?, total, totalWin }`'),
-    freeSpinsCurrent: Schema.string().default('').description('spins played so far (a number) — merged over the current free-spins readout'),
-    freeSpinsTotalWin: Schema.string().default('').description('free-spins total win, currency units — merged over the current readout'),
+      .description('spins total (a number), or a `$path` to `{ current?, total, totalWin }`; a literal, `$expr` or `{…}` template'),
+    freeSpinsCurrent: Schema.string()
+      .default('')
+      .description(
+        'spins played so far (a number) — merged over the current free-spins readout; reaches `setFreeSpins`, which clears a `bonus` readout — in bonus mode use `bonusTotalWin`',
+      ),
+    freeSpinsTotalWin: Schema.string()
+      .default('')
+      .description(
+        'free-spins total win, currency units — merged over the current readout; reaches `setFreeSpins`, which clears a `bonus` readout — in bonus mode use `bonusTotalWin`',
+      ),
     bonus: Schema.string()
       .default('')
       .description('`$expr` to `{ label, value, totalWin }` — a bonus readout in the bar hero'),

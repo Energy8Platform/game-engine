@@ -462,6 +462,28 @@ describe('built-in kinds', () => {
       expect(setProps).not.toHaveBeenCalled();
     });
 
+    it('a dynamic value ($expr) that resolves to NaN into a number prop is refused with the same message as a bad literal', async () => {
+      const setProps = vi.fn(() => true);
+      const scenes = { setProps, nodeSchema: nodeSchema({ x: { type: 'number' } }) };
+      const { rc } = runCtx({ scenes });
+      expect(
+        await kind('prop').run!({ target: 'base_game/win', prop: 'x', value: '$missing * 2' }, rc),
+      ).toEqual({ out: 'next' });
+      expect(rc.report).toHaveBeenCalledWith(`value "$missing * 2" is not a number for 'x'`);
+      expect(setProps).not.toHaveBeenCalled();
+    });
+
+    it('a `{…}` template into a number prop reaches setProps as the resolved STRING — setProps refusing it is what reports', async () => {
+      const setProps = vi.fn(() => false);
+      const scenes = { setProps, nodeSchema: nodeSchema({ x: { type: 'number' } }) };
+      const { rc } = runCtx({ scenes }, { result: { win: 12.5 } });
+      expect(
+        await kind('prop').run!({ target: 'a/b', prop: 'x', value: '{$result.win}' }, rc),
+      ).toEqual({ out: 'next' });
+      expect(setProps).toHaveBeenCalledWith({ scene: 'a', node: 'b' }, { x: '12.5' });
+      expect(rc.report).toHaveBeenCalledWith(`could not set 'x' on "a/b"`);
+    });
+
     it('`$path` target/value read vars — the value skips schema coercion entirely', async () => {
       const setProps = vi.fn(() => true);
       const scenes = { setProps, nodeSchema: nodeSchema({ x: { type: 'number' } }) };
@@ -980,14 +1002,15 @@ describe('built-in kinds', () => {
     }
   });
 
-  it('boot fires once on the next microtask; wait and emit opt out of the run timeout', async () => {
+  it('boot fires once on the next microtask; present, wait and emit opt out of the run timeout', async () => {
     const fire = vi.fn();
     const { rc } = runCtx();
     kind('boot').arm!({}, fire, rc);
     expect(fire).not.toHaveBeenCalled();
     await Promise.resolve();
     expect(fire).toHaveBeenCalledTimes(1);
+    expect(kind('present').timeout).toBe(false);
     expect(kind('wait').timeout).toBe(false);
-    expect(BUILTIN_KINDS.filter((k) => k.timeout === false).map((k) => k.kind)).toEqual(['wait', 'emit']);
+    expect(BUILTIN_KINDS.filter((k) => k.timeout === false).map((k) => k.kind)).toEqual(['present', 'wait', 'emit']);
   });
 });

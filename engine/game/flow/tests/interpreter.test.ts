@@ -757,6 +757,14 @@ describe('createFlow', () => {
     });
     f.flow.provideRoot('shell', () => ({ bet: 2 }));
     const d = spinDoc('ignore');
+    // The parent run gets its OWN var (`mark`) before it blocks on `spin` —
+    // if `vars` were shared across runs, the parallel branch's `{ ...c.vars
+    // }` probe below would see it too, and `toEqual` would fail.
+    d.nodes.push({ id: 'mark', kind: 'set', props: { name: 'mark', value: 1 } });
+    d.edges = [
+      { from: 'idle', to: 'mark' },
+      { from: 'mark', to: 'spin' },
+    ];
     d.nodes.push(
       { id: 'beat', kind: 'on', props: { event: 'pd.round', busy: 'parallel' } },
       { id: 'note', kind: 'set', props: { name: 'seen', value: '$event.n' } },
@@ -776,11 +784,12 @@ describe('createFlow', () => {
     const done = f.events.emit('pd.round', { n: 7 });
     await done;
     expect(f.flow.trace().filter((e) => e.node === 'beat' && e.out === null)).toHaveLength(1);
-    // The parallel run's own vars: `$event` and the root read, `$result` is the other run's and not here.
+    // The parallel run's own vars: `$event` and the root read, `$result` is the other run's and not here — and
+    // no `mark`, the parent run's own var.
     expect(seen).toEqual({ event: { n: 7 }, seen: 7, bet: 2, res: null });
     expect(f.flow.busy()).toBe(true); // the spin run is still held
     release[0]();
-    await settled(f, ['idle.next', 'beat.next', 'note.next', 'root.next', 'parent.next', 'look.next', 'spin.result']);
+    await settled(f, ['idle.next', 'beat.next', 'mark.next', 'note.next', 'root.next', 'parent.next', 'look.next', 'spin.result']);
     expect(play).toHaveBeenCalledTimes(1);
     expect(f.flow.busy()).toBe(false);
   });
