@@ -42,6 +42,9 @@ interface Sliced {
 /** What each view was last sliced from — skips re-slicing when nothing changed. */
 const sliced = new WeakMap<AnimatedSprite, Sliced>();
 
+/** The in-flight `once()` run for a view, if any — a second call chains behind it. */
+const pendingOnce = new WeakMap<AnimatedSprite, Promise<void>>();
+
 const destroySliced = (view: AnimatedSprite) => {
   const prev = sliced.get(view);
   if (!prev) return;
@@ -129,25 +132,43 @@ export const strip: NodeType<StripProps> = {
   once(view, props) {
     const s = view as AnimatedSprite;
     if (!(s instanceof AnimatedSprite) || s.textures.length <= 1) return Promise.resolve();
-    return new Promise<void>((resolve) => {
-      let settled = false;
-      // Idempotent, and reachable two ways: the animation finishing, or the cell tearing the
-      // view down mid-play. The 'destroyed' listener is `off`'d on the normal path too — left
-      // registered, a repeat `once()` on the same still-live view would stack another one on
-      // every call.
-      const done = (viaDestroy: boolean) => {
-        if (settled) return;
-        settled = true;
-        s.onComplete = undefined;
-        s.off('destroyed', onDestroyed);
-        if (!viaDestroy) s.loop = props.loop;
-        resolve();
-      };
-      const onDestroyed = () => done(true);
-      s.loop = false;
-      s.onComplete = () => done(false);
-      s.once('destroyed', onDestroyed);
-      s.gotoAndPlay(0);
-    });
+    const start = () =>
+      new Promise<void>((resolve) => {
+        let settled = false;
+        // Idempotent, and reachable two ways: the animation finishing, or the cell tearing the
+        // view down mid-play. The 'destroyed' listener is `off`'d on the normal path too — left
+        // registered, a repeat `once()` on the same still-live view would stack another one on
+        // every call.
+        const done = (viaDestroy: boolean) => {
+          if (settled) return;
+          settled = true;
+          s.onComplete = undefined;
+          s.off('destroyed', onDestroyed);
+          if (!viaDestroy) s.loop = props.loop;
+          resolve();
+        };
+        const onDestroyed = () => done(true);
+        s.loop = false;
+        s.onComplete = () => done(false);
+        s.once('destroyed', onDestroyed);
+        s.gotoAndPlay(0);
+      });
+    // A second `once()` while the first is still playing must not overwrite `s.onComplete` —
+    // `AnimatedSprite` holds one callback, not a list, so the first call's promise would never
+    // settle. Queued behind the in-flight run instead: both resolve, the second once the first
+    // (and then its own) finishes. No prior run in flight → starts synchronously, same as
+    // before — a caller that tears the view down right after calling `once()` (no run in
+    // between) still gets the synchronous 'destroyed' wiring it relies on.
+    const prior = pendingOnce.get(s);
+    const run = prior ? prior.then(start) : start();
+    pendingOnce.set(s, run);
+    // `.then(cleanup, cleanup)`, not `.finally`: a `.finally` callback's own promise chain is
+    // never read by anyone, so a rejection (a throwing `gotoAndPlay` on an already-torn-down
+    // view) would be an unhandled rejection distinct from the `run` this method returns.
+    const cleanup = () => {
+      if (pendingOnce.get(s) === run) pendingOnce.delete(s);
+    };
+    run.then(cleanup, cleanup);
+    return run;
   },
 };

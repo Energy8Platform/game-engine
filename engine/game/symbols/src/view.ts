@@ -232,10 +232,25 @@ export function createSymbolHandle(
     if (rest) rest.container.visible = false;
     const w = mount('win', def.win);
     win = w;
+    // A node type's `once` that never settles (a stuck media load, a bug in a
+    // custom type) must not hang the whole reveal step forever: raced against
+    // the view's own pixi `'destroyed'` event (fired by `Container.destroy()`
+    // — the same signal the handle's teardown listener below reacts to), so a
+    // cell torn down mid-win still lets this promise resolve.
+    let onDestroyed: (() => void) | undefined;
+    const destroyed = new Promise<void>((resolve) => {
+      onDestroyed = () => resolve();
+      view.once('destroyed', onDestroyed);
+    });
     try {
-      await (w.type?.once && w.child ? w.type.once(w.child, w.props!, deps.ctx) : wait(600));
+      await Promise.race([
+        w.type?.once && w.child ? w.type.once(w.child, w.props!, deps.ctx) : wait(600),
+        destroyed,
+      ]);
     } catch (e) {
       fail(w, 'play once', e);
+    } finally {
+      if (onDestroyed) view.off('destroyed', onDestroyed);
     }
     if (win === w) showStatic();
   }

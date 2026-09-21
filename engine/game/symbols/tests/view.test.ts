@@ -226,6 +226,30 @@ describe('createSymbolHandle', () => {
     expect(rest.visible).toBe(true);
   });
 
+  it('playWin resolves on view.destroy() even when the win type\'s once never settles', async () => {
+    const { deps, nodeTypes } = setup();
+    const stuck: NodeType = {
+      type: 'stuck',
+      schema: Schema.object({}),
+      mount: () => new Container(),
+      once: () => new Promise<void>(() => {}), // never resolves on its own
+    };
+    nodeTypes.register(stuck);
+    const h = createSymbolHandle('1', deps);
+    h.apply({ id: '1', static: STATIC, win: { type: 'stuck', props: {} } });
+    h.resize(SIZE);
+    const p = h.view.playWin!();
+    let done = false;
+    void p.then(() => {
+      done = true;
+    });
+    await Promise.resolve();
+    expect(done).toBe(false);
+    h.view.destroy();
+    await p;
+    expect(done).toBe(true);
+  });
+
   it('a win type without once holds 600 ms', async () => {
     vi.useFakeTimers();
     try {

@@ -171,4 +171,24 @@ describe('strip', () => {
     await expect(p).resolves.toBeUndefined();
     expect(view.loop).toBe(false);
   });
+
+  it('two concurrent once() calls resolve in order — the second is queued behind the first', async () => {
+    const base = textureSized(32, 16);
+    const view = strip.mount(
+      props({ cols: 2, loop: true }),
+      ctxWith(() => base),
+    ) as AnimatedSprite;
+    const order: number[] = [];
+    const p1 = strip.once!(view, props({ cols: 2, loop: true }), none).then(() => order.push(1));
+    const p2 = strip.once!(view, props({ cols: 2, loop: true }), none).then(() => order.push(2));
+    // The first call wired `onComplete` synchronously; a naive second call would have
+    // overwritten it (the sprite holds one callback, not a list) and never settled.
+    view.onComplete!();
+    await p1;
+    expect(order).toEqual([1]);
+    view.onComplete!();
+    await p2;
+    expect(order).toEqual([1, 2]);
+    view.destroy();
+  });
 });
