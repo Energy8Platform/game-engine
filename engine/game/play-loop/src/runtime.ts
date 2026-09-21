@@ -191,7 +191,7 @@ export function apply(ctx: Context, config: { skipEvents?: string[] } = {}): voi
   const skipEvents = config.skipEvents ?? ['ui.skip'];
 
   // The one step no board performs: a beat on the flow bus. `wait: true`
-  // holds the plan until the runs the event started have drained (the
+  // holds the plan until the runs that the event started have drained (the
   // bus's `emit` promise — `@energy8engine/flow`); `skip()` lets go of
   // every pending hold at once, the branches keep running on their own.
   const holds = new Set<() => void>();
