@@ -155,3 +155,62 @@ export const COMMON = Schema.object({
     .default('')
     .description("anchors x/y to this point of the safe rect (x/y become offsets); '' = absolute"),
 });
+
+/** One prop's schema as `emptyProp` reads it: its `type`, and a union's `list` of literals. */
+type PropSchema = { type?: string; list?: { value?: unknown }[] };
+const dictOf = (schema: unknown): Record<string, PropSchema | undefined> =>
+  (schema as { dict?: Record<string, PropSchema> }).dict ?? {};
+
+/** A bound prop's value: the cell's field coerced to the prop's schema type — the way a flow's `prop` coerces. */
+function boundValue(field: unknown, entry?: PropSchema): unknown {
+  const type = entry?.type;
+  if (field === undefined || field === null) return emptyProp(entry);
+  if (type === 'number') {
+    const n = Number(field);
+    return Number.isNaN(n) ? 0 : n;
+  }
+  if (type === 'boolean') return typeof field === 'string' ? field === 'true' : Boolean(field);
+  return type === 'string' ? String(field) : field;
+}
+
+/**
+ * A node's props with every `$cell.<field>` binding resolved against one
+ * cell's data — the one place a binding turns into a value, shared by
+ * `@energy8engine/symbols` (a symbol's own states) and the scenes runtime
+ * (a cell scene, and any other mount, where an unresolved binding simply
+ * stands at its empty value rather than failing the schema).
+ *
+ * The schema never sees a binding: that prop's EMPTY stands in for the
+ * validation, which is what makes a binding valid whatever the prop's type
+ * (the host's `checkNode` does the same), and the resolved value — never
+ * validated, like a flow's `$path` — is put back on top. A prop the type
+ * does not declare is read through `COMMON` instead (a `$cell.*` on
+ * `alpha` is a number too).
+ *
+ * `bound` is what a later `bind()` must re-resolve: the keys that carried
+ * a binding, in declaration order. A prop that is not bound keeps whatever
+ * the document said, so the schema sees the author's own value.
+ */
+export const cellProps = (
+  type: { schema: Schema },
+  raw: Record<string, unknown>,
+  data?: Record<string, unknown>,
+): { props: Record<string, unknown>; bound: string[] } => {
+  const own = dictOf(type.schema);
+  const common = dictOf(COMMON);
+  const input: Record<string, unknown> = {};
+  const resolved: Record<string, unknown> = {};
+  const bound: string[] = [];
+  for (const [key, value] of Object.entries(raw)) {
+    if (!isCellBinding(value)) {
+      input[key] = value;
+      continue;
+    }
+    // The ENTRY, not its type name: a union's empty is its first literal (`text.align` → 'left').
+    const entry = own[key] ?? common[key];
+    input[key] = emptyProp(entry);
+    resolved[key] = data ? boundValue(data[cellField(value)], entry) : input[key];
+    bound.push(key);
+  }
+  return { props: { ...(type.schema(input) as Record<string, unknown>), ...resolved }, bound };
+};

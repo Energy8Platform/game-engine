@@ -11,7 +11,7 @@ import { createRegistry } from '@energy8engine/registry';
 import { COLOUR, COMMON, PINS, type Pin } from './common-schema';
 import type { Fit } from './fit';
 
-export { COLOUR, COMMON, PINS, cellField, emptyProp, isCellBinding } from './common-schema';
+export { COLOUR, COMMON, PINS, cellField, cellProps, emptyProp, isCellBinding } from './common-schema';
 export type { NodeTypeAccept, Pin };
 
 declare global {
@@ -19,6 +19,8 @@ declare global {
     interface Meta<T> {
       /** IDE hint: this string field holds a project-relative asset path with one of these extensions. */
       asset?: string[];
+      /** IDE hint: this string field names a document of this kind (`'scene'`) — draw a dropdown of them. */
+      pick?: string;
     }
   }
 }

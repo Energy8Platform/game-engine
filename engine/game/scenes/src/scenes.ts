@@ -38,6 +38,7 @@ import { createTransitions, cut, type TickerLike, type TransitionsService } from
 import {
   COMMON,
   applyCommon,
+  cellProps,
   commonProps,
   place,
   type NodeType,
@@ -70,6 +71,21 @@ export interface SceneRef {
   node: string;
 }
 
+/**
+ * One document mounted for ONE cell — a private copy, no part of any
+ * `Mount`: nothing addresses it by id (`view`/`setProps` never find it),
+ * nothing shows or hides it, and it lives and dies with the cell that
+ * asked for it rather than with a scene on screen.
+ */
+export interface CellMount {
+  view: Container;
+  /** Re-resolves every `$cell` prop of the copy against `data` (`update` + the common pass). */
+  bind(data: Record<string, unknown>): void;
+  /** Every node's `once` (a strip, a spritesheet, a spine) awaited together; resolves at once when none has one. */
+  once(): Promise<void>;
+  destroy(): void;
+}
+
 export interface ScenesService {
   show(id: string, opts?: { transition?: string }): Promise<void>;
   hide(id: string): Promise<void>;
@@ -83,6 +99,12 @@ export interface ScenesService {
   assetsOf(id: string): string[];
   /** Mounts `id`'s tree into a fresh container for a `scene` node; `null` on a cycle or a missing id. Internal to `scene` nodes. */
   mountDoc(id: string, chain: string[]): Container | null;
+  /**
+   * A private copy of `id` for one cell, its `$cell.<field>` props
+   * resolved against `data` — what a symbol state of type `scene` mounts.
+   * `null` when nothing declares `id`.
+   */
+  mountCell(id: string, data?: Record<string, unknown>): CellMount | null;
   sceneView(id: string): Container | undefined;
   /** A node's view by id, top-level or nested under a `container`/another node — the top-level map first (the common case, O(1)), `all` otherwise. */
   view(ref: SceneRef): Container | undefined;
@@ -133,7 +155,7 @@ export type Orientation = 'landscape' | 'portrait';
 interface Entry {
   view: Container;
   node: SceneNode;
-  /** The node's own props, through the type's schema — of the LAYERED dict (`rawOf`), not the document's alone. */
+  /** The node's own props, through the type's schema — of the LAYERED dict (`rawOf`), not the document's alone, with any `$cell` binding resolved over the top (`bound`). */
   props: Record<string, unknown>;
   type: NodeType;
   /** `<scene>/<node id>` — where a throwing `update` is reported. */
@@ -165,6 +187,8 @@ interface Entry {
    * `setProps` patch still wins. `root` entries only.
    */
   variant?: Record<string, unknown>;
+  /** The props that carried a `$cell.<field>` binding — the only ones a `CellMount.bind` re-resolves. */
+  bound?: string[];
   /** `refresh()` already reported this entry once; suppresses repeats until the next remount rebuilds it. */
   failed?: boolean;
 }
@@ -205,6 +229,28 @@ const offending = (e: unknown, patch: Record<string, unknown>): string => {
   return `prop ${named && named in patch ? named : Object.keys(patch).join(', ')}`;
 };
 
+/**
+ * `cellProps` for a mount: the type's props, the keys that carried a
+ * `$cell` binding, and the RAW dict the common pass reads with those keys
+ * resolved in place — `applyCommon` must never see a binding string on a
+ * COMMON prop (`alpha: '$cell.hot'` would fail the whole node).
+ */
+function resolveCell(
+  type: NodeType,
+  base: Record<string, unknown>,
+  cell?: Record<string, unknown>,
+): { props: Record<string, unknown>; bound: string[]; raw: Record<string, unknown> } {
+  const { props, bound } = cellProps(type, base, cell);
+  return {
+    props,
+    bound,
+    raw:
+      bound.length === 0
+        ? base
+        : { ...base, ...Object.fromEntries(bound.map((k) => [k, props[k]])) },
+  };
+}
+
 export function createScenes(options: CreateScenesOptions): ScenesService {
   const { nodeTypes, loader, report = () => {} } = options;
   const error = (where: string, message: string, fix?: string) =>
@@ -217,6 +263,8 @@ export function createScenes(options: CreateScenesOptions): ScenesService {
    * `base ⊕ patch` through the type's schema AND the common pass — the two
    * verdicts `setProps` asks before it touches a view — or `null` with a
    * `portrait …` diagnostic that blames `blame` (the override, normally).
+   * Through `resolveCell`, so a `$cell` binding in the merge stands at its
+   * empty for both verdicts instead of failing an override that is fine.
    */
   const tryVariant = (
     where: string,
@@ -227,9 +275,9 @@ export function createScenes(options: CreateScenesOptions): ScenesService {
   ): { raw: Record<string, unknown>; props: Record<string, unknown> } | null => {
     const raw = { ...base, ...patch };
     try {
-      const props = type.schema(raw as never) as Record<string, unknown>;
-      commonProps(raw, type);
-      return { raw, props };
+      const r = resolveCell(type, raw);
+      commonProps(r.raw, type);
+      return { raw, props: r.props };
     } catch (err) {
       error(where, `portrait ${offending(err, blame)}: ${why(err)}`, 'fix the override');
       return null;
@@ -292,6 +340,8 @@ export function createScenes(options: CreateScenesOptions): ScenesService {
     root = top,
     /** A `setProps` patch the node carries into a remount (`remountNode` from `setProps`): the layer OVER the override. */
     live?: Record<string, unknown>,
+    /** The cell `mountCell` is mounting for; `undefined` for every other caller, and a `$cell` prop then stands at its empty. */
+    cell?: Record<string, unknown>,
   ): Entry | undefined {
     const where = `${sceneId}/${node.id}`;
     if (seen.has(node.id)) {
@@ -330,12 +380,17 @@ export function createScenes(options: CreateScenesOptions): ScenesService {
       variant = undefined;
       if (live) merged = tryVariant(where, type, node.props, live);
     }
-    const raw = merged ? merged.raw : node.props;
+    // The variant/live merge first, then the cell resolution over what it
+    // produced: `tryVariant` validates the document's own strings, and a
+    // binding among them stands at its empty there as it does here.
+    const base = merged ? merged.raw : node.props;
     let view: Container;
     let props: Record<string, unknown>;
+    let bound: string[];
+    let raw = base;
     let masks = false;
     try {
-      props = merged ? merged.props : (type.schema(node.props) as Record<string, unknown>);
+      ({ props, bound, raw } = resolveCell(type, base, cell));
       view = type.mount(props, mountCtx([...chain, sceneId]));
       // Inside the try: a common prop off its type (`x: 'abc'`) is this
       // node's failure, not the whole set's.
@@ -379,10 +434,12 @@ export function createScenes(options: CreateScenesOptions): ScenesService {
       root,
       variant,
       live,
+      bound,
     };
     building?.all.push(entry);
     if (building && chain.length === 0) building.nodes.set(node.id, entry);
-    for (const child of node.children ?? []) mountNode(child, view, sceneId, chain, seen, false);
+    for (const child of node.children ?? [])
+      mountNode(child, view, sceneId, chain, seen, false, false, undefined, cell);
     // A `container`'s local bounds ARE its children's: the pass above ran
     // before they mounted, read 0, and left `scale` at 1 — so a node
     // carrying `width`/`height` gets the pass again now that there is
@@ -546,14 +603,18 @@ export function createScenes(options: CreateScenesOptions): ScenesService {
           remountNode(m, e);
           continue;
         }
+        // The merge again, resolved: `tryVariant` keeps `raw` as written
+        // (`mountNode` needs the bindings to resolve against a cell), and
+        // the common pass must not be handed one.
+        const r = resolveCell(e.type, merged.raw);
         try {
-          e.type.update?.(e.view, merged.props, mountCtx([]));
-          applyCommon(e.view, merged.raw, e.type, e.top ? lastFit : null);
+          e.type.update?.(e.view, r.props, mountCtx([]));
+          applyCommon(e.view, r.raw, e.type, e.top ? lastFit : null);
         } catch (err) {
           error(e.where, `portrait ${offending(err, blame)}: ${why(err)}`, 'fix the override');
           continue;
         }
-        e.props = merged.props;
+        e.props = r.props;
         e.variant = next;
         e.failed = false;
       }
@@ -889,6 +950,76 @@ export function createScenes(options: CreateScenesOptions): ScenesService {
       // An embedded copy: its host lays it out, so no node in it is `top` — but its roots are the document's, and take its variant.
       for (const node of doc.nodes) mountNode(node, view, id, chain, seen, false, true);
       return view;
+    },
+    mountCell(id, data) {
+      const doc = docs.get(id);
+      if (!doc) return null;
+      const view = new Container();
+      view.label = id;
+      const entries: Entry[] = [];
+      // Its own entry list: a cell copy belongs to no `Mount` — `setProps`
+      // must never find it, `refresh` must never walk it, and it dies with
+      // one cell rather than with a shown scene. Swapping `building` is
+      // safe because every `mountNode` below is synchronous (children and
+      // a nested `mountDoc` file into the same list, which is what
+      // `destroy` wants); the PREVIOUS value is put back rather than
+      // cleared, since a node type's own `mount` may be what called us,
+      // mid-`mountTop`.
+      const prev = building;
+      building = { view, nodes: new Map(), all: entries, types: new Map(), missing: [] };
+      try {
+        // Not `top` — nothing pins a cell copy — but its roots are the
+        // document's. `[id]` as the host chain keeps the copy out of
+        // `building.nodes`, silences the nested-pin warning the document's
+        // own mount already gave, and refuses a `scene` node nesting the
+        // document inside itself.
+        const seen = new Set<string>();
+        for (const node of doc.nodes)
+          mountNode(node, view, id, [id], seen, false, true, undefined, data);
+      } finally {
+        building = prev;
+      }
+      const ctx = mountCtx([id]);
+      return {
+        view,
+        bind(next) {
+          for (const e of entries) {
+            if (!e.bound?.length) continue;
+            try {
+              const r = resolveCell(e.type, rawOf(e), next);
+              e.type.update?.(e.view, r.props, ctx);
+              // No `fit`: a cell copy is never `top`, so its `pin` is inert.
+              applyCommon(e.view, r.raw, e.type);
+              e.props = r.props;
+            } catch (err) {
+              // `refresh`'s rule: one report per entry, and the siblings
+              // still get their value — a cell must still draw.
+              if (e.failed) continue;
+              e.failed = true;
+              error(e.where, `${e.node.type} "${e.node.id}" failed to bind: ${why(err)}`);
+            }
+          }
+        },
+        async once() {
+          await Promise.all(
+            entries.map(async (e) => {
+              if (!e.type.once) return;
+              try {
+                await e.type.once(e.view, e.props, ctx);
+              } catch (err) {
+                error(e.where, `${e.node.type} "${e.node.id}" failed to play: ${why(err)}`);
+              }
+            }),
+          );
+        },
+        destroy() {
+          // `unmountTop`'s order, on the copy's own list: deepest first,
+          // then the container this built itself.
+          for (const e of [...entries].reverse()) unmountEntry(e);
+          entries.length = 0;
+          view.destroy({ children: true });
+        },
+      };
     },
     sceneView: (id) => mounted.get(id)?.view,
     view: (ref) => entryOf(ref)?.view,

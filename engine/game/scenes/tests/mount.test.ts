@@ -430,6 +430,18 @@ describe('mounting', () => {
     scenes.replace([]);
     expect(view.destroyed).toBe(true);
   });
+
+  it('a `$cell` binding in an ordinary document mounts at its empty value, silently', async () => {
+    // The runtime is lenient everywhere — only a cell scene is SUPPOSED to
+    // carry one, and refusing it is the host's static check, not this.
+    const { scenes, nodeTypes, report } = boot([
+      { id: 'a', nodes: [{ id: 't', type: 'text', props: { text: '$cell.mv' } }] },
+    ]);
+    nodeTypes.register(text);
+    await scenes.show('a');
+    expect((byId(scenes, 'a', 't') as Text).text).toBe('');
+    expect(report).not.toHaveBeenCalled();
+  });
 });
 
 describe('show / hide', () => {

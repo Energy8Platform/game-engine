@@ -58,7 +58,9 @@ export const image: NodeType<{ src: string }> = {
 /** The referenced document, mounted as a child. `mountDoc` is the runtime's; the cycle guard is its chain of ids. */
 export const scene: NodeType<{ scene: string }> = {
   type: 'scene',
-  schema: Schema.object({ scene: Schema.string().required().description('scene id') }),
+  schema: Schema.object({
+    scene: Schema.string().required().extra('pick', 'scene').description('scene id'),
+  }),
   mount(props, ctx) {
     const scenes = ctx.reflect.get('scenes', false) as
       { mountDoc(id: string, chain: string[]): Container | null } | undefined;
