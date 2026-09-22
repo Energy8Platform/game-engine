@@ -688,3 +688,147 @@ describe('boardFromReelSystem: turbo, skip, config, lastOpts', () => {
     expect(board.lastOpts).toBeUndefined();
   });
 });
+
+/**
+ * Slice 30 — `playState`. Not a win reveal (`revealWins`): no amount, no
+ * line, and the named state is the mechanic's to choose. Reaches the
+ * symbol view directly (`grid.getCell(col,row).view.playState(name)`),
+ * the same `bind`-carrying view `spinTo`/`refill` already walk with
+ * `bindAll` — never through `ReelSystem.spin`/`cascade`, since the legacy
+ * facade knows nothing about a symbol's named states.
+ */
+describe('boardFromReelSystem: playState', () => {
+  /** A `CellLike` whose view is whatever `viewOverrides` supplies — `undefined` fields read as absent, matching a plain `SymbolView`. */
+  function cellWithView(viewOverrides: Record<string, unknown> | null): CellLike {
+    return {
+      setState: vi.fn(),
+      setData: vi.fn(),
+      playWin: vi.fn(),
+      view: (viewOverrides ? { ...viewOverrides } : null) as unknown as CellLike['view'],
+      data: { symbol: 'a' },
+    };
+  }
+
+  it("calls view.playState(state) on each named cell", async () => {
+    const { reelSystem, getCell } = fakeReelSystem();
+    const c00 = cellWithView({ playState: vi.fn(async () => {}) });
+    const c10 = cellWithView({ playState: vi.fn(async () => {}) });
+    getCell.mockImplementation((col: number) => (col === 0 ? c00 : c10));
+    const board = boardFromReelSystem(reelSystem);
+
+    await board.playState({
+      kind: 'playState',
+      cells: [
+        { col: 0, row: 0 },
+        { col: 1, row: 0 },
+      ],
+      state: 'death',
+    });
+
+    expect(c00.view!.playState).toHaveBeenCalledWith('death');
+    expect(c10.view!.playState).toHaveBeenCalledWith('death');
+  });
+
+  it('awaits every named cell before resolving when `wait` is absent (default true)', async () => {
+    let release!: () => void;
+    const gate = new Promise<void>((r) => (release = r));
+    const cell = cellWithView({ playState: vi.fn(() => gate) });
+    const { reelSystem, getCell } = fakeReelSystem();
+    getCell.mockImplementation(() => cell);
+    const board = boardFromReelSystem(reelSystem);
+
+    let settled = false;
+    const running = board
+      .playState({ kind: 'playState', cells: [{ col: 0, row: 0 }], state: 'death' })
+      .then(() => {
+        settled = true;
+      });
+
+    await Promise.race([running, new Promise((r) => setTimeout(r, 20))]);
+    expect(settled).toBe(false);
+
+    release();
+    await running;
+    expect(settled).toBe(true);
+  });
+
+  it('returns at once with `wait: false` — the states keep playing on their own', async () => {
+    const playState = vi.fn(() => new Promise<void>(() => {})); // never settles within this test
+    const cell = cellWithView({ playState });
+    const { reelSystem, getCell } = fakeReelSystem();
+    getCell.mockImplementation(() => cell);
+    const board = boardFromReelSystem(reelSystem);
+
+    await expect(
+      board.playState({
+        kind: 'playState',
+        cells: [{ col: 0, row: 0 }],
+        state: 'death',
+        wait: false,
+      }),
+    ).resolves.toBeUndefined();
+    expect(playState).toHaveBeenCalledWith('death');
+  });
+
+  it('skips a cell with no view, a view with no playState, and a cell past a short reel — not a throw', async () => {
+    const { reelSystem, getCell } = fakeReelSystem();
+    const noView = cellWithView(null);
+    const noPlayState = cellWithView({}); // a plain SymbolView: no playState of its own
+    getCell.mockImplementation((col: number) => {
+      if (col === 0) return noView;
+      if (col === 1) return noPlayState;
+      return undefined as unknown as CellLike; // a ragged grid: no cell past a short reel's last row
+    });
+    const board = boardFromReelSystem(reelSystem);
+
+    await expect(
+      board.playState({
+        kind: 'playState',
+        cells: [
+          { col: 0, row: 0 },
+          { col: 1, row: 0 },
+          { col: 2, row: 0 },
+        ],
+        state: 'death',
+      }),
+    ).resolves.toBeUndefined();
+  });
+
+  // `skip()` (the board's) must leave no cell stuck mid-state: a `playState`
+  // left playing when the round is hurried is collapsed to its resting look
+  // through the same `showStatic()` the symbol view already exposes (Task 3)
+  // — the legacy `ReelSystem.skip()` it also forwards to knows nothing about
+  // a symbol's named states, so it cannot do this on its own.
+  it("skip() shows the resting state of a cell whose playState is still in flight, and still forwards to the legacy skip", async () => {
+    let release!: () => void;
+    const gate = new Promise<void>((r) => (release = r));
+    const showStatic = vi.fn();
+    const cell = cellWithView({ playState: vi.fn(() => gate), showStatic });
+    const { reelSystem, getCell, skip } = fakeReelSystem();
+    getCell.mockImplementation(() => cell);
+    const board = boardFromReelSystem(reelSystem);
+
+    const running = board.playState({
+      kind: 'playState',
+      cells: [{ col: 0, row: 0 }],
+      state: 'death',
+    });
+
+    board.skip();
+
+    expect(showStatic).toHaveBeenCalledTimes(1);
+    expect(skip).toHaveBeenCalledTimes(1);
+
+    release();
+    await running;
+  });
+
+  it('a skip with nothing in flight calls no showStatic and still forwards to the legacy skip', async () => {
+    const { reelSystem, skip } = fakeReelSystem();
+    const board = boardFromReelSystem(reelSystem);
+
+    board.skip();
+
+    expect(skip).toHaveBeenCalledTimes(1);
+  });
+});

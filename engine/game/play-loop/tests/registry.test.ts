@@ -26,6 +26,9 @@ function fakeBoard() {
     refill: vi.fn(async () => {
       calls.push('refill');
     }),
+    playState: vi.fn(async () => {
+      calls.push('playState');
+    }),
   };
 }
 

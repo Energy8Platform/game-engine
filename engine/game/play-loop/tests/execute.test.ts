@@ -20,6 +20,9 @@ function fakeBoard() {
     tumble: vi.fn(async () => {
       calls.push('tumble');
     }),
+    playState: vi.fn(async () => {
+      calls.push('playState');
+    }),
   };
 }
 
@@ -276,5 +279,48 @@ describe('executePlan: StepOpts and tumble', () => {
       expect(await executePlan([{ kind: 'spinTo', board: [[1]] }], plain)).toEqual([]);
       expect(plain.calls).toEqual(['spinTo']);
     });
+  });
+});
+
+/**
+ * Slice 30 — `playState`. Added to `KNOWN_STEP_KINDS` by Task 1, so it
+ * reaches `board.playState` the same way `revealWins`/`remove`/etc. do — the
+ * board gets first refusal, never the registry — and a board missing the
+ * method is exactly the "board cannot perform" diagnostic the other five
+ * known kinds already get.
+ */
+describe('executePlan: playState', () => {
+  it('reaches board.playState, not the registry', async () => {
+    const board = fakeBoard();
+    const registry = {
+      register: () => () => {},
+      has: () => true,
+      get: vi.fn(() => ({ kind: 'playState', run: vi.fn(async () => {}) })),
+      kinds: () => ['playState'],
+      collisions: () => [],
+    };
+    const step = { kind: 'playState' as const, cells: [{ col: 0, row: 0 }], state: 'death' };
+
+    const problems = await executePlan([step], board, registry);
+
+    expect(problems).toEqual([]);
+    expect(board.calls).toEqual(['playState']);
+    expect(board.playState).toHaveBeenCalledWith(step, undefined);
+    // A registered handler for the SAME kind must never be consulted — the
+    // board already declares this kind, so it always wins it.
+    expect(registry.get).not.toHaveBeenCalled();
+  });
+
+  it('a board without playState is the "board cannot perform" diagnostic naming it', async () => {
+    const board = fakeBoard() as any;
+    delete board.playState;
+
+    const problems = await executePlan(
+      [{ kind: 'playState', cells: [{ col: 0, row: 0 }], state: 'death' }],
+      board,
+    );
+
+    expect(problems).toHaveLength(1);
+    expect(problems[0].message).toContain('board cannot perform step "playState"');
   });
 });

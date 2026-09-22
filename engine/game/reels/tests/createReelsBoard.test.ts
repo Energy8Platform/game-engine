@@ -83,6 +83,8 @@ describe('createReelsBoard — after destroy()', () => {
           fresh: [],
           settled: [[1]],
         }),
+      () =>
+        board.playState({ kind: 'playState', cells: [{ col: 0, row: 0 }], state: 'death' }),
     ]) {
       await expect(call()).rejects.toThrow('board destroyed — reels1 was re-applied; spin again');
     }

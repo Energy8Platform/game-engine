@@ -73,6 +73,7 @@ import type { Container } from 'pixi.js';
 import { cellData } from '@energy8engine/contracts';
 import type {
   Board,
+  PlayStateStep,
   RefillStep,
   RemoveStep,
   RevealWinsStep,
@@ -89,8 +90,13 @@ export interface CellLike {
   setState(state: { winning?: boolean; removed?: boolean; fresh?: boolean }): void;
   setData(data: CellData): void;
   playWin(): Promise<void>;
-  /** The mounted symbol's view, when there is one; `bind` is `@energy8engine/symbols`' `$cell.<field>` resolution. */
-  readonly view: (SymbolView & { bind?(data: CellData): void }) | null;
+  /**
+   * The mounted symbol's view, when there is one; `bind` is `@energy8engine/symbols`'
+   * `$cell.<field>` resolution, `playState` is its `BoundSymbolView.playState` — absent
+   * for a preview's pinned state and for a symbol with no def, which is why `playState()`
+   * (below) checks for it on every cell rather than assuming it.
+   */
+  readonly view: (SymbolView & { bind?(data: CellData): void; playState?(state: string): Promise<void> }) | null;
   /** The data this cell last took — what `bind` resolves against. */
   readonly data: CellData;
 }
@@ -163,6 +169,15 @@ export function boardFromReelSystem(
   // reads back to prove a turbo toggle actually reached the board. Recorded on
   // the way IN (before the op runs), so it is the one in force while it plays.
   let lastOpts: StepOpts | undefined;
+  // Cells whose `playState` is currently in flight — what `skip()` below walks to
+  // collapse each one to its resting look. Unlike `revealWins`'s `playWin()`
+  // (a legacy `AnimatedSymbol` tween `skip()` has never reached into, and still
+  // doesn't), a `playState` view exposes exactly the primitive for this —
+  // `showStatic()` — because the symbols package's `playState` is built to be
+  // torn down early (see `@energy8engine/symbols`' `view.ts`: "showStatic tears
+  // a state in flight down early; the once it was awaiting then resolves into a
+  // no-op").
+  const statesPlaying = new Set<NonNullable<CellLike['view']>>();
   const tracked =
     <S>(run: (step: S, opts?: StepOpts) => Promise<void>) =>
     async (step: S, opts?: StepOpts) => {
@@ -219,6 +234,26 @@ export function boardFromReelSystem(
         if (snapshot[col]?.[row]) snapshot[col][row] = { symbol: null };
       }
       reelSystem.setBoard(snapshot);
+    }),
+
+    // Not `revealWins` with a field: no amount, no line — a named state
+    // (`symbols.yml`'s `states`) played on cells the mechanic chose, win or
+    // not. Reaches the view directly, never through `spin`/`cascade`: the
+    // legacy facade has no notion of a symbol's own states at all. A cell
+    // past a short reel (`getCell` answers `undefined`), an empty cell (no
+    // view) and a plain `SymbolView` with no `playState` of its own are all
+    // skipped rather than thrown over — the same tolerance `bindAll` already
+    // has for a ragged grid.
+    playState: tracked(async (step: PlayStateStep) => {
+      const views = step.cells
+        .map(({ col, row }) => (reelSystem.grid.getCell(col, row) as CellLike | undefined)?.view)
+        .filter((v): v is NonNullable<typeof v> => !!v?.playState);
+      const playing = views.map((v) => {
+        statesPlaying.add(v);
+        return v.playState!(step.state).finally(() => statesPlaying.delete(v));
+      });
+      if (step.wait === false) return;
+      await Promise.all(playing);
     }),
 
     refill: tracked(async (step: RefillStep) => {
@@ -284,7 +319,17 @@ export function boardFromReelSystem(
     // after a skip, whether or not anything was animating. Nothing here can
     // narrow that without reaching past the facade; a game that draws into
     // `fx` redraws it after a skip.
+    //
+    // `reelSystem.skip()` doesn't know a cell's `playState` exists at all —
+    // that's this board's own bookkeeping, not the legacy facade's — so a
+    // `playState` still in flight is collapsed here explicitly, the same
+    // "hurry to the end state" bargain `skip()` already makes for everything
+    // else. `showStatic()` on each is enough: the `.finally()` on `playState`'s
+    // own promise (above) already removes it from `statesPlaying`, so calling
+    // it twice for the same view can't happen.
     skip() {
+      for (const view of statesPlaying) view.showStatic?.();
+      statesPlaying.clear();
       reelSystem.skip();
     },
 
@@ -363,6 +408,7 @@ export function createReelsBoard(options: CreateReelSystemOptions): ReelsBoard {
     remove: guarded(api.remove),
     refill: guarded(api.refill),
     tumble: guarded(api.tumble),
+    playState: guarded(api.playState),
     view: reelSystem.view,
     grid: reelSystem.grid,
     // Unlike the BoardApi methods above, a stale repaint/skip is nothing to refuse over —
