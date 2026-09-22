@@ -838,6 +838,32 @@ ctx.inject(['flow'], (c) =>
     while (node.children && node.children.length > 0) node = node.children[0];
     return node.constructor.name;
   },
+  /**
+   * What the cell at `(col, row)` SAYS — the `text` of the first node in
+   * its view that has one, depth-first, as a string; `null` when the cell
+   * has no view, or when nothing in it is a text node.
+   *
+   * `cellArt`'s companion, and it answers the question `cellArt` cannot: a
+   * cell scene's own art is a `Sprite` like any plain `image` state's, so
+   * the constructor name alone cannot tell "a document mounted for THIS
+   * cell" from "an image mounted". A text node inside the cell can — and
+   * when its `text` is bound (`'$cell.<field>'`), what this reads back is
+   * what that binding resolved to against the cell's data: `''` for a
+   * field this game's math does not carry, which is a mounted-and-bound
+   * node, not a missing one.
+   */
+  cellText(col: number, row: number): string | null {
+    const found = (node: ViewNode): string | null => {
+      if (node.text !== undefined) return String(node.text);
+      for (const child of node.children ?? []) {
+        const text = found(child);
+        if (text !== null) return text;
+      }
+      return null;
+    };
+    const view = liveGrid()?.getCell(col, row)?.view;
+    return view ? found(view) : null;
+  },
   /** Visible top-level scenes, as `scenes.visible()`; `[]` with no scenes row. */
   scenesVisible(): string[] {
     return (
@@ -944,10 +970,12 @@ interface PageFit {
   viewport: { left: number; top: number; right: number; bottom: number };
 }
 
-/** Any pixi display object, for `cellArt`'s walk down to its deepest first descendant. */
+/** Any pixi display object, for `cellArt`'s walk down to its deepest first descendant and `cellText`'s over the whole subtree. */
 interface ViewNode {
   readonly children?: readonly ViewNode[];
   readonly constructor: { readonly name: string };
+  /** A `Text`/`BitmapText` has one; every other display object does not — what `cellText` looks for. */
+  readonly text?: unknown;
 }
 
 /**

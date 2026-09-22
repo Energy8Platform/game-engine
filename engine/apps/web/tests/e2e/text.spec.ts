@@ -3,12 +3,18 @@
  * browser (spec §9, Task 4 of the text-and-props slice):
  *
  *  1. The example's own `win` node (`scenes/base_game.scene.yml`) and its
- *     `show_win` flow node (`flow.yml`: `draw → show_win → win → bal → done`,
- *     kind `prop`, `target: base_game/win`, `prop: text`, `value:
- *     '{$result.winAmount | currency}'` — a template with the `currency`
- *     format, which reads `$session.currency` off the dev host: `{ symbol:
- *     '$', decimals: 2, position: 'left' }`) — empty at boot, the last
- *     spin's `winAmount` as `$4.60` after one.
+ *     `show_win` flow node (`flow.yml`: `draw → show_win → win → bal → done`)
+ *     — empty at boot, the last spin's `winAmount` as `$4.60` after one.
+ *     `show_win` is a `count` node since the symbol-scenes slice, not the
+ *     `prop` node this case was written against: `target: base_game/win`,
+ *     `to: '$result.winAmount'`, `ms: 400`, `format: currency` — so the
+ *     text is RUN UP to the amount over 400 ms instead of being written
+ *     once. The assertion is unchanged and still exact, which is the point
+ *     of it: a count writes an eased value each frame and then the exact
+ *     end value last, so what the player is left looking at is the credited
+ *     amount to the cent, formatted by the same `currency` (which reads
+ *     `$session.currency` off the dev host: `{ symbol: '$', decimals: 2,
+ *     position: 'left' }`) the old template piped through.
  *  2. `ui.tap` reaching a flow: a `wait { event: ui.tap }` node holds until
  *     a click on the preview canvas, then a `prop` node with a LITERAL
  *     value sets the same `win` node's text.
@@ -42,10 +48,11 @@ const PREVIEW = 'iframe[title="game preview"]';
  * `start(boot) → base(show base_game) → hold(wait ui.tap) → mark(prop
  * base_game/win.text = 'tapped')` — same one-node-per-line style as the
  * example's own `flow.yml` and `fx.spec.ts`'s `TWEEN_FLOW`. `mark`'s
- * `value` is a LITERAL ('tapped', already a string), unlike the example's
- * own `'{$result.winAmount | currency}'` — this flow proves the tap
- * reaches the flow at all, not the template-into-a-string-prop path case
- * 1 already covers through the real example.
+ * `value` is a LITERAL ('tapped', already a string) and the node is a
+ * `prop`, not the `count` the example's own `show_win` is — this flow
+ * proves the tap reaches the flow at all, not the
+ * expression-into-a-text-node path case 1 already covers through the real
+ * example.
  */
 const TAP_FLOW = `version: 1
 nodes:

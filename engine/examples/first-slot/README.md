@@ -66,7 +66,18 @@ own nodes.
 The symbol art, one entry per id: a `static` node (`image`, onto
 `assets/symbols/<id>.png` — six placeholder shapes) and, on `1`, a `win`
 node (`spritesheet`, onto `assets/coin.json`, `loop: false`) that plays once
-on a win. `e8-base`'s `symbols1` row (`@energy8engine/symbols`) reads it
+on a win. `6` is the exception and shows the other two things a state can
+be: its `static` is `{ type: scene, props: { scene: orb } }`, so
+`scenes/orb.scene.yml` is mounted as a private copy for every cell that
+lands a `6` — a whole document per cell, whose `text` reads
+`'$cell.multiplier'` off that cell's own data (this math hands its board
+over as plain ids, so the node stands at its empty until a game's math
+carries a per-cell figure). And under `states:` it declares `pop`, a NAMED
+state: not one of the three built-ins, played only because something asks
+for it by name — here the `reel-step` mechanic, which puts
+`{ kind: 'playState', cells, state: 'pop' }` in its plan after every round
+it pays. A symbol with no `pop` of its own simply carries on.
+`e8-base`'s `symbols1` row (`@energy8engine/symbols`) reads it
 from the host (`GET /api/symbols`) and is what actually supplies `reels1`'s
 `resolve` — see the patch section below for what that replaced. The IDE's
 Symbols document (`PUT /api/symbols`) is the editor for this file; ids come
@@ -138,7 +149,8 @@ the top of `scenes/base_game.scene.yml`; the `coin` node right after it is a
 `spritesheet` (`assets/coin.json` + `assets/coin.png`, four frames of a
 spinning disc), the `media1` row's node type. A `win` node right after
 `coin` is a `text` node, empty until the flow's `show_win` node (kind
-`prop`) writes `$result.win` into it after every spin.
+`count`) runs it up to `$result.winAmount` over 400 ms after every spin,
+writing the exact credited amount last, as currency.
 
 ## The window, pins and portrait
 

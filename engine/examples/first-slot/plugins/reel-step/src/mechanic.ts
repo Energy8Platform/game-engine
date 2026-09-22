@@ -142,7 +142,18 @@ export function plan(data: ReelStepStageData): ReelStepPlan {
     const moved = round.shifts.some((n) => n > 0);
     if (!paid && !moved) return false;
 
-    if (paid) steps.push({ kind: 'revealWins', total: round.win ?? 0, lines: [] });
+    if (paid) {
+      steps.push({ kind: 'revealWins', total: round.win ?? 0, lines: [] });
+      // The cells that were just paid then POP — `symbols.yml`'s own `pop`
+      // state, on the very cells the reveal named. A second step rather
+      // than something the reveal does: `revealWins` is the money readout
+      // and says nothing about how a cell looks, and a symbol with no
+      // `pop` of its own simply resolves at once (not every symbol on a
+      // winning line declares one). `wait: true` holds the plan while they
+      // play, so the reels below do not start scrolling out from under
+      // them.
+      steps.push({ kind: 'playState', cells: round.winning, state: 'pop', wait: true });
+    }
     steps.push({
       kind: 'reelStep',
       winning: round.winning,

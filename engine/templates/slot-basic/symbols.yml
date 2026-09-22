@@ -18,4 +18,6 @@ symbols:
     static: { type: image, props: { src: assets/symbols/5.png } }
   - id: '6'
     name: sym-6
-    static: { type: image, props: { src: assets/symbols/6.png } }
+    static: { type: scene, props: { scene: orb } }
+    states:
+      pop: { type: spritesheet, props: { sheet: assets/coin.json, loop: false } }

@@ -99,6 +99,13 @@ function fakeBoard() {
     async revealWins(step: { total: number }) {
       calls.push(`revealWins:${step.total}`);
     },
+    // A real `ReelsBoard` carries this one (`@energy8engine/reels`); a board
+    // that did not would make `executePlan` report the plan's `playState`
+    // rather than run it, which is exactly what the `diagnostics` assertion
+    // below would catch.
+    async playState(step: { cells: { col: number; row: number }[]; state: string }) {
+      calls.push(`playState:${step.state}:${JSON.stringify(step.cells)}`);
+    },
     async refill(step: { board: number[][] }) {
       calls.push(`refill:${JSON.stringify(step.board)}`);
     },
@@ -157,13 +164,15 @@ describe('reel-step: the plan the mechanic emits is the plan the board runs', ()
     await executePlan(plan(DATA) as PresentationStep[], board as unknown as BoardApi, registry);
 
     // The reels land on the pre-chain board, each round's payout is read
-    // out before its scroll, and each scroll re-syncs the board it settled
-    // onto — the whole sequence, by content.
+    // out and its paid cells pop before its scroll, and each scroll
+    // re-syncs the board it settled onto — the whole sequence, by content.
     expect(board.calls).toEqual([
       `spinTo:${JSON.stringify(DATA.grid)}`,
       'revealWins:0.5',
+      `playState:pop:${JSON.stringify(DATA.reel_steps[0].winning)}`,
       `refill:${JSON.stringify(DATA.reel_steps[0].settled)}`,
       'revealWins:1.25',
+      `playState:pop:${JSON.stringify(DATA.reel_steps[1].winning)}`,
       `refill:${JSON.stringify(DATA.reel_steps[1].settled)}`,
     ]);
   });

@@ -15,6 +15,19 @@
  * proved unreliable once source and target sit in different React
  * subtrees (measured: no `symbols.yml` write followed), so this file
  * dispatches directly on the target element instead, iframe or not.
+ *
+ * The last two cases are the symbol-scenes slice's own, and they are about
+ * the running game rather than the Symbols tab:
+ *
+ *  - **A cell scene.** The example's symbol `'6'` no longer draws an
+ *    `image`: its `static` is `{ type: scene, props: { scene: orb } }`, and
+ *    `scenes/orb.scene.yml` is mounted as a PRIVATE copy for each cell that
+ *    lands a `'6'`, with its `text` bound to `'$cell.multiplier'`.
+ *  - **A named state.** That symbol also declares a `pop` state, and the
+ *    project's own `reel-step` mechanic names it in the plan it emits
+ *    (`{ kind: 'playState', cells, state: 'pop', wait: true }`, after each
+ *    round's `revealWins`) — so the plan the game actually ran carries a
+ *    state this engine knows nothing about, named by a project's plugin.
  */
 import { readFileSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
@@ -183,4 +196,119 @@ test('the Preview draws a symbol sprite after a spin, and Properties shows src a
   const src = right.getByLabel('image path, project-relative');
   await expect(src).toHaveJSProperty('tagName', 'SELECT');
   await expect(src).toHaveValue('assets/symbols/1.png');
+});
+
+/** The live board as `__e8.symbols()` reads it — `[col][row]`, `null` for an empty cell. */
+type Board = (string | null)[][];
+
+/**
+ * Spins the preview until the board shows `id` somewhere, and answers the
+ * whole board. `'6'` carries the heaviest reel weight the example's math
+ * has (30 of 105 — `game/script.spin`'s `SYM_W`), so a single spin puts one
+ * in fifteen cells about 99 % of the time: the loop is here for the other
+ * one per cent, not as a search.
+ */
+async function boardShowing(frame: Frame, id: string): Promise<Board> {
+  for (let attempt = 0; attempt < 5; attempt += 1) {
+    expect(await frame.evaluate(() => (window as any).__e8.spin())).toEqual({ out: 'next' });
+    const board = (await frame.evaluate(() => (window as any).__e8.symbols())) as Board;
+    if (board.some((col) => col.includes(id))) return board;
+  }
+  throw new Error(`no "${id}" landed in five spins — the math or symbols.yml regressed`);
+}
+
+/**
+ * The first cell the board shows `id` at — or, with `match: false`, the
+ * first showing some OTHER symbol. An empty cell is neither: it has no view
+ * at all, so it would satisfy the "no text node here" assertion below for
+ * entirely the wrong reason.
+ */
+function cellOf(board: Board, id: string, match = true): [number, number] {
+  for (let col = 0; col < board.length; col += 1)
+    for (let row = 0; row < board[col].length; row += 1) {
+      const cell = board[col][row];
+      if (cell !== null && (cell === id) === match) return [col, row];
+    }
+  throw new Error(`no cell ${match ? 'showing' : 'other than'} "${id}" on this board`);
+}
+
+/** The composition screen's preview, booted to `ready` — `text.spec.ts`'s `readyFrame`. */
+async function readyPreview(page: Page): Promise<Frame> {
+  await page.goto(`${IDE_URL}#/doc/composition`);
+  const frame = await frameOf(page, PREVIEW);
+  await expect
+    .poll(() => frame.locator('#status').textContent(), { timeout: 20_000 })
+    .toBe('ready');
+  return frame;
+}
+
+test("a symbol whose static state is a cell scene draws that document in its cells, bindings and all", async ({
+  page,
+}) => {
+  const frame = await readyPreview(page);
+  const board = await boardShowing(frame, '6');
+  const orb = cellOf(board, '6');
+  const plain = cellOf(board, '6', false);
+
+  // What the copy actually is: `orb.scene.yml`'s first node is its `image`,
+  // and `cellArt` walks first-children, so this reads `Sprite` — the same
+  // word a plain `image` state gives. It is asserted because the art really
+  // being on screen is half of what "the document mounted" means, not
+  // because it tells the two apart. The line below does that.
+  expect(
+    await frame.evaluate(([c, r]) => (window as any).__e8.cellArt(c, r), orb),
+  ).toMatch(/Sprite$/);
+
+  // The other half, and the half that only a cell scene can produce: a text
+  // node inside a CELL. It reads empty, and that is the honest answer rather
+  // than a missing one — `first-slot`'s math hands its board over as
+  // `[[int]]`, so a cell's data is `{ symbol }` and nothing else, and
+  // `'$cell.multiplier'` therefore stands at its prop's empty value
+  // (`cellProps`, `@energy8engine/scenes`) instead of failing the schema.
+  // A game whose math carries a per-cell figure gets the figure here; this
+  // one proves the node mounted, bound and resolvable.
+  expect(await frame.evaluate(([c, r]) => (window as any).__e8.cellText(c, r), orb)).toBe('');
+  // And it came from the document, not from the board's own furniture: a
+  // cell of any other symbol has no text node in it at all.
+  expect(
+    await frame.evaluate(([c, r]) => (window as any).__e8.cellText(c, r), plain),
+  ).toBeNull();
+});
+
+test("a mechanic names a symbol's own state, and the plan the game ran carries it", async ({
+  page,
+}) => {
+  // `playState` only enters the plan for a round that PAID, and the
+  // example's math pays roughly one spin in seven — so this is a search,
+  // and it gets the same budget and attempt count `reel-step.spec.ts`'s own
+  // `winUnder` was measured to need (~2 s a spin, 14-25 % hit rate).
+  test.setTimeout(150_000);
+  const frame = await readyPreview(page);
+
+  // This project binds `base_game` to its own `reel-step` plugin in
+  // `e8.patch.yml`, and that plugin is what names `pop`. Read first, so a
+  // failure below is about the plan rather than about the binding.
+  await expect
+    .poll(() => frame.evaluate(() => (window as any).__e8.bound('base_game')), {
+      timeout: 20_000,
+    })
+    .toBe('reel-step');
+
+  for (let attempt = 0; attempt < 40; attempt += 1) {
+    // The spin completing at all is half the case: `wait: true` means the
+    // plan is held while every named cell plays its state, so a state that
+    // never resolved would hang `present` and fail here rather than later.
+    expect(await frame.evaluate(() => (window as any).__e8.spin())).toEqual({ out: 'next' });
+    const spins = (await frame.evaluate(() => (window as any).__e8.spins())) as {
+      plan: { kind: string; state?: string; cells?: unknown[]; wait?: boolean }[];
+    }[];
+    const played = spins.at(-1)!.plan.filter((step) => step.kind === 'playState');
+    if (played.length === 0) continue;
+    for (const step of played) {
+      expect(step).toMatchObject({ state: 'pop', wait: true });
+      expect(step.cells!.length).toBeGreaterThan(0);
+    }
+    return;
+  }
+  throw new Error('no paying spin in 40 attempts — the math or the reel-step mechanic regressed');
 });

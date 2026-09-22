@@ -286,21 +286,31 @@ test("the plan under each binding, step by step, against the spin's own data", a
     });
 
     // reel-step: nothing is removed and nothing refills. Each round pays
-    // its winning cells and then every reel SCROLLS DOWN by its own count
-    // of them — the distances are the step, which is why this could not be
-    // said with `remove` + `refill` and why the plugin brings a step kind
-    // of its own. `index` is on the step because the handler is given one
-    // step at a time with no idea where in the chain it is.
+    // its winning cells, those cells then play the `pop` state the
+    // project's own `symbols.yml` gives them, and only then does every reel
+    // SCROLL DOWN by its own count of them — the distances are the step,
+    // which is why this could not be said with `remove` + `refill` and why
+    // the plugin brings a step kind of its own. `index` is on the step
+    // because the handler is given one step at a time with no idea where in
+    // the chain it is.
     const rs = reelStep.spin.result.data;
     expect(rs.reel_steps.length).toBeGreaterThan(0);
-    expect(reelStep.spin.plan).toHaveLength(1 + rs.reel_steps.length * 2);
+    expect(reelStep.spin.plan).toHaveLength(1 + rs.reel_steps.length * 3);
     rs.reel_steps.forEach((round, i) => {
-      expect(reelStep.spin.plan[1 + i * 2]).toEqual({
+      expect(reelStep.spin.plan[1 + i * 3]).toEqual({
         kind: 'revealWins',
         total: round.win,
         lines: [],
       });
-      expect(reelStep.spin.plan[2 + i * 2]).toEqual({
+      // `playState` is a KNOWN kind, not this plugin's — the mechanic only
+      // names which state, on which cells (the ones the reveal just paid).
+      expect(reelStep.spin.plan[2 + i * 3]).toEqual({
+        kind: 'playState',
+        cells: round.winning,
+        state: 'pop',
+        wait: true,
+      });
+      expect(reelStep.spin.plan[3 + i * 3]).toEqual({
         kind: 'reelStep',
         winning: round.winning,
         shifts: round.shifts,

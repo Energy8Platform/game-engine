@@ -6,11 +6,15 @@ is the delta on top of it.
 
 ## `scenes/`
 
-Scene documents live here, one file per scene: `scenes/base_game.scene.yml`
-and `scenes/big_win.scene.yml`. `flow.yml`'s `show` node puts `base_game` on
-screen at boot — `base_game`'s board is a `reels` node, and `big_win` is a
-nested scene it can show. `scenes1`'s row (below) sets the design resolution
-these documents are laid out against.
+Scene documents live here, one file per scene: `scenes/base_game.scene.yml`,
+`scenes/big_win.scene.yml` and `scenes/orb.scene.yml`. `flow.yml`'s `show`
+node puts `base_game` on screen at boot — `base_game`'s board is a `reels`
+node, and `big_win` is a nested scene it can show. `orb` is neither: it is a
+CELL scene, named by symbol `6`'s `static` state in `symbols.yml`, so a
+private copy of it is mounted inside every cell that lands a `6` and its
+`'$cell.multiplier'` text resolves against that cell's own data.
+`scenes1`'s row (below) sets the design resolution these documents are laid
+out against.
 
 ## `flow.yml`
 
@@ -75,7 +79,16 @@ own nodes.
 The symbol art, one entry per id: a `static` node (`image`, onto
 `assets/symbols/<id>.png` — six placeholder shapes) and, on `1`, a `win`
 node (`spritesheet`, onto `assets/coin.json`, `loop: false`) that plays once
-on a win. `e8-base`'s `symbols1` row (`@energy8engine/symbols`) reads it
+on a win. `6` is the exception and shows the other two things a state can
+be: its `static` is `{ type: scene, props: { scene: orb } }` — a whole
+scene document mounted as a private copy inside every cell that lands a
+`6`, whose `text` reads `'$cell.multiplier'` off that cell's own data — and
+under `states:` it declares `pop`, a NAMED state. A named state is not one
+of the three built-ins and nothing plays it on its own: a mechanic asks for
+it by name, with a `{ kind: 'playState', cells, state: 'pop' }` step. The
+`classic` mechanic this template binds never does, so `pop` sits there as
+the shape to copy.
+`e8-base`'s `symbols1` row (`@energy8engine/symbols`) reads it
 from the host (`GET /api/symbols`) and is what actually supplies `reels1`'s
 `resolve` — see the patch section below for what that replaced. The IDE's
 Symbols document (`PUT /api/symbols`) is the editor for this file; ids come
@@ -132,7 +145,8 @@ there is a real image on the board to select, not just the reel grid; next to
 it, a `coin` node (`spritesheet`, `assets/coin.json` + `assets/coin.png`)
 animates through four frames of a spinning disc, from the `media1` row. A
 `win` node after `coin` is a `text` node, empty until the flow's `show_win`
-node (kind `prop`) writes `$result.win` into it after every spin.
+node (kind `count`) runs it up to `$result.winAmount` over 400 ms after
+every spin, writing the exact credited amount last, as currency.
 
 ## The window, pins and portrait
 

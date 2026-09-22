@@ -31,7 +31,7 @@ function walk(dir: string): string[] {
 }
 
 describe('engine/templates/slot-basic', () => {
-  it('carries main.ts, env.d.ts, script.spin, e8.profile.yml, flow.yml and the two scene files byte-for-byte from first-slot', () => {
+  it('carries main.ts, env.d.ts, script.spin, e8.profile.yml, flow.yml and the three scene files byte-for-byte from first-slot', () => {
     for (const rel of [
       '.gitignore',
       'src/main.ts',
@@ -42,6 +42,7 @@ describe('engine/templates/slot-basic', () => {
       'flow.yml',
       'scenes/base_game.scene.yml',
       'scenes/big_win.scene.yml',
+      'scenes/orb.scene.yml',
       'editor.html',
       'assets/logo.png',
       'assets/coin.json',

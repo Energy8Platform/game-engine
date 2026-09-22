@@ -34,7 +34,24 @@ const DATA = {
 
 describe('reel-step: one spin result becomes a presentation plan', () => {
   it('lands the reels, then walks the steps', () => {
-    expect(plan(DATA).map((s) => s.kind)).toEqual(['spinTo', 'revealWins', 'reelStep']);
+    expect(plan(DATA).map((s) => s.kind)).toEqual([
+      'spinTo',
+      'revealWins',
+      'playState',
+      'reelStep',
+    ]);
+  });
+
+  it('the paid cells pop, by name, before the reels move', () => {
+    // `playState` is a built-in kind, not this plugin's: the board plays
+    // the named state on exactly the cells the reveal just paid, and holds
+    // the plan while it does — see `@energy8engine/contracts`.
+    expect(plan(DATA)).toContainEqual({
+      kind: 'playState',
+      cells: DATA.reel_steps[0].winning,
+      state: 'pop',
+      wait: true,
+    });
   });
 
   it('the reelStep step carries the shifts and the settled board', () => {
@@ -138,8 +155,10 @@ describe('reel-step: what each step actually carries', () => {
     expect(chainSteps()).toEqual([
       { kind: 'spinTo', board: CHAIN.grid },
       { kind: 'revealWins', total: 0.5, lines: [] },
+      { kind: 'playState', cells: CHAIN.reel_steps[0].winning, state: 'pop', wait: true },
       expect.objectContaining({ kind: 'reelStep', index: 0 }),
       { kind: 'revealWins', total: 1.25, lines: [] },
+      { kind: 'playState', cells: CHAIN.reel_steps[1].winning, state: 'pop', wait: true },
       expect.objectContaining({ kind: 'reelStep', index: 1 }),
     ]);
   });

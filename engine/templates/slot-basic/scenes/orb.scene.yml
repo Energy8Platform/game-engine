@@ -1,0 +1,8 @@
+id: orb
+nodes:
+  - id: art
+    type: image
+    props: { src: assets/symbols/6.png }
+  - id: value
+    type: text
+    props: { text: '$cell.multiplier', size: 28, fill: '#ffffff', anchor: 0.5, y: 34 }
