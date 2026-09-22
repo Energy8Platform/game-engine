@@ -180,14 +180,14 @@ describe('FlowProperties', () => {
     act(() => h.ctx.flow.select('spin'));
     renderSide(h.ctx);
 
-    const action = screen.getByLabelText('action name, or `$path` to read a var') as HTMLInputElement;
+    const action = screen.getByLabelText('action name: a literal, `$expr`, or a `{…}` template') as HTMLInputElement;
     expect(action.tagName).toBe('INPUT');
     expect(action.type).toBe('text');
     expect(action.readOnly).toBe(false);
     expect(action.value).toBe('spin'); // the bare node's props carry no `action` — the schema default shows
 
     const betLevel = screen.getByLabelText(
-      'bet level (a number), or `$path` to read a var',
+      'bet level (a number): a literal, `$expr`, or a `{…}` template',
     ) as HTMLInputElement;
     expect(betLevel.tagName).toBe('INPUT');
     expect(betLevel.type).toBe('text');
@@ -235,7 +235,7 @@ describe('FlowProperties', () => {
     renderSide(h.ctx);
 
     const target = screen.getByLabelText(
-      '`<scene>/<node>` (a literal), or `$path` to read a var',
+      '`<scene>/<node>`: a literal, `$expr`, or a `{…}` template',
     ) as HTMLSelectElement;
     expect(target.tagName).toBe('SELECT');
     expect([...target.options].map((o) => o.value)).toEqual([
@@ -251,7 +251,7 @@ describe('FlowProperties', () => {
     expect(propName.readOnly).toBe(false);
 
     const value = screen.getByLabelText(
-      "literal, coerced by the prop's schema type (number/boolean/string), or `$path` to read a var",
+      "literal, coerced by the prop's schema type (number/boolean/string), or `$expr` / a `{…}` template",
     ) as HTMLInputElement;
     expect(value.tagName).toBe('INPUT');
     expect(value.type).toBe('text');
