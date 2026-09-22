@@ -530,8 +530,9 @@ const prop: FlowNodeKind<{ target: string; prop: string; value: string }> = {
       // own Number()/boolean coercion below for everything EXCEPT a
       // `string` target — `Schema.string()` throws outright on anything
       // but a JS string, and `setProps` would refuse the whole patch (a
-      // `$result.win` float into a `text` node's `text` prop, the
-      // example's own `show_win` node, is exactly this case). Only a
+      // `$result.win` float into a `text` node's `text` prop — what the
+      // example's `show_win` did before it became a `count` node — is
+      // exactly this case). Only a
       // number/boolean is stringified; an object or `null` is left for
       // `setProps` to refuse, same as before this branch existed. A
       // template is always a string — a number prop refuses it there too.
