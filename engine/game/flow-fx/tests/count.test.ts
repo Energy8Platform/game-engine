@@ -98,6 +98,22 @@ describe('createCount', () => {
     expect(scenes.setProps).toHaveBeenCalledWith({ scene: 'base_game', node: 'win' }, { text: '$4.60' });
   });
 
+  it('ms 0 writes the start and the exact end at once, taking no tick', async () => {
+    const { clock, advance } = fakeClock();
+    const scenes = fakeScenes();
+    const { rc } = runCtx({ scenes });
+    Object.assign(rc.vars, CURRENCY);
+    const result = await createCount({ clock }).run!(
+      props({ to: '4.604', ms: 0, format: 'currency' }),
+      rc,
+    );
+    expect(result).toEqual({ out: 'next' });
+    expect(written(scenes)).toEqual(['$0.00', '$4.60']);
+    // Nothing subscribed to the clock: a later frame writes nothing more.
+    advance(1000);
+    expect(written(scenes)).toEqual(['$0.00', '$4.60']);
+  });
+
   it('an explicit `from` starts there; `$expr` resolves on both ends', async () => {
     const { clock, advance } = fakeClock();
     const scenes = fakeScenes();
