@@ -6,7 +6,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { Context } from 'cordis';
 import { Container, Sprite, Text, Texture, TextureSource } from 'pixi.js';
 import type { SymbolsDoc } from '@energy8engine/contracts';
-import { createNodeTypes, image } from '@energy8engine/scenes';
+import { createNodeTypes, image, type ScenesService } from '@energy8engine/scenes';
 import { spritesheet } from '@energy8engine/node-media';
 import * as runtime from '../src/runtime';
 import type { SymbolsService } from '../src/runtime';
@@ -273,5 +273,60 @@ describe('symbols row against the real reels board', () => {
     await settle();
     expect(update).toHaveBeenCalledTimes(6);
     board.destroy();
+  });
+});
+
+/**
+ * Slice 30: a def's states are the three built-ins plus every key of
+ * `states`, and one of them may be a `scene` — whose assets are the
+ * document's, which only the scenes runtime can name.
+ */
+describe('named and scene states', () => {
+  const doc30: SymbolsDoc = {
+    version: 1,
+    symbols: [
+      {
+        id: '3',
+        static: { type: 'image', props: { src: 'assets/symbols/3.png' } },
+        states: {
+          death: { type: 'image', props: { src: 'assets/death.png' } },
+          celebrate: { type: 'scene', props: { scene: 'orb' } },
+        },
+      },
+    ],
+  };
+
+  it('preloads every named state, a scene state through scenes.assetsOf', async () => {
+    const { ctx, symbols, loader } = await boot();
+    await symbols.ready;
+    const assetsOf = vi.fn((id: string) => (id === 'orb' ? ['assets/orb.png'] : []));
+    ctx.provide('scenes', { assetsOf } as unknown as ScenesService);
+    symbols.replace(doc30);
+    await settle();
+    expect(assetsOf).toHaveBeenCalledWith('orb');
+    expect(loader.load).toHaveBeenCalledWith([
+      'assets/symbols/3.png',
+      'assets/death.png',
+      'assets/orb.png',
+    ]);
+  });
+
+  it('without a scenes runtime the other states still load', async () => {
+    const { symbols, loader, report } = await boot();
+    await symbols.ready;
+    symbols.replace(doc30);
+    await settle();
+    expect(loader.load).toHaveBeenCalledWith(['assets/symbols/3.png', 'assets/death.png']);
+    expect(report).not.toHaveBeenCalled();
+  });
+
+  it('preview pins a named state', async () => {
+    const { symbols } = await boot();
+    await symbols.ready;
+    symbols.replace(doc30);
+    await settle();
+    const view = symbols.preview('3', 'death', { width: 64, height: 64 })!;
+    expect(wrapperOf(view, 'death')).toBeDefined();
+    expect(symbols.preview('3', 'nope', { width: 64, height: 64 })).toBeNull();
   });
 });

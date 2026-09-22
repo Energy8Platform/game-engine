@@ -38,7 +38,13 @@ import {
   TextureSource,
 } from 'pixi.js';
 import type { SymbolDef } from '@energy8engine/contracts';
-import { createNodeTypes, image, text, type NodeType } from '@energy8engine/scenes';
+import {
+  createNodeTypes,
+  image,
+  text,
+  type NodeType,
+  type ScenesService,
+} from '@energy8engine/scenes';
 import { spritesheet } from '@energy8engine/node-media';
 import Schema from 'schemastery';
 import { createSymbolHandle, type ViewDeps } from '../src/view';
@@ -226,7 +232,7 @@ describe('createSymbolHandle', () => {
     expect(rest.visible).toBe(true);
   });
 
-  it('playWin resolves on view.destroy() even when the win type\'s once never settles', async () => {
+  it("playWin resolves on view.destroy() even when the win type's once never settles", async () => {
     const { deps, nodeTypes } = setup();
     const stuck: NodeType = {
       type: 'stuck',
@@ -488,5 +494,201 @@ describe('$cell bindings', () => {
     expect(wrapperOf(h.view, 'static')!.children[0].x).toBe(0);
     h.view.bind({ symbol: '1', multiplier: 12 });
     expect(wrapperOf(h.view, 'static')!.children[0].x).toBe(12);
+  });
+});
+
+/**
+ * Slice 30: a state's node may be `{ type: scene }` — a private copy of a
+ * scene document mounted for THIS cell (`scenes.mountCell`), which owns
+ * the binding, the `once` and its own teardown. The fake below is that
+ * service: one `CellMount` per document id, each a spy whose `once` the
+ * test settles by hand.
+ */
+function cellMount(label = 'orb') {
+  const view = new Container();
+  view.label = label;
+  view.addChild(new Graphics().rect(-8, -8, 16, 16).fill(0xffffff));
+  let settle: (() => void) | undefined;
+  return {
+    view,
+    bind: vi.fn(),
+    once: vi.fn(() => new Promise<void>((r) => (settle = r))),
+    destroy: vi.fn(() => view.destroy({ children: true })),
+    settle: () => settle!(),
+  };
+}
+
+function withScenes(ctx: Context, mounts: Record<string, ReturnType<typeof cellMount>>) {
+  const mountCell = vi.fn((id: string, _data?: Record<string, unknown>) => mounts[id] ?? null);
+  ctx.provide('scenes', { mountCell } as unknown as ScenesService);
+  return mountCell;
+}
+
+describe('a scene state', () => {
+  it('mounts the document as a cell copy, fits it, and binds through it', () => {
+    const { ctx, deps } = setup();
+    const orb = cellMount();
+    const mountCell = withScenes(ctx, { orb });
+    const h = createSymbolHandle('orb', deps);
+    h.apply({ id: 'orb', static: { type: 'scene', props: { scene: 'orb' } } });
+    h.resize(SIZE);
+    expect(mountCell).toHaveBeenCalledWith('orb', undefined);
+    const w = wrapperOf(h.view, 'static')!;
+    expect(w.children).toEqual([orb.view]);
+    expect(w.scale.x).toBeCloseTo(6); // 16 px of art in a 96 px cell
+    h.view.bind({ symbol: 'orb', mv: 4 });
+    expect(orb.bind).toHaveBeenCalledWith({ symbol: 'orb', mv: 4 });
+  });
+
+  it('mounted after a bind, the copy is built with that cell data', () => {
+    const { ctx, deps } = setup();
+    const coin = cellMount('coin');
+    const mountCell = withScenes(ctx, { coin });
+    const h = createSymbolHandle('orb', deps);
+    h.apply({ id: 'orb', static: STATIC, win: { type: 'scene', props: { scene: 'coin' } } });
+    h.view.bind({ symbol: 'orb', mv: 3 });
+    void h.view.playWin!();
+    expect(mountCell).toHaveBeenCalledWith('coin', { symbol: 'orb', mv: 3 });
+  });
+
+  it("playWin on a scene win awaits the copy's once, then destroys it and restores the rest", async () => {
+    const { ctx, deps } = setup();
+    const coin = cellMount('coin');
+    withScenes(ctx, { coin });
+    const h = createSymbolHandle('1', deps);
+    h.apply({ id: '1', static: STATIC, win: { type: 'scene', props: { scene: 'coin' } } });
+    h.resize(SIZE);
+    const rest = wrapperOf(h.view, 'static')!;
+    const p = h.view.playWin!();
+    expect(rest.visible).toBe(false);
+    expect(coin.once).toHaveBeenCalledTimes(1);
+    let done = false;
+    void p.then(() => {
+      done = true;
+    });
+    await Promise.resolve();
+    expect(done).toBe(false);
+    coin.settle();
+    await p;
+    expect(coin.destroy).toHaveBeenCalledTimes(1);
+    expect(wrapperOf(h.view, 'win')).toBeUndefined();
+    expect(rest.visible).toBe(true);
+  });
+
+  it('without a scenes runtime, or with a document nothing declares, reports once and draws nothing', () => {
+    const bare = setup();
+    const h = createSymbolHandle('1', bare.deps);
+    h.apply({ id: '1', static: { type: 'scene', props: { scene: 'orb' } } });
+    expect(wrapperOf(h.view, 'static')!.children).toHaveLength(0);
+    expect(bare.report).toHaveBeenCalledTimes(1);
+    expect(bare.report.mock.calls[0][0]).toBe('symbols/1/static');
+
+    const known = setup();
+    withScenes(known.ctx, {});
+    const absent = createSymbolHandle('1', known.deps);
+    absent.apply({ id: '1', static: { type: 'scene', props: { scene: 'orb' } } });
+    expect(wrapperOf(absent.view, 'static')!.children).toHaveLength(0);
+    expect(known.report).toHaveBeenCalledTimes(1);
+    expect(known.report.mock.calls[0][0]).toBe('symbols/1/static');
+    expect(known.report.mock.calls[0][1]).toContain('orb');
+  });
+
+  it('destroying the handle destroys the copy', () => {
+    const { ctx, deps } = setup();
+    const orb = cellMount();
+    withScenes(ctx, { orb });
+    const h = createSymbolHandle('orb', deps);
+    h.apply({ id: 'orb', static: { type: 'scene', props: { scene: 'orb' } } });
+    h.destroy();
+    expect(orb.destroy).toHaveBeenCalledTimes(1);
+    expect(orb.view.destroyed).toBe(true);
+  });
+});
+
+/** Slice 30: `playWin` generalised — any state of `states` can be played. */
+describe('playState', () => {
+  const withStates: SymbolDef = {
+    id: '1',
+    static: STATIC,
+    states: { death: WIN, celebrate: WIN },
+  };
+  const spriteOf = (view: Container, state: string) =>
+    wrapperOf(view, state)!.children[0] as AnimatedSprite;
+
+  it('mounts a named state over the rest, awaits its once, then restores', async () => {
+    const { deps } = setup();
+    const h = createSymbolHandle('1', deps);
+    h.apply(withStates);
+    h.resize(SIZE);
+    const rest = wrapperOf(h.view, 'static')!;
+    const p = h.view.playState!('death');
+    expect(rest.visible).toBe(false);
+    spriteOf(h.view, 'death').onComplete!();
+    await p;
+    expect(wrapperOf(h.view, 'death')).toBeUndefined();
+    expect(rest.visible).toBe(true);
+  });
+
+  it('a second call replaces the state in flight: the first resolves and its wrapper is gone', async () => {
+    const { deps } = setup();
+    const h = createSymbolHandle('1', deps);
+    h.apply(withStates);
+    h.resize(SIZE);
+    const rest = wrapperOf(h.view, 'static')!;
+    let first = false;
+    const p1 = h.view.playState!('death').then(() => {
+      first = true;
+    });
+    const death = wrapperOf(h.view, 'death')!;
+    const p2 = h.view.playState!('celebrate');
+    expect(death.destroyed).toBe(true);
+    expect(wrapperOf(h.view, 'death')).toBeUndefined();
+    await p1;
+    expect(first).toBe(true);
+    // The replacement is playing, and the rest wrapper is still hidden behind it.
+    expect(wrapperOf(h.view, 'celebrate')).toBeDefined();
+    expect(rest.visible).toBe(false);
+    spriteOf(h.view, 'celebrate').onComplete!();
+    await p2;
+    expect(wrapperOf(h.view, 'celebrate')).toBeUndefined();
+    expect(rest.visible).toBe(true);
+  });
+
+  it('a state the symbol does not have resolves at once — one info per state, not an error', async () => {
+    const { deps, report } = setup();
+    const h = createSymbolHandle('1', deps);
+    h.apply({ id: '1', static: STATIC });
+    await h.view.playState!('death');
+    await h.view.playState!('death');
+    expect(report).toHaveBeenCalledTimes(1);
+    expect(report).toHaveBeenCalledWith('symbols/1', 'no state "death"', 'info');
+    await h.view.playState!('nope');
+    expect(report).toHaveBeenCalledTimes(2);
+    expect(h.view.children).toEqual([wrapperOf(h.view, 'static')]);
+  });
+
+  it('playWin is playState("win"), and both are gone with no def or a pinned state', () => {
+    const { deps } = setup();
+    const h = createSymbolHandle('1', deps);
+    h.apply({ id: '1', static: STATIC });
+    expect(h.view.playState).toBeTypeOf('function');
+    expect('playWin' in h.view).toBe(false);
+    h.apply({ id: '1', static: STATIC, win: WIN });
+    expect(h.view.playWin).toBeTypeOf('function');
+    h.apply(undefined);
+    expect('playState' in h.view).toBe(false);
+    expect('playWin' in h.view).toBe(false);
+    const only = createSymbolHandle('1', deps, { only: 'static' });
+    only.apply({ id: '1', static: STATIC, win: WIN });
+    expect('playState' in only.view).toBe(false);
+  });
+
+  it('pins a named state as the resting one for a preview', () => {
+    const { deps } = setup();
+    const h = createSymbolHandle('1', deps, { only: 'death' });
+    h.apply(withStates);
+    // The named state's own node, not the static one under its label.
+    expect(wrapperOf(h.view, 'death')!.children[0]).toBeInstanceOf(AnimatedSprite);
+    expect(wrapperOf(h.view, 'static')).toBeUndefined();
   });
 });

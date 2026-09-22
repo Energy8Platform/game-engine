@@ -2,26 +2,37 @@
  * One symbol's `SymbolView` — the legacy contract a reel board's
  * `SymbolCell` drives (`@energy8platform/game-engine/slot`): a `Container`
  * centred on `(0, 0)`, `resize`d to the cell, `playWin`'d on a win,
- * destroyed on every `setData`. Built here out of `symbols.yml`'s
- * `static`/`idle`/`win` nodes through `@energy8engine/scenes`' node
- * types, one *wrapper* per state: a `Container` holding the type's view,
- * scaled and pivoted so the view's local bounds fill the cell (`fit:
- * contain`) or just sit centred (`fit: none`).
+ * destroyed on every `setData`. Built here out of `symbols.yml`'s states
+ * — `static`/`idle`/`win` and every name under `states` — through
+ * `@energy8engine/scenes`' node types, one *wrapper* per state: a
+ * `Container` holding the type's view, scaled and pivoted so the view's
+ * local bounds fill the cell (`fit: contain`) or just sit centred (`fit:
+ * none`).
+ *
+ * A state whose node is `{ type: scene }` is not mounted by a node type
+ * at all: it is a whole document mounted as a PRIVATE copy for this cell
+ * (`scenes.mountCell`), which owns the binding, the `once` and its own
+ * teardown. Without a scenes runtime, or for a document nothing declares,
+ * the wrapper stays empty and says so once — as an unknown node type does.
  *
  * The view shows ONE wrapper at rest (`idle ?? static`, or the `only`
- * state a preview pins). `playWin` — defined only when the def has `win`
- * and no `only`, so the cell's own scale pop stands in otherwise — hides
- * the rest wrapper, mounts `win`, awaits the type's `once` (600 ms for a
- * type without one), unmounts `win` and shows the rest wrapper again.
- * `showStatic` tears a `win` in flight down early; the `once` it was
- * awaiting then resolves into a no-op (the wrapper it would restore is
- * not the current one).
+ * state a preview pins). `playState(name)` — `view.playState`, with
+ * `playWin` as its `'win'` shorthand where the def has one, so the cell's
+ * own scale pop stands in otherwise — hides the rest wrapper, mounts the
+ * state, awaits its `once` (the copy's for a scene, 600 ms for a type
+ * without one), unmounts it and shows the rest wrapper again. A state
+ * already playing is replaced rather than queued, and a state the def
+ * does not declare resolves at once against one `info`: a mechanic names
+ * `death` for every loser, and not every symbol dies. `showStatic` tears
+ * a state in flight down early; the `once` it was awaiting then resolves
+ * into a no-op (the wrapper it would restore is not the current one).
  *
  * A state's props may read the data of the cell the symbol landed in:
  * `'$cell.<field>'` (an orb's `text: '$cell.multiplier'`). `bind(data)` —
  * the reels board calls it on every seated cell — resolves those against
- * that data and re-runs the type's `update`; until then each stands at its
- * prop's empty, so no type and no schema ever sees the raw string.
+ * that data (`cellProps`) and re-runs the type's `update`, or hands the
+ * data to the cell copy; until then each stands at its prop's empty, so
+ * no type and no schema ever sees the raw string.
  *
  * Every call into a node type's `update`/`once`/`unmount` is guarded:
  * slice 20's lesson — a throwing type is one report per wrapper (until a
@@ -29,15 +40,20 @@
  */
 import type { Context } from 'cordis';
 import { Container } from 'pixi.js';
-import type { SymbolDef, SymbolNode, SymbolState } from '@energy8engine/contracts';
+import {
+  stateNode,
+  type Severity,
+  type SymbolDef,
+  type SymbolNode,
+  type SymbolState,
+} from '@energy8engine/contracts';
 import {
   applyCommon,
-  cellField,
-  COMMON,
-  emptyProp,
-  isCellBinding,
+  cellProps,
+  type CellMount,
   type NodeType,
   type NodeTypesService,
+  type ScenesService,
 } from '@energy8engine/scenes';
 import type { SymbolView } from '@energy8platform/game-engine/slot';
 import { fallbackBox } from './fallback';
@@ -46,19 +62,29 @@ export interface ViewDeps {
   ctx: Context;
   /** Looked up per mount, not once: the registry may not exist yet when the row applies. */
   nodeTypes(): NodeTypesService | undefined;
-  report(where: string, message: string): void;
+  /** `'error'` when absent; a state the def simply has not got is an `'info'`. */
+  report(where: string, message: string, severity?: Severity): void;
 }
 
-/** The legacy view plus `bind`: what the reels board calls on every cell it has just seated. */
-export type BoundSymbolView = SymbolView & { bind(data: Record<string, unknown>): void };
+/** The legacy view plus `bind` and `playState`: what the reels board calls on every cell it has just seated. */
+export type BoundSymbolView = SymbolView & {
+  bind(data: Record<string, unknown>): void;
+  /** Plays any state of the def (`playWin` generalised); absent for a preview's pinned state and for a symbol with no def. */
+  playState?(state: SymbolState): Promise<void>;
+};
 
 export interface SymbolHandle {
   readonly id: string;
-  /** Centred `Container`; `playWin` present iff the def has `win` (and no `only`). */
+  /** Centred `Container`; `playState` present iff there is a def (and no `only`), `playWin` iff it has `win`. */
   readonly view: BoundSymbolView;
   /** Remounts the wrappers unless `def` is JSON-equal to the current one; `undefined` → the fallback box. */
   apply(def: SymbolDef | undefined): void;
-  /** `type.update` on the rest wrapper, then fit — after an asset load. */
+  /**
+   * `type.update` on the rest wrapper, then fit — after an asset load. A
+   * `scene` state is skipped: a cell copy has no `refresh` of its own, so
+   * art that lands after it mounted reaches it only through a remount
+   * (the board's `repaint`, or the next `apply`).
+   */
   refresh(): void;
   /** Resolves every `$cell.<field>` prop against this cell's data; kept for a wrapper mounted later (a `win`). */
   bind(data: Record<string, unknown>): void;
@@ -75,62 +101,16 @@ interface Wrapper {
   props?: Record<string, unknown>;
   /** The state's props as written — re-resolved on every `bind`. */
   raw?: Record<string, unknown>;
-  /** `raw` holds at least one `$cell.<field>` string; nothing else is worth re-resolving. */
-  bound?: boolean;
+  /** A `scene` state: the private copy of the document, which owns its binding, `once` and teardown. */
+  cell?: CellMount;
+  /** The props that carried a `$cell.<field>` — the only ones a `bind` re-resolves. */
+  bound?: string[];
   /** Reported once; a remount rebuilds the wrapper and clears it. */
   failed?: boolean;
 }
 
 const DEFAULT_SIZE = { width: 96, height: 96 };
 const wait = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
-
-/** One prop's schema as `emptyProp` reads it: its `type`, and a union's `list` of literals. */
-type PropSchema = { type?: string; list?: { value?: unknown }[] };
-const dictOf = (schema: unknown): Record<string, PropSchema | undefined> =>
-  (schema as { dict?: Record<string, PropSchema> }).dict ?? {};
-
-/** A bound prop's value: the cell's field coerced to the prop's schema type — the way a flow's `prop` coerces. */
-function boundValue(field: unknown, entry?: PropSchema): unknown {
-  const type = entry?.type;
-  if (field === undefined || field === null) return emptyProp(entry);
-  if (type === 'number') {
-    const n = Number(field);
-    return Number.isNaN(n) ? 0 : n;
-  }
-  if (type === 'boolean') return typeof field === 'string' ? field === 'true' : Boolean(field);
-  return type === 'string' ? String(field) : field;
-}
-
-/**
- * The type's schema over a state's props, with every `$cell.<field>`
- * string resolved against `data` (its own prop's type when the type
- * declares it, `COMMON`'s otherwise — a `$cell.*` on `x` is a number too).
- * The schema never sees a binding: that prop's EMPTY stands in for the
- * validation, which is what makes a binding valid whatever the prop's type
- * (the host's `checkNode` does the same), and the resolved value — never
- * validated, like a flow's `$path` — is put back on top.
- */
-function resolveProps(
-  type: NodeType,
-  raw: Record<string, unknown>,
-  data?: Record<string, unknown>,
-): Record<string, unknown> {
-  const own = dictOf(type.schema);
-  const common = dictOf(COMMON);
-  const input: Record<string, unknown> = {};
-  const bound: Record<string, unknown> = {};
-  for (const [key, value] of Object.entries(raw)) {
-    if (!isCellBinding(value)) {
-      input[key] = value;
-      continue;
-    }
-    // The ENTRY, not its type name: a union's empty is its first literal (`text.align` → 'left').
-    const entry = own[key] ?? common[key];
-    input[key] = emptyProp(entry);
-    bound[key] = data ? boundValue(data[cellField(value)], entry) : input[key];
-  }
-  return { ...(type.schema(input) as Record<string, unknown>), ...bound };
-}
 
 export function createSymbolHandle(
   id: string,
@@ -145,8 +125,11 @@ export function createSymbolHandle(
   let def: SymbolDef | undefined;
   let json = '';
   let rest: Wrapper | null = null;
-  let win: Wrapper | null = null;
+  /** The state `playState` is running over `rest`, if any — a `win`, a `death`. */
+  let playing: Wrapper | null = null;
   let fallback: Container | null = null;
+  /** States already reported absent; cleared when a new def arrives — it may declare them. */
+  const noState = new Set<SymbolState>();
 
   const fail = (w: Wrapper, what: string, e: unknown) => {
     if (w.failed) return;
@@ -187,18 +170,48 @@ export function createSymbolHandle(
     fit(w);
   }
 
+  /**
+   * A `scene` state: the document mounted as a private copy for THIS cell,
+   * never through the `scene` node type — that one nests a document inside
+   * another document (`mountDoc`), with no cell to resolve against.
+   */
+  function mountCell(w: Wrapper, node: SymbolNode): void {
+    const where = `symbols/${id}/${w.state}`;
+    const scene = String(node.props.scene ?? '');
+    const scenes = deps.ctx.reflect.get('scenes', false) as ScenesService | undefined;
+    if (!scenes) {
+      deps.report(where, `no scenes runtime to mount the scene "${scene}"`);
+      return;
+    }
+    const mounted = scenes.mountCell(scene, cell);
+    if (!mounted) {
+      deps.report(where, `unknown scene "${scene}"`);
+      return;
+    }
+    w.cell = mounted;
+    w.child = mounted.view;
+    w.container.addChild(mounted.view);
+    fit(w);
+  }
+
   function mount(state: SymbolState, node: SymbolNode): Wrapper {
     const w: Wrapper = { state, container: new Container() };
     w.container.label = state;
+    if (node.type === 'scene') {
+      mountCell(w, node);
+      view.addChild(w.container);
+      return w;
+    }
     const type = deps.nodeTypes()?.get(node.type);
     if (!type) {
       deps.report(`symbols/${id}/${state}`, `unknown node type "${node.type}"`);
     } else {
       w.type = type;
       w.raw = node.props;
-      w.bound = Object.values(node.props).some(isCellBinding);
       try {
-        w.props = resolveProps(type, node.props, cell);
+        const resolved = cellProps(type, node.props, cell);
+        w.props = resolved.props;
+        w.bound = resolved.bound;
         w.child = type.mount(w.props, deps.ctx);
         applyCommon(w.child, w.props, type);
         w.container.addChild(w.child);
@@ -213,56 +226,73 @@ export function createSymbolHandle(
   }
 
   function unmount(w: Wrapper): void {
-    if (w.child) {
-      try {
-        w.type?.unmount?.(w.child);
-      } catch (e) {
-        fail(w, 'unmount', e);
-      }
+    try {
+      // The copy tears its own nodes down; a node type's view is the wrapper's to unmount.
+      if (w.cell) w.cell.destroy();
+      else if (w.child) w.type?.unmount?.(w.child);
+    } catch (e) {
+      fail(w, 'unmount', e);
     }
     w.container.destroy({ children: true });
   }
 
-  /** Tears down a `win` in flight; the awaited `once` finds `win !== w` and does nothing more. */
+  /** Tears down a state in flight; the awaited `once` finds `playing !== w` and does nothing more. */
   function showStatic(): void {
-    if (!win) return;
-    unmount(win);
-    win = null;
+    if (!playing) return;
+    unmount(playing);
+    playing = null;
     if (rest) rest.container.visible = true;
   }
 
-  async function playWin(): Promise<void> {
-    if (win || !def?.win) return;
+  async function playState(state: SymbolState): Promise<void> {
+    const node = def && stateNode(def, state);
+    if (!node) {
+      if (!noState.has(state)) {
+        noState.add(state);
+        // An `info`, not an error: a mechanic names `death` for every loser and not every symbol dies.
+        deps.report(`symbols/${id}`, `no state "${state}"`, 'info');
+      }
+      return;
+    }
+    // A state already playing is replaced, not queued — its own `once` is
+    // left to resolve (the wrapper's teardown settles a media type's) into
+    // the no-op below.
+    showStatic();
     if (rest) rest.container.visible = false;
-    const w = mount('win', def.win);
-    win = w;
+    const w = mount(state, node);
+    playing = w;
     // A node type's `once` that never settles (a stuck media load, a bug in a
     // custom type) must not hang the whole reveal step forever: raced against
     // the view's own pixi `'destroyed'` event (fired by `Container.destroy()`
     // — the same signal the handle's teardown listener below reacts to), so a
-    // cell torn down mid-win still lets this promise resolve.
+    // cell torn down mid-state still lets this promise resolve.
     let onDestroyed: (() => void) | undefined;
     const destroyed = new Promise<void>((resolve) => {
       onDestroyed = () => resolve();
       view.once('destroyed', onDestroyed);
     });
     try {
-      await Promise.race([
-        w.type?.once && w.child ? w.type.once(w.child, w.props!, deps.ctx) : wait(600),
-        destroyed,
-      ]);
+      const once = w.cell
+        ? w.cell.once()
+        : w.type?.once && w.child
+          ? w.type.once(w.child, w.props!, deps.ctx)
+          : wait(600);
+      await Promise.race([once, destroyed]);
     } catch (e) {
       fail(w, 'play once', e);
     } finally {
       if (onDestroyed) view.off('destroyed', onDestroyed);
     }
-    if (win === w) showStatic();
+    if (playing === w) showStatic();
   }
+
+  const playWin = () => playState('win');
 
   function clear(): void {
     showStatic();
     if (rest) unmount(rest);
     rest = null;
+    noState.clear();
     fallback?.destroy({ children: true });
     fallback = null;
   }
@@ -279,38 +309,52 @@ export function createSymbolHandle(
       if (!def) {
         fallback = view.addChild(fallbackBox(id, size));
         delete view.playWin;
+        delete view.playState;
         return;
       }
       const state = opts.only ?? (def.idle ? 'idle' : 'static');
-      rest = mount(state, def[state] ?? def.static);
-      if (def.win && !opts.only) view.playWin = playWin;
-      else delete view.playWin;
+      rest = mount(state, stateNode(def, state) ?? def.static);
+      // A pinned state is a preview standing still: nothing plays over it.
+      if (opts.only) {
+        delete view.playWin;
+        delete view.playState;
+      } else {
+        view.playState = playState;
+        if (def.win) view.playWin = playWin;
+        else delete view.playWin;
+      }
     },
-    // `rest` only: a `win` wrapper is either mounted from loaded assets or a placeholder whose
-    // `once` resolved at once — and `spritesheet.update` resetting `loop` on a win in flight
-    // would leave the awaited `once` never completing.
+    // `rest` only: a state wrapper in flight is either mounted from loaded assets or a
+    // placeholder whose `once` resolved at once — and `spritesheet.update` resetting `loop`
+    // mid-play would leave the awaited `once` never completing.
     refresh() {
       if (rest) update(rest);
     },
-    // Every mounted wrapper, `win` included: a win state reads the same cell.
+    // Every mounted wrapper, the one in flight included: it reads the same cell.
     bind(data) {
       cell = data;
-      for (const w of [rest, win]) {
-        if (!w?.bound || !w.type || !w.child) continue;
+      for (const w of [rest, playing]) {
+        if (!w) continue;
         try {
-          w.props = resolveProps(w.type, w.raw!, data);
-          applyCommon(w.child, w.props, w.type);
+          // A cell copy resolves its own nodes; a wrapper with no binding is left alone.
+          if (w.cell) w.cell.bind(data);
+          else if (!w.bound?.length || !w.type || !w.child) continue;
+          else {
+            w.props = cellProps(w.type, w.raw!, data).props;
+            applyCommon(w.child, w.props, w.type);
+          }
         } catch (e) {
           fail(w, 'bind', e);
           continue;
         }
-        update(w);
+        if (w.cell) fit(w);
+        else update(w);
       }
     },
     resize(next) {
       size = next;
       if (rest) fit(rest);
-      if (win) fit(win);
+      if (playing) fit(playing);
       if (fallback) {
         fallback.destroy({ children: true });
         fallback = view.addChild(fallbackBox(id, size));

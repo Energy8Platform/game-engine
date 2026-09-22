@@ -14,11 +14,12 @@
  *   `doc()`, `ready`, and `preview(id, state, size)` for the Symbols
  *   document's canvas.
  *
- * **`inject: []`**, like `flow`: `nodeTypes`, `assetLoader` and `board`
- * are read leniently (`ctx.reflect.get(name, false)`) at the moment they
- * are needed — the rows providing them (`scenes1`, `reels1`) sit earlier
- * or later in the same bundle and are there at run time; a missing one is
- * a placeholder wrapper or a skipped repaint, never a row stuck PENDING.
+ * **`inject: []`**, like `flow`: `nodeTypes`, `assetLoader`, `scenes` and
+ * `board` are read leniently (`ctx.reflect.get(name, false)`) at the
+ * moment they are needed — the rows providing them (`scenes1`, `reels1`)
+ * sit earlier or later in the same bundle and are there at run time; a
+ * missing one is a placeholder wrapper or a skipped repaint, never a row
+ * stuck PENDING.
  *
  * Boot: `GET /api/symbols`, then `replace(body.doc)` — the same
  * `replaced`/`alive`/`ready` device as `flow/runtime.ts` (see its doc for
@@ -28,14 +29,17 @@
 import type { Context } from 'cordis';
 import type { Container } from 'pixi.js';
 import {
+  BUILTIN_STATES,
   diagnostic,
+  stateNode,
+  type Severity,
   type SymbolDef,
   type SymbolsDoc,
   type SymbolsResponse,
   type SymbolState,
 } from '@energy8engine/contracts';
 import type { DiagnosticsService } from '@energy8engine/diagnostics';
-import type { AssetLoader, NodeTypesService } from '@energy8engine/scenes';
+import type { AssetLoader, NodeTypesService, ScenesService } from '@energy8engine/scenes';
 import type { SymbolResolver } from '@energy8platform/game-engine/slot';
 import { createSymbolHandle, type SymbolHandle, type ViewDeps } from './view';
 
@@ -56,7 +60,7 @@ export interface SymbolsService {
   doc(): SymbolsDoc | null;
   /** The boot GET landed (or a `replace` beat it); rejects when the GET failed and nothing replaced. */
   ready: Promise<void>;
-  /** A fresh view of ONE state, fitted to `size`; `null` when the symbol or the state is absent. Destroying it drops it from the live set. */
+  /** A fresh view of ONE state — built-in or named — fitted to `size`; `null` when the symbol or the state is absent. Destroying it drops it from the live set. */
   preview(
     id: string,
     state: SymbolState,
@@ -67,17 +71,22 @@ export interface SymbolsService {
 export const name = 'symbols';
 export const inject = [];
 
-const STATES: SymbolState[] = ['static', 'idle', 'win'];
+/** Every state a def may show: the three built-ins, then the names it declares. */
+const statesOf = (def: SymbolDef): SymbolState[] => [
+  ...BUILTIN_STATES,
+  ...Object.keys(def.states ?? {}),
+];
 
 export function apply(ctx: Context, config: SymbolsConfig = {}): void {
-  const report = (where: string, message: string, fix?: string) =>
+  const report = (where: string, message: string, fix?: string, severity: Severity = 'error') =>
     (ctx.reflect.get('diagnostics', false) as DiagnosticsService | undefined)?.report(
-      diagnostic('error', 'symbols', where, message, fix),
+      diagnostic(severity, 'symbols', where, message, fix),
     );
   const deps: ViewDeps = {
     ctx,
     nodeTypes: () => ctx.reflect.get('nodeTypes', false) as NodeTypesService | undefined,
-    report,
+    // A view has no fix to offer, but it does pick the severity (a state a def has not got).
+    report: (where, message, severity) => report(where, message, undefined, severity),
   };
 
   const live = new Set<SymbolHandle>();
@@ -107,12 +116,20 @@ export function apply(ctx: Context, config: SymbolsConfig = {}): void {
   async function load(): Promise<void> {
     const loader = ctx.reflect.get('assetLoader', false) as AssetLoader | undefined;
     const nodeTypes = deps.nodeTypes();
+    // A `scene` state is a whole document: only the scenes runtime can name its assets.
+    // They matter more than any other state's — a cell copy has no `refresh`, so art that
+    // lands after it mounted reaches it through a REMOUNT alone (the repaint below).
+    const scenes = ctx.reflect.get('scenes', false) as ScenesService | undefined;
     const urls = new Set<string>();
     for (const def of defs.values())
-      for (const state of STATES) {
-        const node = def[state];
+      for (const state of statesOf(def)) {
+        const node = stateNode(def, state);
         if (!node) continue;
-        for (const u of nodeTypes?.get(node.type)?.assets?.(node.props) ?? []) urls.add(u);
+        const assets =
+          node.type === 'scene'
+            ? scenes?.assetsOf(String(node.props.scene ?? ''))
+            : nodeTypes?.get(node.type)?.assets?.(node.props);
+        for (const u of assets ?? []) urls.add(u);
       }
     if (loader && urls.size > 0) {
       try {
@@ -143,7 +160,7 @@ export function apply(ctx: Context, config: SymbolsConfig = {}): void {
     ready: Promise.resolve(),
     preview(id, state, size) {
       const def = defs.get(id);
-      if (!def?.[state]) return null;
+      if (!def || !stateNode(def, state)) return null;
       const h = handle(id, state);
       h.resize(size);
       return h.view;
