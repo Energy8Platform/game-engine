@@ -77,10 +77,10 @@ describe('executePlan with a BoardStepRegistry', () => {
   // `setMultiplier` and `wait` were on it while no mechanic in the repo
   // could emit either and no board was ever asked to perform one — a third
   // of the advice, pointing nowhere. They are gone; this holds them gone.
-  it('offers exactly the four kinds a board declares, and neither removed one', async () => {
+  it('offers exactly the six kinds a board declares, and neither removed one', async () => {
     const [d] = await executePlan([{ kind: 'nope' }], board, registry);
     const offered = d.message.slice(d.message.indexOf('known kinds:'));
-    for (const kind of ['spinTo', 'revealWins', 'remove', 'refill']) {
+    for (const kind of ['spinTo', 'revealWins', 'remove', 'refill', 'tumble', 'playState']) {
       expect(offered, `should offer ${kind}`).toContain(kind);
     }
     expect(offered).not.toContain('setMultiplier');
@@ -288,7 +288,7 @@ describe('createBoardStepRegistry — two plugins claiming one kind', () => {
  * registry was decided by JavaScript's object model rather than by the
  * vocabulary.
  *
- * The board-first rule is now gated on `KNOWN_STEP_KINDS`: the four kinds
+ * The board-first rule is now gated on `KNOWN_STEP_KINDS`: the six kinds
  * `BoardApi` declares go to the board, everything else goes straight to
  * the registry. That is exactly what this file's module doc always
  * claimed, and what `executePlan`'s own doc says.
@@ -319,9 +319,9 @@ describe('executePlan — the board only wins the kinds BoardApi actually declar
   });
 
   it('a board method for a kind BoardApi never declared does not outrank the registry', async () => {
-    // `ReelsBoard` really does carry methods past the four — `destroy()`
+    // `ReelsBoard` really does carry methods past the six — `destroy()`
     // among them — so "whatever the board happens to have" is a wider and
-    // more dangerous rule than "the four", not a hypothetical one.
+    // more dangerous rule than "the six", not a hypothetical one.
     const board = {
       ...fakeBoard(),
       reelStep: async () => {
@@ -352,7 +352,7 @@ describe('executePlan — the board only wins the kinds BoardApi actually declar
     expect(d.message).toContain('toString');
   });
 
-  it('the four still go to the board even when something is registered for them', async () => {
+  it('the six still go to the board even when something is registered for them', async () => {
     // The rule this gate must not weaken, restated against the gate.
     const board = fakeBoard();
     const registry = createBoardStepRegistry();

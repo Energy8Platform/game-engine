@@ -177,6 +177,12 @@ export function boardFromReelSystem(
   // torn down early (see `@energy8engine/symbols`' `view.ts`: "showStatic tears
   // a state in flight down early; the once it was awaiting then resolves into a
   // no-op").
+  //
+  // ponytail: keyed by view identity, so two playState calls OVERLAPPING on
+  // one view (a `wait: false` step, then a second step naming the same cell
+  // before the first ended) collapse to one entry, and the first `.finally()`
+  // drops it — a `skip()` in between then misses the second. Upgrade path:
+  // a Map<view, count>, deleted at zero.
   const statesPlaying = new Set<NonNullable<CellLike['view']>>();
   const tracked =
     <S>(run: (step: S, opts?: StepOpts) => Promise<void>) =>
