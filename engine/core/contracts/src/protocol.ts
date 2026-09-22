@@ -443,8 +443,11 @@ export interface SymbolNode {
   props: Record<string, unknown>;
 }
 
-/** Which of a symbol's up to three views is showing. */
-export type SymbolState = 'static' | 'idle' | 'win';
+/** Which of a symbol's views is showing: one of `BUILTIN_STATES`, or a key of its `states` map. */
+export type SymbolState = string;
+
+/** The three states every symbol may declare directly; every other name lives in `states`. */
+export const BUILTIN_STATES = ['static', 'idle', 'win'] as const;
 
 /** One symbol's definition: its id (what a reel's board carries) and a node per state it supports. `static` is required — a symbol always has a resting view; `idle`/`win` fall back to it when absent. */
 export interface SymbolDef {
@@ -454,6 +457,16 @@ export interface SymbolDef {
   static: SymbolNode;
   idle?: SymbolNode;
   win?: SymbolNode;
+  /** Named states a plan's `playState` step can play — a death morph, a celebration. Keys are identifiers; the three built-ins above are not allowed here. */
+  states?: Record<string, SymbolNode>;
+}
+
+/** The node for a state, wherever it lives: `def.static`/`idle`/`win`, else `def.states[name]`. Never reads a prototype key. */
+export function stateNode(def: SymbolDef, state: string): SymbolNode | undefined {
+  if ((BUILTIN_STATES as readonly string[]).includes(state)) {
+    return def[state as (typeof BUILTIN_STATES)[number]];
+  }
+  return def.states && Object.hasOwn(def.states, state) ? def.states[state] : undefined;
 }
 
 /** `symbols.yml`, parsed. */

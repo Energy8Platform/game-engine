@@ -147,6 +147,23 @@ export interface EmitStep {
 }
 
 /**
+ * These cells play a named state of their symbol (`symbols.yml`'s `states`)
+ * — a death morph on a duel's losers, a celebration on the scatters — and
+ * return to their resting state when it ends. Not a win reveal: no amount,
+ * no line, and the state is the mechanic's to name.
+ *
+ * `wait` (default true) is what the plan does, not what the cells do: with
+ * `false` the states start and the plan moves on, so a morph can play over
+ * the tumble that follows it.
+ */
+export interface PlayStateStep {
+  kind: 'playState';
+  cells: Cell[];
+  state: string;
+  wait?: boolean;
+}
+
+/**
  * How fast a step should play — the one thing a presentation carries
  * besides its own content. Threaded from `play.execute` (`@energy8engine/
  * play-loop`) through `executePlan` to every `BoardApi` method and every
@@ -164,24 +181,27 @@ export interface StepOpts {
 }
 
 /**
- * One of the steps a mechanic may put in its plan: the five board steps
- * the built-in mechanics stand on, plus `emit` — see the module doc. Kept as its own named union (rather than folding straight
- * into `PresentationStep` below) because `PresentationPlan` is defined from
- * THIS type, not from `PresentationStep`: a mechanic's `steps.push({ kind:
- * 'spinTo', ...typo })` must still fail to compile, and it only does
- * because `PresentationPlan`'s element type has no open member for a typo'd
- * literal to quietly match instead. See `UnknownPresentationStep`'s doc for
- * the mechanism that would otherwise defeat that.
+ * One of the steps a mechanic may put in its plan: the six board steps
+ * the built-in mechanics stand on (`KNOWN_STEP_KINDS`), plus `emit`, which
+ * isn't one — see the module doc. Kept as its own named union (rather than
+ * folding straight into `PresentationStep` below) because `PresentationPlan`
+ * is defined from THIS type, not from `PresentationStep`: a mechanic's
+ * `steps.push({ kind: 'spinTo', ...typo })` must still fail to compile, and
+ * it only does because `PresentationPlan`'s element type has no open member
+ * for a typo'd literal to quietly match instead. See
+ * `UnknownPresentationStep`'s doc for the mechanism that would otherwise
+ * defeat that.
  *
- * It was six, then four, then five: `setMultiplier` and `wait` were built
- * before any mechanic asked for them, nothing ever emitted either, and they
- * are gone. `tumble` (slice 25) earned the fifth place the other way round
- * — see `KNOWN_STEP_KINDS`. `emit` (slice 29) is the sixth, the first that
- * is not a board step — see `EmitStep`'s own doc for why it belongs here
- * but not in `KNOWN_STEP_KINDS`.
+ * Seven now: `setMultiplier` and `wait` were built before any mechanic
+ * asked for them, nothing ever emitted either, and they are gone. `tumble`
+ * (slice 25) earned its place the way `KNOWN_STEP_KINDS` explains. `emit`
+ * (slice 29) was the sixth, the first that is not a board step — see
+ * `EmitStep`'s own doc for why it belongs here but not in
+ * `KNOWN_STEP_KINDS`. `playState` (slice 30) is the seventh, and IS a
+ * board step — see `PlayStateStep`'s own doc and `KNOWN_STEP_KINDS`.
  */
 export type KnownPresentationStep =
-  SpinToStep | RevealWinsStep | RemoveStep | RefillStep | TumbleStep | EmitStep;
+  SpinToStep | RevealWinsStep | RemoveStep | RefillStep | TumbleStep | EmitStep | PlayStateStep;
 
 /**
  * A step naming any OTHER kind — a plugin's, task 9's `reelStep` among
@@ -261,6 +281,11 @@ export type PresentationPlan = KnownPresentationStep[];
  *
  * `emit` is deliberately absent even though it is a `KnownPresentationStep`
  * — it is not a board step at all, the play loop serves it itself.
+ *
+ * `playState` (slice 30) is the sixth. It is not `revealWins` with a field:
+ * a reveal carries an amount and lights a line — a paid result. `playState`
+ * carries neither; it names a state (`symbols.yml`'s `states`) for a
+ * mechanic to play on cells it chose, win or not (see `PlayStateStep`).
  */
 export const KNOWN_STEP_KINDS: readonly KnownPresentationStep['kind'][] = [
   'spinTo',
@@ -268,6 +293,7 @@ export const KNOWN_STEP_KINDS: readonly KnownPresentationStep['kind'][] = [
   'remove',
   'refill',
   'tumble',
+  'playState',
 ] as const;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -395,6 +421,14 @@ export function isPresentationStep(value: unknown): value is PresentationStep {
       return (
         typeof value.event === 'string' &&
         value.event.length > 0 &&
+        (value.wait === undefined || typeof value.wait === 'boolean')
+      );
+    case 'playState':
+      return (
+        Array.isArray(value.cells) &&
+        value.cells.every(isCell) &&
+        typeof value.state === 'string' &&
+        value.state.length > 0 &&
         (value.wait === undefined || typeof value.wait === 'boolean')
       );
     default:

@@ -219,6 +219,18 @@ describe('emit — a beat on the bus, not a board step', () => {
   });
 });
 
+describe('playState — a named state on chosen cells', () => {
+  it('is well-formed with cells and a non-empty state; wait is a boolean when present', () => {
+    expect(isPresentationStep({ kind: 'playState', cells: [{ col: 0, row: 1 }], state: 'death' })).toBe(true);
+    expect(isPresentationStep({ kind: 'playState', cells: [], state: 'death', wait: false })).toBe(true);
+    expect(isPresentationStep({ kind: 'playState', cells: [{ col: 0, row: 1 }], state: '' })).toBe(false);
+    expect(isPresentationStep({ kind: 'playState', cells: 'no', state: 'death' })).toBe(false);
+    expect(isPresentationStep({ kind: 'playState', cells: [{ col: 0 }], state: 'death' })).toBe(false);
+    expect(isPresentationStep({ kind: 'playState', cells: [], state: 'death', wait: 'yes' })).toBe(false);
+  });
+  it('is one of the board kinds', () => expect(KNOWN_STEP_KINDS).toContain('playState'));
+});
+
 describe('cellData', () => {
   it('a bare number becomes a stringified symbol', () => {
     expect(cellData(7)).toEqual({ symbol: '7' });

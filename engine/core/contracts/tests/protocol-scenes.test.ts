@@ -13,6 +13,7 @@ import type {
   SymbolsMessage,
   SymbolsResponse,
 } from '../src';
+import { stateNode } from '../src';
 
 /** Compile-time shapes: a value of each type assigns; the unions carry the new members. */
 describe('scene contracts', () => {
@@ -86,5 +87,16 @@ describe('symbols contracts', () => {
     // doc: null (nothing curated yet, or a curation error) is legal on both the message and the response
     const empty: SymbolsMessage = { type: 'symbols', doc: null, diagnostics: [] };
     expect(empty.doc).toBeNull();
+  });
+});
+
+describe('stateNode', () => {
+  const def = { id: 'ROCK', static: { type: 'image', props: {} }, states: { death: { type: 'strip', props: {} } } };
+  it('answers the built-ins off the def and the rest off `states`', () => {
+    expect(stateNode(def, 'static')).toBe(def.static);
+    expect(stateNode(def, 'death')).toBe(def.states!.death);
+    expect(stateNode(def, 'idle')).toBeUndefined();
+    expect(stateNode(def, 'nope')).toBeUndefined();
+    expect(stateNode({ id: 'X', static: def.static, states: { toString: def.static } } as any, 'constructor')).toBeUndefined();
   });
 });
