@@ -2,12 +2,15 @@ import { describe, expect, it } from 'vitest';
 import type { SymbolsDoc } from '@energy8engine/contracts';
 import {
   EMPTY,
+  addState,
   addSymbol,
   nodeForDrop,
+  removeState,
   removeSymbol,
   setState,
   setStateType,
   setSymbol,
+  statesOf,
 } from '../src/shell/symbols-doc';
 
 /** The Symbols document's pure reducers: none mutate, an unknown id is the doc back unchanged. */
@@ -92,5 +95,53 @@ describe('symbols-doc reducers', () => {
       type: 'image',
       props: { src: 'a.png' },
     });
+  });
+
+  it('addState creates states.<name> with an empty image; a duplicate, built-in or invalid name is refused', () => {
+    const next = addState(ONE, '1', 'death');
+    expect(next.symbols[0].states).toEqual({ death: IMAGE });
+    expect(addState(next, '1', 'death')).toBe(next); // duplicate name
+    expect(addState(ONE, '1', 'win')).toBe(ONE); // built-in
+    expect(addState(ONE, '1', 'static')).toBe(ONE); // built-in
+    expect(addState(ONE, '1', '1bad')).toBe(ONE); // must start with a letter/underscore
+    expect(addState(ONE, '1', 'has space')).toBe(ONE); // no spaces
+    expect(addState(ONE, '9', 'death')).toBe(ONE); // unknown id
+  });
+
+  it('removeState drops the key, and the whole `states` map when it empties; an unknown name is a no-op', () => {
+    const oneState = addState(ONE, '1', 'death');
+    const twoStates = addState(oneState, '1', 'party');
+    expect(removeState(twoStates, '1', 'death').symbols[0].states).toEqual({ party: IMAGE });
+    expect(removeState(oneState, '1', 'death').symbols[0]).toEqual(ONE.symbols[0]);
+    expect(removeState(oneState, '1', 'death').symbols[0].states).toBeUndefined();
+    expect(removeState(ONE, '1', 'nope')).toBe(ONE);
+    expect(removeState(ONE, '9', 'death')).toBe(ONE);
+  });
+
+  it('setState on a named state writes into `states`; null removes it, dropping the map when it empties', () => {
+    const node = { type: 'gif', props: { src: 'assets/death.gif' } };
+    const withDeath = setState(ONE, '1', 'death', node);
+    expect(withDeath.symbols[0].states).toEqual({ death: node });
+    expect(setState(withDeath, '1', 'death', null).symbols[0]).toEqual(ONE.symbols[0]);
+    expect(setState(ONE, '1', 'death', null)).toBe(ONE); // nothing to clear
+  });
+
+  it('setStateType on a named state keeps only the props named in `keep`', () => {
+    const withDeath = setState(ONE, '1', 'death', {
+      type: 'spritesheet',
+      props: { sheet: 'assets/death.json', loop: false, x: 4 },
+    });
+    const next = setStateType(withDeath, '1', 'death', 'gif', ['nope']);
+    expect(next.symbols[0].states).toEqual({ death: { type: 'gif', props: {} } });
+    const kept = setStateType(withDeath, '1', 'death', 'gif', ['loop', 'x']);
+    expect(kept.symbols[0].states).toEqual({
+      death: { type: 'gif', props: { loop: false, x: 4 } },
+    });
+  });
+
+  it('statesOf lists the built-ins present, then the named states in order', () => {
+    expect(statesOf(ONE.symbols[0])).toEqual(['static', 'win']); // no idle
+    const withNamed = addState(addState(ONE, '1', 'party'), '1', 'death');
+    expect(statesOf(withNamed.symbols[0])).toEqual(['static', 'win', 'party', 'death']);
   });
 });

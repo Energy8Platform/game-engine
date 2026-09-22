@@ -1,12 +1,19 @@
 import { useMemo, useState } from 'react';
 import type { Context } from 'cordis';
 import Schema from 'schemastery';
-import type { NodeTypeInfo, SymbolDef, SymbolState, SymbolsDoc } from '@energy8engine/contracts';
+import {
+  BUILTIN_STATES,
+  stateNode,
+  type NodeTypeInfo,
+  type SymbolDef,
+  type SymbolState,
+  type SymbolsDoc,
+} from '@energy8engine/contracts';
 import { useScenes } from '../plugins/scenes';
 import { useSymbols } from '../plugins/symbols';
 import { SchemaForm } from '../schema-form/SchemaForm';
 import { mergedSchema, useAssetPicker, useNodePicker } from './PropertiesSidebar';
-import { setState, setStateType, setSymbol } from './symbols-doc';
+import { removeState, setState, setStateType, setSymbol } from './symbols-doc';
 
 /**
  * The right-hand inspector over `ctx.symbols.selected()`: the symbol's
@@ -15,8 +22,10 @@ import { setState, setStateType, setSymbol } from './symbols-doc';
  * first) and a `SchemaForm` over that type's schema merged with the
  * common props (the state's wrapper applies them, so a symbol can be
  * nudged without new art). A state the def has not got yet is one
- * `Create <state>` button. Changing the type keeps the props the new
- * schema also has. Holds no draft of the document: every edit is a
+ * `Create <state>` button; a named state (never a built-in) also gets a
+ * `Remove state` button that drops it from `def.states`. Changing the
+ * type keeps the props the new schema also has. Holds no draft of the
+ * document: every edit is a
  * reducer through `ctx.symbols.update`, queued behind whatever write
  * (here or in `SymbolsDocument`) is already in flight — two blur-commits
  * close together each reduce the doc as it stands at THEIR turn, not the
@@ -71,7 +80,8 @@ function Body({
   const write = (reduce: (doc: SymbolsDoc) => SymbolsDoc) =>
     void ctx.symbols.update(reduce).then((refused) => setError(refused[0]?.message ?? null));
 
-  const current = def[state];
+  const current = stateNode(def, state);
+  const named = !(BUILTIN_STATES as readonly string[]).includes(state);
   const info = current ? nodeTypes.find((t) => t.type === current.type) : undefined;
   const schema = useMemo(() => mergedSchema(info), [info]);
   // The types a state can be: those that take a file, `image` first; the doc's own type stays offered.
@@ -146,6 +156,15 @@ function Body({
               </option>
             ))}
           </select>
+        ) : null}
+        {named ? (
+          <button
+            type="button"
+            data-testid="prop-state-remove"
+            onClick={() => write((d) => removeState(d, def.id, state))}
+          >
+            Remove state
+          </button>
         ) : null}
       </div>
       <div className="e8-properties-body">

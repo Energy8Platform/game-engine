@@ -437,4 +437,59 @@ describe('SymbolsDocument', () => {
       expect(screen.queryByTitle('symbol canvas')).toBeNull();
     });
   });
+
+  describe('named states in the chip row', () => {
+    const withDeath: SymbolsDoc = {
+      version: 1,
+      symbols: [
+        { ...TWO.symbols[0], states: { death: { type: 'image', props: { src: 'assets/d.png' } } } },
+        TWO.symbols[1],
+      ],
+    };
+
+    it('a named state chip renders after the built-ins, and selects { id, state: name } on click', async () => {
+      const { ctx } = await booted({}, withDeath);
+      renderDocument(ctx);
+      const chip = await screen.findByTestId('symbol-chip-1-death');
+      expect(chip).toHaveTextContent('image');
+      fireEvent.click(chip);
+      expect(ctx.symbols.selected()).toEqual({ id: '1', state: 'death' });
+      expect(chip).toHaveClass('e8-symbol-chip-selected');
+    });
+
+    it('the "+" chip prompts for a name and PUTs a new named state with an empty image', async () => {
+      const { ctx, docs } = await booted({}, { version: 1, symbols: [TWO.symbols[0]] });
+      renderDocument(ctx);
+      const prompt = vi.spyOn(window, 'prompt').mockReturnValue('death');
+      fireEvent.click(await screen.findByTestId('symbol-chip-add-1'));
+      expect(prompt).toHaveBeenCalled();
+      await waitFor(() => expect(docs()).toHaveLength(1));
+      expect(docs()[0].symbols[0].states).toEqual({
+        death: { type: 'image', props: { src: '' } },
+      });
+      prompt.mockRestore();
+    });
+
+    it('a blank or cancelled prompt is a no-op', async () => {
+      const { ctx, docs } = await booted({}, { version: 1, symbols: [TWO.symbols[0]] });
+      renderDocument(ctx);
+      const prompt = vi.spyOn(window, 'prompt').mockReturnValue(null);
+      fireEvent.click(await screen.findByTestId('symbol-chip-add-1'));
+      expect(docs()).toHaveLength(0);
+      prompt.mockReturnValue('   ');
+      fireEvent.click(screen.getByTestId('symbol-chip-add-1'));
+      expect(docs()).toHaveLength(0);
+      prompt.mockRestore();
+    });
+
+    it('the row menu offers Clear for a named state that is present, and it removes just that state', async () => {
+      const { ctx, docs } = await booted({}, withDeath);
+      renderDocument(ctx);
+      fireEvent.click(await screen.findByTestId('symbol-menu-1'));
+      expect(screen.getByTestId('symbol-clear-death')).toBeTruthy();
+      fireEvent.click(screen.getByTestId('symbol-clear-death'));
+      await waitFor(() => expect(docs()).toHaveLength(1));
+      expect(docs()[0].symbols[0].states).toBeUndefined();
+    });
+  });
 });

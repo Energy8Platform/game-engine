@@ -1,15 +1,28 @@
-import type { SymbolDef, SymbolNode, SymbolState, SymbolsDoc } from '@energy8engine/contracts';
+import {
+  BUILTIN_STATES,
+  stateNode,
+  type SymbolDef,
+  type SymbolNode,
+  type SymbolState,
+  type SymbolsDoc,
+} from '@energy8engine/contracts';
 
 /**
  * The Symbols document's pure reducers — what `SymbolsDocument` and
  * `SymbolsProperties` write through. None mutate; each returns a new
  * document, or the SAME one when there is nothing to do (an unknown id, a
- * clear of a state that is not there), which is how `commit` knows to
- * skip the PUT.
+ * clear of a state that is not there, a refused name), which is how
+ * `commit` knows to skip the PUT.
  */
 export const EMPTY: SymbolsDoc = { version: 1, symbols: [] };
 
-export const STATES: readonly SymbolState[] = ['static', 'idle', 'win'];
+export const STATES: readonly SymbolState[] = BUILTIN_STATES;
+
+const isBuiltin = (state: string) => (BUILTIN_STATES as readonly string[]).includes(state);
+
+/** A named state's key: an identifier, and not one of the three built-ins. */
+const NAME_RE = /^[A-Za-z_][\w-]*$/;
+const validName = (name: string) => NAME_RE.test(name) && !isBuiltin(name);
 
 /** What a fresh `static` is: an image with no file yet — the inspector shows what is missing. */
 const emptyImage = (): SymbolNode => ({ type: 'image', props: { src: '' } });
@@ -50,7 +63,22 @@ export function setSymbol(
   });
 }
 
-/** `null` clears `idle`/`win`; `static` is always there, so clearing it resets it to the empty image. */
+/** A built-in state written in place; a named one written into (a fresh) `states`. */
+function writeState(def: SymbolDef, state: string, node: SymbolNode): SymbolDef {
+  if (isBuiltin(state)) return { ...def, [state]: node };
+  return { ...def, states: { ...def.states, [state]: node } };
+}
+
+/** Drops a named state's key; drops `states` itself once it is empty. Unknown name is a no-op. */
+function dropNamed(def: SymbolDef, name: string): SymbolDef {
+  if (!def.states || !Object.hasOwn(def.states, name)) return def;
+  const { [name]: _gone, ...rest } = def.states;
+  if (Object.keys(rest).length > 0) return { ...def, states: rest };
+  const { states: _states, ...next } = def;
+  return next;
+}
+
+/** `null` clears `idle`/`win`/a named state; `static` is always there, so clearing it resets it to the empty image. */
 export function setState(
   doc: SymbolsDoc,
   id: string,
@@ -58,10 +86,12 @@ export function setState(
   node: SymbolNode | null,
 ): SymbolsDoc {
   return patch(doc, id, (def) => {
-    if (node) return { ...def, [state]: node };
+    if (node) return writeState(def, state, node);
     if (state === 'static') return { ...def, static: emptyImage() };
-    if (!def[state]) return def;
-    const { [state]: _gone, ...rest } = def;
+    if (!isBuiltin(state)) return dropNamed(def, state);
+    const key = state as 'idle' | 'win';
+    if (!def[key]) return def;
+    const { [key]: _gone, ...rest } = def;
     return rest;
   });
 }
@@ -75,10 +105,32 @@ export function setStateType(
   keep: readonly string[],
 ): SymbolsDoc {
   return patch(doc, id, (def) => {
-    const prev = def[state]?.props ?? {};
+    const prev = stateNode(def, state)?.props ?? {};
     const props = Object.fromEntries(keep.filter((k) => k in prev).map((k) => [k, prev[k]]));
-    return { ...def, [state]: { type, props } };
+    return writeState(def, state, { type, props });
   });
+}
+
+/** Adds `states.<name>` with an empty image; refused (doc unchanged) for a duplicate, built-in or invalid name. */
+export function addState(doc: SymbolsDoc, id: string, name: string): SymbolsDoc {
+  return patch(doc, id, (def) => {
+    if (!validName(name)) return def;
+    if (def.states && Object.hasOwn(def.states, name)) return def;
+    return { ...def, states: { ...def.states, [name]: emptyImage() } };
+  });
+}
+
+/** Drops a named state entirely — the key and, once it was the last one, the `states` map. */
+export function removeState(doc: SymbolsDoc, id: string, name: string): SymbolsDoc {
+  return patch(doc, id, (def) => dropNamed(def, name));
+}
+
+/** The built-in states this def actually has, then its named states, in declaration order. */
+export function statesOf(def: SymbolDef): SymbolState[] {
+  return [
+    ...STATES.filter((s) => def[s as 'static' | 'idle' | 'win']),
+    ...Object.keys(def.states ?? {}),
+  ];
 }
 
 /** A dropped file as a state's node: the path in the picked prop, and `loop: false` for a `win` that would otherwise loop. */

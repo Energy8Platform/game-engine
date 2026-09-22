@@ -10,6 +10,7 @@ import type { Context } from 'cordis';
 import Schema from 'schemastery';
 import {
   diagnostic,
+  stateNode,
   type Diagnostic,
   type NodeTypeInfo,
   type SymbolDef,
@@ -24,11 +25,22 @@ import { activateOnKey } from './activate';
 import { createCanvasRpc, type CanvasRpc } from './canvas-rpc';
 import { clampZoom } from './CanvasToolbar';
 import { ExplorerMenu } from './ExplorerMenu';
-import { addSymbol, EMPTY, nodeForDrop, removeSymbol, setState, STATES } from './symbols-doc';
+import {
+  addState,
+  addSymbol,
+  EMPTY,
+  nodeForDrop,
+  removeSymbol,
+  setState,
+  STATES,
+  statesOf,
+} from './symbols-doc';
 
 /**
  * The Symbols document: the list down the left (one row per symbol — its
- * id, name and three state chips showing the state's type or `+`; then
+ * id, name, a chip per state — the three built-ins, then any named states
+ * (`def.states`) in declaration order, each showing the state's type or
+ * `+` — and a trailing `+` chip that prompts for a name and adds one; then
  * the `known` ids not yet in the doc as ghost rows with Add; then an add
  * input for a free id), the live canvas in the centre (`editor.html?symbol=`
  * in `@energy8engine/scene-edit`'s symbol mode, talked to through
@@ -283,6 +295,36 @@ export function SymbolsDocument({ ctx }: { ctx: Context }) {
           {symbols.map((def) => {
             const picked = selected?.id === def.id;
             const where = `symbols/${def.id}`;
+            const chip = (state: SymbolState) => {
+              const node = stateNode(def, state);
+              const target = `${def.id}/${state}`;
+              return (
+                <button
+                  key={state}
+                  type="button"
+                  className={[
+                    'e8-symbol-chip',
+                    node ? '' : 'e8-symbol-chip-empty',
+                    picked && selected.state === state ? 'e8-symbol-chip-selected' : '',
+                    dropTarget === target ? 'e8-drop-target' : '',
+                  ]
+                    .filter(Boolean)
+                    .join(' ')}
+                  data-testid={`symbol-chip-${def.id}-${state}`}
+                  data-diagnostic={worst(diagnostics, `${where}/${state}`)}
+                  title={state}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    ctx.symbols.select({ id: def.id, state });
+                  }}
+                  onDragOver={onDragOver(target)}
+                  onDragLeave={() => dropTarget === target && setDropTarget(null)}
+                  onDrop={onDrop((path) => void dropState(def.id, state, path))}
+                >
+                  {node?.type ?? '+'}
+                </button>
+              );
+            };
             return (
               <li
                 key={def.id}
@@ -306,36 +348,21 @@ export function SymbolsDocument({ ctx }: { ctx: Context }) {
                 <span className="e8-explorer-name" data-testid={`symbol-name-${def.id}`}>
                   {def.name ?? ''}
                 </span>
-                {STATES.map((state) => {
-                  const node = def[state];
-                  const target = `${def.id}/${state}`;
-                  return (
-                    <button
-                      key={state}
-                      type="button"
-                      className={[
-                        'e8-symbol-chip',
-                        node ? '' : 'e8-symbol-chip-empty',
-                        picked && selected.state === state ? 'e8-symbol-chip-selected' : '',
-                        dropTarget === target ? 'e8-drop-target' : '',
-                      ]
-                        .filter(Boolean)
-                        .join(' ')}
-                      data-testid={`symbol-chip-${def.id}-${state}`}
-                      data-diagnostic={worst(diagnostics, `${where}/${state}`)}
-                      title={state}
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        ctx.symbols.select({ id: def.id, state });
-                      }}
-                      onDragOver={onDragOver(target)}
-                      onDragLeave={() => dropTarget === target && setDropTarget(null)}
-                      onDrop={onDrop((path) => void dropState(def.id, state, path))}
-                    >
-                      {node?.type ?? '+'}
-                    </button>
-                  );
-                })}
+                {STATES.map(chip)}
+                {Object.keys(def.states ?? {}).map(chip)}
+                <button
+                  type="button"
+                  className="e8-symbol-chip e8-symbol-chip-add"
+                  data-testid={`symbol-chip-add-${def.id}`}
+                  title="add state"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    const name = window.prompt('new state name')?.trim();
+                    if (name) void commit((d) => addState(d, def.id, name));
+                  }}
+                >
+                  +
+                </button>
                 <button
                   type="button"
                   className="e8-explorer-delete"
@@ -447,7 +474,7 @@ export function SymbolsDocument({ ctx }: { ctx: Context }) {
           y={menu.y}
           items={[
             { label: 'Remove symbol', testId: 'symbol-remove', onPick: () => remove(menu.def.id) },
-            ...STATES.filter((s) => menu.def[s]).map((s) => ({
+            ...statesOf(menu.def).map((s) => ({
               label: `Clear ${s}`,
               testId: `symbol-clear-${s}`,
               onPick: () => void commit((d) => setState(d, menu.def.id, s, null)),

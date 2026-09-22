@@ -131,4 +131,28 @@ describe('SymbolsProperties', () => {
     expect(screen.getByTestId('side-right-symbols')).toBeTruthy();
     expect(screen.queryByTestId('prop-symbol-name')).toBeNull();
   });
+
+  it('a named state offers "Remove state"; removing it drops the key', async () => {
+    const doc: SymbolsDoc = {
+      ...TWO,
+      symbols: [
+        { ...TWO.symbols[0], states: { death: { type: 'image', props: { src: '' } } } },
+        TWO.symbols[1],
+      ],
+    };
+    const { ctx, docs } = await booted({}, doc);
+    act(() => ctx.symbols.select({ id: '1', state: 'death' }));
+    renderSide(ctx);
+    expect(screen.getByTestId('prop-state-remove')).toBeTruthy();
+    fireEvent.click(screen.getByTestId('prop-state-remove'));
+    await waitFor(() => expect(docs()).toHaveLength(1));
+    expect(docs()[0].symbols[0].states).toBeUndefined();
+  });
+
+  it('a built-in state offers no "Remove state"', async () => {
+    const { ctx } = await booted();
+    act(() => ctx.symbols.select({ id: '1', state: 'win' }));
+    renderSide(ctx);
+    expect(screen.queryByTestId('prop-state-remove')).toBeNull();
+  });
 });
