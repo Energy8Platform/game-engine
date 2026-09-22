@@ -10,6 +10,7 @@ import type {
   NodeTypeInfo,
   ServerMessage,
   SymbolDef,
+  SymbolNode,
   SymbolsDoc,
   SymbolsResponse,
 } from '@energy8engine/contracts';
@@ -38,6 +39,7 @@ const TYPES: NodeTypeInfo[] = [
       Schema.object({ text: Schema.string().default(''), size: Schema.number().default(24) }),
     ),
   },
+  { type: 'scene', schema: json(Schema.object({ scene: Schema.string().required() })) },
 ];
 const KNOWN = [
   { id: '1', name: 'Cherry' },
@@ -207,6 +209,84 @@ describe('checkSymbols', () => {
       'symbols/1/idle',
       'symbols/1/win',
     ]);
+  });
+
+  // Slice 30: the three built-ins are not the whole list — a def's `states`
+  // map carries every other name, and a `scene`-typed state is what turns a
+  // scene document into a CELL scene (`scenes.test.ts` has that half).
+  const IMG: SymbolNode = { type: 'image', props: { src: 'x.png' } };
+  const named = (states: Record<string, SymbolNode>, scenes?: string[]) =>
+    checkSymbols(doc([{ id: '1', static: IMG, states }]), TYPES, () => true, [], scenes);
+
+  it('a named state is checked at symbols/<id>/<name>, exactly like a built-in', () => {
+    expect(named({ death: IMG })).toEqual([]);
+    expect(named({ death: { type: 'image', props: {} } })).toContainEqual(
+      expect.objectContaining({
+        severity: 'error',
+        where: 'symbols/1/death',
+        message: 'image has no src',
+      }),
+    );
+  });
+
+  it('a named state cannot take a built-in name', () => {
+    for (const state of ['static', 'idle', 'win']) {
+      expect(named({ [state]: IMG })).toContainEqual(
+        expect.objectContaining({
+          severity: 'error',
+          where: `symbols/1/${state}`,
+          message: `a named state cannot be called "${state}"`,
+        }),
+      );
+    }
+  });
+
+  it('a named state whose key is not an identifier is an error naming the rule', () => {
+    for (const state of ['big win', 'a.b', '2fast', '']) {
+      expect(named({ [state]: IMG })).toContainEqual(
+        expect.objectContaining({
+          severity: 'error',
+          where: `symbols/1/${state}`,
+          message: `"${state}" is not a state name`,
+        }),
+      );
+    }
+    // The rule itself: a letter or `_`, then letters, digits, `_` or `-`.
+    expect(named({ 'big-win_2': IMG })).toEqual([]);
+  });
+
+  it('a `scene` state names a scene document, which must exist', () => {
+    const pop = { pop: { type: 'scene', props: { scene: 'orb' } } };
+    expect(named(pop)).toContainEqual(
+      expect.objectContaining({
+        severity: 'error',
+        where: 'symbols/1/pop',
+        message: 'unknown scene "orb"',
+      }),
+    );
+    expect(named(pop, ['orb'])).toEqual([]);
+    // A built-in state carries the same rule.
+    expect(
+      checkSymbols(
+        doc([{ id: '1', static: { type: 'scene', props: { scene: 'orb' } } }]),
+        TYPES,
+        () => true,
+        [],
+        [],
+      ),
+    ).toContainEqual(
+      expect.objectContaining({ where: 'symbols/1/static', message: 'unknown scene "orb"' }),
+    );
+  });
+
+  it("a `scene` state's props go through the type's schema like any other node", () => {
+    expect(named({ pop: { type: 'scene', props: { scene: 5 } } }, ['orb'])).toContainEqual(
+      expect.objectContaining({
+        severity: 'error',
+        where: 'symbols/1/pop',
+        message: expect.stringContaining('props:'),
+      }),
+    );
   });
 
   it('a known id absent from the doc is a warning naming its spec.json name', () => {
@@ -486,6 +566,49 @@ describe('/api/symbols', () => {
       }),
     );
     close();
+  });
+
+  it('PUT keeps a `states` map through the YAML, and every scene a state names is a cell scene', async () => {
+    const root = symbolsWorkspace();
+    host = await createIdeHost({ root, port: 0 });
+    const written: SymbolsDoc = {
+      version: 1,
+      symbols: [
+        {
+          id: '1',
+          name: 'Cherry',
+          static: { type: 'container', props: {} },
+          states: { death: { type: 'scene', props: { scene: 'big_win' } } },
+        },
+      ],
+    };
+    const res = await put(host.url, written);
+    expect(res.status).toBe(200);
+    expect(((await res.json()) as SymbolsResponse).doc).toEqual(written);
+    expect(yaml.load(readFileSync(join(root, 'symbols.yml'), 'utf8'))).toEqual(written);
+    expect((await get(host.url)).doc).toEqual(written);
+    expect(host.ctx.symbolsHost.cellScenes()).toEqual(['big_win']);
+  });
+
+  it('a state naming a scene with no document is an error that clears when the document appears', async () => {
+    host = await createIdeHost({ root: symbolsWorkspace(), port: 0 });
+    const res = await put(host.url, {
+      version: 1,
+      symbols: [{ id: '1', static: { type: 'scene', props: { scene: 'orb' } } }],
+    });
+    expect(((await res.json()) as SymbolsResponse).diagnostics).toContainEqual(
+      expect.objectContaining({
+        severity: 'error',
+        where: 'symbols/1/static',
+        message: 'unknown scene "orb"',
+      }),
+    );
+    // Creating the document re-checks the symbols document — the scene set
+    // this reads is the file tree, and a scene file write is a trigger.
+    expect((await send(host.url, '/api/scenes', 'POST', { id: 'orb' })).status).toBe(200);
+    await expect
+      .poll(async () => (await get(host!.url)).diagnostics.some((d) => d.message.includes('orb')))
+      .toBe(false);
   });
 
   it('serves GET /api/symbols on the preview server too', async () => {

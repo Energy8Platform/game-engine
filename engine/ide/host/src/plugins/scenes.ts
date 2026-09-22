@@ -9,6 +9,13 @@
  * `node-types`, since the schemas travel in that frame). Reported through
  * `ideRpc.reportGameDiagnostics('scenes', …)`, replaced whole each time.
  *
+ * A `$cell` binding is the one check that depends on ANOTHER document:
+ * only a CELL scene — one a `symbols.yml` state names, which the runtime
+ * mounts once per cell — has a cell to read. That set is
+ * `symbolsHost.cellScenes()`, read leniently at check time (the symbols
+ * plugin is plugged after this one), and the symbols plugin calls
+ * `recheck()` here when its own write changes it.
+ *
  * Re-read on ANY `files/written`/`files/removed` (an image may have
  * appeared, not only a document), on `game/node-types`, and on a game row
  * write (`game-composition/written` — the `reels1` warning depends on the
@@ -51,6 +58,12 @@ export interface ScenesHostService {
   attachGameRoutes(server: Server): void;
   /** The last read set, as `GET /api/scenes` answers it. */
   state(): ScenesResponse;
+  /**
+   * Re-read and re-check, for `symbols.ts` to call when ITS write changed
+   * which scenes are cell scenes. Idempotent, and deliberately one-way:
+   * nothing in here calls back into the symbols plugin.
+   */
+  recheck(): Promise<void>;
 }
 
 export const name = 'scenes';
@@ -116,7 +129,7 @@ export function checkNode(
   info: NodeTypeInfo | undefined,
   reported: boolean,
   hasFile: (path: string) => boolean,
-  /** `$cell.<field>` props are accepted — only a `symbols.yml` state has a cell to read them from. */
+  /** `$cell.<field>` props are accepted — only a `symbols.yml` state, and a cell scene one names, has a cell to read them from. */
   cellBindings = false,
   /** The node is a child of another (below the scene root), where the runtime ignores a `pin`. */
   nested = false,
@@ -164,14 +177,16 @@ export function checkNode(
         // either). That prop's EMPTY is checked in its place, exactly as the symbols
         // runtime does before the first `update` (`symbols/src/view.ts`).
         //
-        // Only where there IS a cell, though: a scene node is not mounted per
-        // cell, nothing resolves the binding there, and the string would be
-        // drawn as-is. Substituted either way, so the schema does not pile
+        // Only where there IS a cell, though: an ordinary scene node is not
+        // mounted per cell, nothing resolves the binding there, and the
+        // string would be drawn as-is. A CELL scene is the exception — a
+        // `scene`-typed symbol state names it, and the runtime mounts it
+        // once per cell. Substituted either way, so the schema does not pile
         // a second complaint on top of this one.
         const bound = isCellBinding(v);
         if (bound && !cellBindings)
           err(
-            `prop "${k}" binds "$cell." — only a symbols.yml state reads a cell`,
+            `prop "${k}" binds "$cell." — only a cell scene (one a symbols.yml state names) reads a cell`,
             'use a literal value',
           );
         target[k] = bound ? emptyProp(dict[k] ?? COMMON.dict?.[k]) : v;
@@ -220,11 +235,17 @@ export function checkNode(
   return out;
 }
 
+/**
+ * `cellScenes` is `symbolsHost.cellScenes()` — the documents some symbol
+ * state names, which the runtime mounts once per cell. Only those may
+ * carry a `$cell` binding; everywhere else the string is drawn as written.
+ */
 export function checkScenes(
   docs: ParsedDoc[],
   nodeTypes: NodeTypeInfo[],
   hasFile: (path: string) => boolean,
   hasReelsRow: boolean,
+  cellScenes: readonly string[] = [],
 ): Diagnostic[] {
   const out: Diagnostic[] = [];
   const err = (where: string, message: string, fix?: string) =>
@@ -253,6 +274,7 @@ export function checkScenes(
 
   for (const { file, doc } of docs) {
     const scene = sceneId(file);
+    const cell = cellScenes.includes(scene);
     if (doc.id !== scene) {
       out.push(
         diagnostic(
@@ -281,7 +303,7 @@ export function checkScenes(
           infos.get(node.type),
           nodeTypes.length > 0,
           hasFile,
-          false,
+          cell,
           // `walk` flattens the tree; the root list itself says which nodes are top-level.
           !doc.nodes.includes(node),
         ),
@@ -318,6 +340,7 @@ export function checkScenes(
           infos.get(node.type),
           nodeTypes.length > 0,
           hasFile,
+          cell,
         ),
       );
     }
@@ -463,9 +486,14 @@ export function apply(ctx: Context): void {
       (r) => r.name === '@energy8engine/reels' || r.id === 'reels1',
     );
     const nodeTypes = ctx.ideRpc.nodeTypes();
+    // Lenient, and read HERE rather than captured at apply time: the
+    // symbols plugin is plugged after this one (`project-scope`), so at the
+    // boot read there is no service yet — an empty list then, and the
+    // symbols plugin's own first read calls `recheck` once it has one.
+    const cells = ctx.get('symbolsHost')?.cellScenes() ?? [];
     const found = [
       ...diagnostics,
-      ...checkScenes(docs, nodeTypes, (p) => paths.has(p), hasReelsRow),
+      ...checkScenes(docs, nodeTypes, (p) => paths.has(p), hasReelsRow, cells),
     ];
     // The file name wins for lookup — the mismatch is already a warning above.
     const scenes = docs.map((d) => ({ ...d.doc, id: sceneId(d.file) }));
@@ -624,5 +652,6 @@ export function apply(ctx: Context): void {
   ctx.provide('scenesHost', {
     attachGameRoutes: (server) => server.get('/api/scenes', get),
     state: () => state,
+    recheck: refresh,
   });
 }

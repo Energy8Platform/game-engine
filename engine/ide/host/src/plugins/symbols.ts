@@ -3,14 +3,23 @@
  * `symbols.yml`, read through `files` and kept parsed here; `checkSymbols`
  * is everything the host can say about it without running the game — a
  * parse failure, an empty or duplicate id, a missing `static` state, a
+ * named state (`states`) whose key shadows a built-in or is not an
+ * identifier, a `scene` state naming a document that is not there, a
  * state whose type/props/assets `checkNode` (`scenes.ts`, shared) refuses,
  * and the two-way mismatch against `game/spec.json`'s own `symbols` list
  * (`known`). Reported through `ideRpc.reportGameDiagnostics('symbols', …)`,
  * replaced whole each time — the same shape `flow.ts` uses, down to the
  * `reported`-by-value dedupe rule (see that file's own doc).
  *
- * Re-read on `files/written`/`files/removed` of `symbols.yml` or
- * `game/spec.json` (the latter changes `known`, not the document), and on
+ * The `scene` states also decide, for the OTHER plugin, which documents
+ * are cell scenes: `cellScenes()` is what `scenes.ts` gates a `$cell`
+ * binding on, and a read that changes the set calls `scenesHost.recheck()`
+ * before it returns. One way — the scene ids THIS plugin needs come off
+ * the file tree, never off `scenesHost` — so the pair cannot loop.
+ *
+ * Re-read on `files/written`/`files/removed` of `symbols.yml`, of
+ * `game/spec.json` (which changes `known`, not the document) or of a
+ * scene document (which makes a `scene` state resolve or dangle), and on
  * `game/node-types` (a state's type/props/assets gate on the game's
  * report, exactly as `checkScenes` gates on it). Every read broadcasts the
  * document as a `symbols` frame to every `/ide` socket, the boot read too
@@ -20,6 +29,7 @@ import type { Context } from 'cordis';
 import type { Server } from '@cordisjs/plugin-server';
 import yaml from 'js-yaml';
 import {
+  BUILTIN_STATES,
   diagnostic,
   type Diagnostic,
   type DiagnosticsResponse,
@@ -30,7 +40,7 @@ import {
   type SymbolsResponse,
   type SymbolState,
 } from '@energy8engine/contracts';
-import { checkNode } from './scenes';
+import { SCENE_FILE, checkNode } from './scenes';
 
 declare module 'cordis' {
   interface Context {
@@ -43,13 +53,20 @@ export interface SymbolsHostService {
   attachGameRoutes(server: Server): void;
   /** The last read document, as `GET /api/symbols` answers it. */
   state(): SymbolsResponse;
+  /**
+   * Every scene id some state names — the CELL scenes. `scenes.ts` reads it
+   * to decide where a `$cell` binding is legal: a scene document mounted per
+   * cell has one to read, any other does not.
+   */
+  cellScenes(): string[];
 }
 
 export const name = 'symbols';
 export const inject = ['server', 'ideRpc', 'files'];
 
 const FILE = 'symbols.yml';
-const STATES: SymbolState[] = ['static', 'idle', 'win'];
+/** A named state's key: an identifier, `-` allowed after the first character. */
+const STATE_NAME = /^[A-Za-z_][\w-]*$/;
 
 const isRecord = (v: unknown): v is Record<string, unknown> =>
   typeof v === 'object' && v !== null && !Array.isArray(v);
@@ -69,7 +86,7 @@ const parseSymbolNode = (
 };
 
 /**
- * `{ id, name?, fit?, static?, idle?, win? }`, or the reason it is not.
+ * `{ id, name?, fit?, static?, idle?, win?, states? }`, or the reason it is not.
  *
  * `static` is NOT required to parse — `SymbolDef.static` says it always is,
  * but that is `checkSymbols`'s rule to enforce (spec §4: "`static` present"
@@ -82,22 +99,35 @@ const parseSymbolNode = (
  */
 const parseSymbolDef = (value: Record<string, unknown>): { def?: SymbolDef; reason?: string } => {
   if (typeof value.id !== 'string') {
-    return { reason: 'a symbol is { id: string, name?, fit?, static?, idle?, win? }' };
+    return { reason: 'a symbol is { id: string, name?, fit?, static?, idle?, win?, states? }' };
   }
   const def = { id: value.id } as SymbolDef;
   if (typeof value.name === 'string') def.name = value.name;
   if (value.fit === 'contain' || value.fit === 'none') def.fit = value.fit;
-  for (const state of STATES) {
+  for (const state of BUILTIN_STATES) {
     const raw = value[state];
     if (raw === undefined) continue;
     const { node, reason } = parseSymbolNode(value.id, state, raw);
     if (!node) return { reason };
     def[state] = node;
   }
+  // The named states. A key that shadows a built-in, or is not an
+  // identifier, PARSES — `checkSymbols` refuses it as a diagnostic, the same
+  // way a duplicate id is written and reported rather than refused.
+  if (value.states !== undefined) {
+    if (!isRecord(value.states)) return { reason: `symbol "${value.id}": states is not a map` };
+    const states: Record<string, SymbolNode> = {};
+    for (const [state, raw] of Object.entries(value.states)) {
+      const { node, reason } = parseSymbolNode(value.id, state, raw);
+      if (!node) return { reason };
+      states[state] = node;
+    }
+    def.states = states;
+  }
   return { def };
 };
 
-/** `{ version: 1, symbols: [...] }` with every symbol `{ id, name?, fit?, static?, idle?, win? }`, or the reason it is not. */
+/** `{ version: 1, symbols: [...] }` with every symbol `{ id, name?, fit?, static?, idle?, win?, states? }`, or the reason it is not. */
 export function parseDoc(value: unknown): { doc?: SymbolsDoc; reason?: string } {
   if (!isRecord(value) || value.version !== 1 || !Array.isArray(value.symbols)) {
     return { reason: 'a symbols document is { version: 1, symbols: [...] }' };
@@ -105,7 +135,7 @@ export function parseDoc(value: unknown): { doc?: SymbolsDoc; reason?: string } 
   const symbols: SymbolDef[] = [];
   for (const v of value.symbols) {
     if (!isRecord(v))
-      return { reason: 'a symbol is { id: string, name?, fit?, static?, idle?, win? }' };
+      return { reason: 'a symbol is { id: string, name?, fit?, static?, idle?, win?, states? }' };
     const { def, reason } = parseSymbolDef(v);
     if (!def) return { reason };
     symbols.push(def);
@@ -114,17 +144,52 @@ export function parseDoc(value: unknown): { doc?: SymbolsDoc; reason?: string } 
 }
 
 /**
+ * Every state a def declares, as `[name, node]`: the built-ins it sets,
+ * then its `states` keys. A `states` key that shadows a built-in yields
+ * TWICE (its own entry and the built-in's) — `checkSymbols` refuses the
+ * name, and until it is fixed both nodes are checked, neither silently.
+ */
+const statesOf = (def: SymbolDef): [SymbolState, SymbolNode][] => {
+  const out: [SymbolState, SymbolNode][] = [];
+  for (const state of BUILTIN_STATES) if (def[state]) out.push([state, def[state]]);
+  return [...out, ...Object.entries(def.states ?? {})];
+};
+
+/**
+ * Every scene id some state names — a `scene`-typed state's `props.scene`.
+ * Those documents are the CELL scenes: mounted once per cell, so a `$cell`
+ * binding inside them resolves (`scenes.ts`'s `cellBindings`). Nowhere else.
+ */
+export function cellScenes(doc: SymbolsDoc | null): string[] {
+  const out = new Set<string>();
+  for (const def of doc?.symbols ?? []) {
+    for (const [, node] of statesOf(def)) {
+      if (node.type === 'scene' && typeof node.props.scene === 'string' && node.props.scene)
+        out.add(node.props.scene);
+    }
+  }
+  return [...out];
+}
+
+/**
  * Everything the host can say about a symbols document without running
  * the game — spec §4's list. `known` is `game/spec.json`'s own `symbols`
  * (`[]` when the file or the field is absent — see `known()` in `apply`);
  * both mismatch warnings are skipped when it's empty, the same "the game
  * hasn't spoken yet" gate `checkScenes` applies to an unknown node type.
+ *
+ * `scenes` is every scene document that exists (by file name — `apply`
+ * takes it from the tree, the same rule `checkScenes` uses for lookup), so
+ * a `scene`-typed state naming one that is not there is an error. NOT
+ * gated on the game having reported: the reference is a host-level fact,
+ * exactly like `checkScenes`'s own dangling-`scene` check.
  */
 export function checkSymbols(
   doc: SymbolsDoc,
   nodeTypes: NodeTypeInfo[],
   hasFile: (path: string) => boolean,
   known: { id: string; name: string }[],
+  scenes: readonly string[] = [],
 ): Diagnostic[] {
   const out: Diagnostic[] = [];
   const err = (where: string, message: string, fix?: string) =>
@@ -143,13 +208,24 @@ export function checkSymbols(
     seen.add(def.id);
     docIds.add(def.id);
     if (!def.static) err(where, `symbol "${def.id}" has no static state`, 'add a static state');
-    for (const state of STATES) {
-      const node = def[state];
-      if (!node) continue;
+    // The names first, once per `states` key — `statesOf` below yields a
+    // shadowed built-in twice, and the name is wrong once.
+    for (const state of Object.keys(def.states ?? {})) {
+      const at = `${where}/${state}`;
+      if ((BUILTIN_STATES as readonly string[]).includes(state))
+        err(at, `a named state cannot be called "${state}"`, 'rename it — that name is built in');
+      else if (!STATE_NAME.test(state))
+        err(at, `"${state}" is not a state name`, 'use a letter or _, then letters, digits, _ or -');
+    }
+    for (const [state, node] of statesOf(def)) {
+      const at = `${where}/${state}`;
+      const scene = node.type === 'scene' ? node.props.scene : undefined;
+      if (typeof scene === 'string' && !scenes.includes(scene))
+        err(at, `unknown scene "${scene}"`, 'create it, or name one that exists');
       out.push(
         ...checkNode(
           'symbols',
-          `${where}/${state}`,
+          at,
           node,
           infos.get(node.type),
           nodeTypes.length > 0,
@@ -182,6 +258,9 @@ const fileError = (reason: string): Diagnostic =>
 
 export function apply(ctx: Context): void {
   let state: SymbolsResponse = { doc: null, known: [], diagnostics: [] };
+  // The cell scenes of the last read document, and the same list joined —
+  // what decides whether the scenes plugin has to hear about this read.
+  let cells: string[] = [];
   // The last list handed to `ideRpc`, by value — see `scenes.ts` for the rule.
   let reported = '';
   // Refresh generation — see `scenes.ts` for the rule.
@@ -228,12 +307,18 @@ export function apply(ctx: Context): void {
     // one stands in) — a fresh project with `spec.json` symbols but no
     // `symbols.yml` yet should still nudge "no entry" for each, same as
     // it would once the file exists and simply lists none of them.
+    // Which scenes EXIST, by file name — the same rule `checkScenes` uses
+    // for lookup ("the file name wins"), read off the tree this already
+    // has rather than off `scenesHost`: no service to be missing at boot,
+    // and no read of a state that may not have caught up yet.
+    const sceneIds = [...paths].flatMap((p) => SCENE_FILE.exec(p)?.[1] ?? []);
     found.push(
       ...checkSymbols(
         doc ?? { version: 1, symbols: [] },
         ctx.ideRpc.nodeTypes(),
         (p) => paths.has(p),
         knownList,
+        sceneIds,
       ),
     );
     if (mine !== gen) return;
@@ -242,10 +327,23 @@ export function apply(ctx: Context): void {
     if (key !== reported) ctx.ideRpc.reportGameDiagnostics('symbols', found);
     reported = key;
     ctx.ideRpc.broadcastSymbols({ doc, diagnostics: found });
+    // The scenes check gates `$cell` on `cellScenes()`, so a read that
+    // changed the set re-runs theirs — awaited, so a PUT answers with both
+    // documents settled. One way only: `recheck` never calls back here (the
+    // scene ids above come from the tree, not from `scenesHost`), so the
+    // two plugins cannot chase each other.
+    const next = cellScenes(doc);
+    if (next.join('\u0000') !== cells.join('\u0000')) {
+      cells = next;
+      // Caught: a recheck racing a dispose must not fail the PUT that awaits this.
+      await ctx.get('scenesHost')?.recheck().catch(() => {});
+    }
   };
   const again = () => void refresh().catch(() => {});
   const onFile = ({ path }: { path: string }) => {
-    if (path === FILE || path === 'game/spec.json') again();
+    // A scene document too: a `scene` state names one, and creating or
+    // removing the file is what makes that name resolve or dangle.
+    if (path === FILE || path === 'game/spec.json' || SCENE_FILE.test(path)) again();
   };
   again();
   ctx.on('files/written', onFile);
@@ -298,5 +396,6 @@ export function apply(ctx: Context): void {
   ctx.provide('symbolsHost', {
     attachGameRoutes: (server) => server.get('/api/symbols', get),
     state: () => state,
+    cellScenes: () => cells,
   });
 }

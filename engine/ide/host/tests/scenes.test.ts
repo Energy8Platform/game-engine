@@ -248,6 +248,49 @@ describe('checkScenes', () => {
     ]);
   });
 
+  // Slice 30: a scene document some `symbols.yml` state names is a CELL
+  // scene — its nodes ARE mounted per cell, so a binding resolves there.
+  it('a cell scene may bind $cell; the same document unnamed may not', () => {
+    const one = () => [doc('a', [{ id: 'n', type: 'text', props: { text: '$cell.x' } }])];
+    expect(checkScenes(one(), types, () => true, false, ['a'])).toEqual([]);
+    expect(checkScenes(one(), types, () => true, false, ['b'])).toEqual([
+      expect.objectContaining({
+        severity: 'error',
+        where: 'a/n',
+        message:
+          'prop "text" binds "$cell." — only a cell scene (one a symbols.yml state names) reads a cell',
+      }),
+    ]);
+  });
+
+  it("a cell scene's portrait override may bind $cell too", () => {
+    const one = doc('a', [{ id: 'n', type: 'text', props: { text: 'hi' } }], 'scenes/a.scene.yml', {
+      nodes: { n: { text: '$cell.x' } },
+    });
+    expect(checkScenes([one], types, () => true, false, ['a'])).toEqual([]);
+    expect(checkScenes([one], types, () => true, false, [])).toEqual([
+      expect.objectContaining({ severity: 'error', where: 'a/n (portrait)' }),
+    ]);
+  });
+
+  it('an ASSET prop bound to $cell stays an error in a cell scene too', () => {
+    expect(
+      checkScenes(
+        [doc('a', [{ id: 'i', type: 'image', props: { src: '$cell.symbol' } }])],
+        types,
+        () => true,
+        false,
+        ['a'],
+      ),
+    ).toEqual([
+      expect.objectContaining({
+        severity: 'error',
+        where: 'a/i',
+        message: 'an asset prop cannot be bound to $cell (assets are preloaded from the document)',
+      }),
+    ]);
+  });
+
   it('only the `$cell.` prefix passes — any other string on a number prop is still refused', () => {
     const out = checkScenes(
       [doc('a', [{ id: 'n', type: 'text', props: { size: '$cellular' } }])],
@@ -791,6 +834,39 @@ describe('/api/scenes', () => {
         expect.objectContaining({ severity: 'error', plugin: 'scenes' }),
       ]);
     }
+    close();
+  });
+
+  it('a `$cell` binding flips from error to clean when a symbols.yml state names the scene', async () => {
+    host = await createIdeHost({ root: scenesWorkspace(), port: 0 });
+    const { socket, close } = await listen(host);
+    socket.send(JSON.stringify({ type: 'node-types', types }));
+    await expect.poll(() => host!.ctx.ideRpc.nodeTypes().length).toBe(types.length);
+    const at = async () =>
+      (
+        (await (await fetch(`${host!.url}/api/scenes`)).json()) as ScenesResponse
+      ).diagnostics.filter((d) => d.where === 'big_win/t');
+    const written = await send(host.url, '/api/scenes/big_win', 'PUT', {
+      id: 'big_win',
+      nodes: [{ id: 't', type: 'text', props: { text: '$cell.symbol' } }],
+    });
+    expect(written.status).toBe(200);
+    expect(await at()).toEqual([
+      expect.objectContaining({
+        severity: 'error',
+        message: expect.stringContaining('only a cell scene'),
+      }),
+    ]);
+    // Naming it from a symbol state makes it a cell scene, with no restart:
+    // the symbols write re-runs this plugin's check before it answers.
+    const symbols = await send(host.url, '/api/symbols', 'PUT', {
+      doc: {
+        version: 1,
+        symbols: [{ id: '1', static: { type: 'scene', props: { scene: 'big_win' } } }],
+      },
+    });
+    expect(symbols.status).toBe(200);
+    expect(await at()).toEqual([]);
     close();
   });
 
