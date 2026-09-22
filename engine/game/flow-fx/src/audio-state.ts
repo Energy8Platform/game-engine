@@ -24,7 +24,8 @@ export interface LiveInstance {
   on?(event: 'end' | 'stop', fn: () => void): void;
 }
 
-const rafClock: Clock = {
+/** The default `Clock`: one rAF chain. Shared with `./count.ts`, whose ramp is the same shape. */
+export const rafClock: Clock = {
   now: () => performance.now(),
   tick(fn) {
     // The latch is load-bearing: `fn` itself can cancel this loop (a ramp that

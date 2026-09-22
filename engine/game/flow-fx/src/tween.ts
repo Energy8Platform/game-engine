@@ -33,7 +33,8 @@ export interface TweenProps {
   scale?: number;
 }
 
-const EASINGS = Object.keys(Easing).filter(
+/** The easing names the IDE offers — `count` draws the same dropdown. */
+export const EASINGS = Object.keys(Easing).filter(
   (k) => typeof Easing[k as keyof typeof Easing] === 'function',
 );
 

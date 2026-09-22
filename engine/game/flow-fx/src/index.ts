@@ -1,12 +1,14 @@
 /**
- * `flow-fx`: three flow node kinds — `tween` (moves a scene node through
- * the legacy `Tween`), `sound` (plays a file through `@pixi/sound`, with
+ * `flow-fx`: four flow node kinds — `tween` (moves a scene node through
+ * the legacy `Tween`), `count` (runs a text node's `text` up to a number),
+ * `sound` (plays a file through `@pixi/sound`, with
  * category/fade) and `audio` (sets a category's volume, ducking every live
  * instance) — registered on `@energy8engine/flow`'s `flowNodes` by the
  * `fx1` row (`./runtime`). `sound` and `audio` share one `AudioState`
  * (`./audio-state`) per row.
  */
 export { createTween, type TweenProps, type TweenDeps } from './tween';
+export { createCount, type CountProps, type CountDeps } from './count';
 export {
   createSound,
   type SoundProps,

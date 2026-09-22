@@ -4,13 +4,14 @@ import { createFlowNodes } from '@energy8engine/flow';
 import * as runtime from '../src/runtime';
 
 describe('fx1 runtime half', () => {
-  it('registers tween, sound and audio on flowNodes; dispose takes them all back', async () => {
+  it('registers tween, count, sound and audio on flowNodes; dispose takes them all back', async () => {
     const ctx = new Context();
     const flowNodes = createFlowNodes();
     ctx.provide('flowNodes', flowNodes);
     const fiber = ctx.plugin(runtime);
     await fiber;
     expect(flowNodes.get('tween')?.kind).toBe('tween');
+    expect(flowNodes.get('count')?.kind).toBe('count');
     expect(flowNodes.get('sound')?.kind).toBe('sound');
     expect(flowNodes.get('audio')?.kind).toBe('audio');
     await fiber.dispose();

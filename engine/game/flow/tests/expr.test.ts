@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { evaluate, evaluateValue, readPath } from '../src/expr';
+import { evaluate, evaluateValue, formatValue, readPath } from '../src/expr';
 
 const vars = { result: { stage: 'free_spins', win: 12.5 }, ready: true, n: 0, s: 'x' };
 
@@ -95,4 +95,28 @@ describe('evaluateValue', () => {
     expect(() => evaluateValue('($result.win | int)', v)).toThrow(SyntaxError));
   it('evaluate is Boolean(evaluateValue): arithmetic reaches if', () =>
     expect(evaluate('$result.data.fs_total - $result.data.fs_remaining > 5', v)).toBe(true));
+});
+
+/**
+ * The pipe formats, reachable on their own: `count` (`@energy8engine/flow-fx`)
+ * formats every tick of a count-up with the SAME code the `| currency` pipe
+ * runs, rather than a second implementation of "what a number looks like".
+ */
+describe('formatValue', () => {
+  const vars = { session: { currency: { symbol: '$', decimals: 2, position: 'left' } } };
+  it.each<[string, unknown, unknown, string]>([
+    ['currency', 4.604, undefined, '$4.60'],
+    ['int', 4.604, undefined, '5'],
+    ['fixed', 4.604, 1, '4.6'],
+    ['multiplier', 2.5, undefined, 'x2.5'],
+  ])('%s of %s → %s', (name, value, arg, out) => expect(formatValue(name, value, arg, vars)).toBe(out));
+
+  it('currency with no $session.currency is toFixed(2), no symbol', () =>
+    expect(formatValue('currency', 4.604, undefined, {})).toBe('4.60'));
+
+  it('an unknown format is a SyntaxError naming it', () =>
+    expect(() => formatValue('bogus', 1, undefined, {})).toThrow(/unknown format 'bogus'/));
+
+  it('the pipe still appends the position the parser knows', () =>
+    expect(() => evaluateValue('1 | bogus', {})).toThrow(/unknown format 'bogus' at position 4/));
 });

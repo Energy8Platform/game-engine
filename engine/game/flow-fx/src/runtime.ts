@@ -3,7 +3,7 @@
  * `flow1` on purpose (see that bundle's comment on the row): it stays
  * PENDING (`inject: ['flowNodes']`) until `flow1` provides the registry,
  * but going first means its own — heavier — module import finishes before
- * `flow1`'s boot GET can even start, so `tween`/`sound`/`audio` are
+ * `flow1`'s boot GET can even start, so `tween`/`count`/`sound`/`audio` are
  * registered the instant `flow1` applies, not racing it. Each registration
  * is an effect: dispose takes the kind back — `sound`'s also destroys
  * whatever `Sound`s it cached (see `./sound.ts`'s doc comment).
@@ -19,6 +19,7 @@ import type { Context } from 'cordis';
 // itself is a separate row (`flow1`).
 import type {} from '@energy8engine/flow/runtime';
 import { createTween } from './tween';
+import { createCount } from './count';
 import { createSound } from './sound';
 import { createAudio } from './audio';
 import { createAudioState } from './audio-state';
@@ -28,6 +29,7 @@ export const inject = ['flowNodes'];
 
 export function apply(ctx: Context): void {
   ctx.effect(() => ctx.flowNodes.register(createTween()), 'flow-fx:tween');
+  ctx.effect(() => ctx.flowNodes.register(createCount()), 'flow-fx:count');
   const state = createAudioState();
   const sound = createSound(state);
   ctx.effect(() => {

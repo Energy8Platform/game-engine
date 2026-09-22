@@ -180,9 +180,19 @@ class Parser {
         this.next();
         arg = this.parsePrimary();
       }
-      value = format(name.value, value, arg, this.vars, name.pos);
+      value = this.format(name.value, value, arg, name.pos);
     }
     return value;
+  }
+
+  /** `formatValue`, plus the position the parser (and only the parser) knows. */
+  private format(name: string, value: unknown, arg: unknown, pos: number): string {
+    try {
+      return formatValue(name, value, arg, this.vars);
+    } catch (e) {
+      if (e instanceof SyntaxError) throw new SyntaxError(`${e.message} at position ${pos}`);
+      throw e;
+    }
   }
 
   private parseOr(): unknown {
@@ -295,8 +305,15 @@ function compare(op: string, a: unknown, b: unknown, pos: number): boolean {
   }
 }
 
-/** The pipe formats; each returns a string. `vars` is for `currency`'s `$session.currency`. */
-function format(name: string, value: unknown, arg: unknown, vars: Record<string, unknown>, pos: number): string {
+/**
+ * The pipe formats, each returning a string — `vars` is for `currency`'s
+ * `$session.currency`. Exported because a count-up (`flow-fx`'s `count`)
+ * formats every tick with the same code the `| currency` pipe runs, rather
+ * than a second implementation of what a number looks like. The parser's
+ * own wrapper (`Parser.format`) appends the failing position; a caller
+ * with no expression to point into gets the bare message.
+ */
+export function formatValue(name: string, value: unknown, arg: unknown, vars: Record<string, unknown>): string {
   const n = num(value);
   switch (name) {
     case 'currency': {
@@ -314,7 +331,7 @@ function format(name: string, value: unknown, arg: unknown, vars: Record<string,
     case 'multiplier':
       return `x${String(Number(n.toFixed(4)))}`;
     default:
-      throw new SyntaxError(`unknown format '${name}' at position ${pos}`);
+      throw new SyntaxError(`unknown format '${name}'`);
   }
 }
 
