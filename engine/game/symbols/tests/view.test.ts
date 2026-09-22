@@ -504,17 +504,19 @@ describe('$cell bindings', () => {
  * service: one `CellMount` per document id, each a spy whose `once` the
  * test settles by hand.
  */
-function cellMount(label = 'orb') {
+function cellMount(label = 'orb', bound = true) {
   const view = new Container();
   view.label = label;
   view.addChild(new Graphics().rect(-8, -8, 16, 16).fill(0xffffff));
-  let settle: (() => void) | undefined;
+  let settle: ((ran: boolean) => void) | undefined;
   return {
     view,
+    bound,
     bind: vi.fn(),
-    once: vi.fn(() => new Promise<void>((r) => (settle = r))),
+    once: vi.fn(() => new Promise<boolean>((r) => (settle = r))),
     destroy: vi.fn(() => view.destroy({ children: true })),
-    settle: () => settle!(),
+    /** `ran`: whether any node of the copy had an `once` — what the floor below reads. */
+    settle: (ran = true) => settle!(ran),
   };
 }
 
@@ -593,6 +595,64 @@ describe('a scene state', () => {
     expect(known.report.mock.calls[0][1]).toContain('orb');
   });
 
+  it('a copy that ran no once of its own holds 600 ms; one that ran a media node ends with it', async () => {
+    vi.useFakeTimers();
+    try {
+      const { ctx, deps } = setup();
+      const quiet = cellMount('quiet');
+      const loud = cellMount('loud');
+      withScenes(ctx, { quiet, loud });
+      const h = createSymbolHandle('1', deps);
+      h.apply({
+        id: '1',
+        static: STATIC,
+        states: {
+          quiet: { type: 'scene', props: { scene: 'quiet' } },
+          loud: { type: 'scene', props: { scene: 'loud' } },
+        },
+      });
+      // Nothing in the copy had an `once`: without the floor the state would
+      // mount and unmount inside one microtask and the player would see none of it.
+      let done = false;
+      void h.view.playState!('quiet').then(() => (done = true));
+      quiet.settle(false);
+      await vi.advanceTimersByTimeAsync(599);
+      expect(done).toBe(false);
+      expect(wrapperOf(h.view, 'quiet')).toBeDefined();
+      await vi.advanceTimersByTimeAsync(1);
+      expect(done).toBe(true);
+      expect(wrapperOf(h.view, 'quiet')).toBeUndefined();
+
+      // A media node ran: the state is as long as the media, not 600 ms.
+      let played = false;
+      void h.view.playState!('loud').then(() => (played = true));
+      loud.settle(true);
+      await vi.advanceTimersByTimeAsync(0);
+      expect(played).toBe(true);
+      expect(wrapperOf(h.view, 'loud')).toBeUndefined();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('a copy with no bound node is not re-fitted on every bind', () => {
+    const { ctx, deps } = setup();
+    const plain = cellMount('plain', false);
+    withScenes(ctx, { plain });
+    const h = createSymbolHandle('1', deps);
+    h.apply({ id: '1', static: { type: 'scene', props: { scene: 'plain' } } });
+    h.resize(SIZE);
+    const w = wrapperOf(h.view, 'static')!;
+    const fitted = w.scale.x;
+    // A copy the document bound nothing in has nothing to re-resolve, and
+    // `getLocalBounds()` over the whole copy is what a fit costs.
+    const spy = vi.spyOn(plain.view, 'getLocalBounds');
+    h.view.bind({ symbol: '1', mv: 4 });
+    expect(plain.bind).not.toHaveBeenCalled();
+    expect(spy).not.toHaveBeenCalled();
+    expect(w.scale.x).toBe(fitted);
+  });
+
   it('destroying the handle destroys the copy', () => {
     const { ctx, deps } = setup();
     const orb = cellMount();
@@ -652,6 +712,32 @@ describe('playState', () => {
     await p2;
     expect(wrapperOf(h.view, 'celebrate')).toBeUndefined();
     expect(rest.visible).toBe(true);
+  });
+
+  it('a second call replaces a state whose own once never settles: the first resolves all the same', async () => {
+    const { deps, nodeTypes } = setup();
+    const stuck: NodeType = {
+      type: 'stuck',
+      schema: Schema.object({}),
+      mount: () => new Container(),
+      once: () => new Promise<void>(() => {}), // never resolves on its own
+    };
+    nodeTypes.register(stuck);
+    const h = createSymbolHandle('1', deps);
+    h.apply({ id: '1', static: STATIC, states: { a: { type: 'stuck', props: {} }, b: WIN } });
+    h.resize(SIZE);
+    let first = false;
+    const p1 = h.view.playState!('a').then(() => (first = true));
+    const a = wrapperOf(h.view, 'a')!;
+    const p2 = h.view.playState!('b');
+    expect(a.destroyed).toBe(true);
+    await p1;
+    expect(first).toBe(true);
+    // The replacement is unharmed by the first one letting go.
+    expect(wrapperOf(h.view, 'b')).toBeDefined();
+    spriteOf(h.view, 'b').onComplete!();
+    await p2;
+    expect(wrapperOf(h.view, 'static')!.visible).toBe(true);
   });
 
   it('a state the symbol does not have resolves at once — one info per state, not an error', async () => {

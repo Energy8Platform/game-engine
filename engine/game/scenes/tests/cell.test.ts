@@ -146,9 +146,11 @@ describe('mountCell', () => {
     expect(report).not.toHaveBeenCalled();
   });
 
-  it('once resolves at once with no media node, and awaits the one that has it', async () => {
+  it('once answers false with no media node, and awaits — then true for — the one that has it', async () => {
     const { scenes } = boot();
-    await expect(scenes.mountCell('orb', { mv: 1 })!.once()).resolves.toBeUndefined();
+    // `false`: nothing in the copy had an `once`, which is what lets a caller
+    // showing the copy for a while floor it (`@energy8engine/symbols`).
+    await expect(scenes.mountCell('orb', { mv: 1 })!.once()).resolves.toBe(false);
 
     const gate = deferred();
     const once = vi.fn(async () => gate.promise);
@@ -163,14 +165,97 @@ describe('mountCell', () => {
       [media],
     );
     const cell = withMedia.scenes.mountCell('orb', { mv: 1 })!;
-    let done = false;
-    void cell.once().then(() => (done = true));
+    let done: boolean | undefined;
+    void cell.once().then((ran) => (done = ran));
     await tick();
     expect(once).toHaveBeenCalledTimes(1);
-    expect(done).toBe(false);
+    expect(done).toBeUndefined();
     gate.resolve();
     await tick();
     expect(done).toBe(true);
+  });
+
+  it('two copies of one document, bound to different cells, stay independent', () => {
+    const { scenes } = boot();
+    const a = scenes.mountCell('orb', { mv: 2 })!;
+    const b = scenes.mountCell('orb', { mv: 9 })!;
+    expect([textIn(a.view).text, textIn(b.view).text]).toEqual(['2', '9']);
+    a.bind({ mv: 5 });
+    expect(textIn(a.view).text).toBe('5');
+    expect(textIn(b.view).text).toBe('9');
+    a.destroy();
+    expect(textIn(b.view).text).toBe('9');
+    expect(b.view.destroyed).toBe(false);
+  });
+
+  it('bind re-applies a bound COMMON prop, which no type owns', () => {
+    const hot: SceneDoc = {
+      id: 'hot',
+      nodes: [{ id: 'art', type: 'image', props: { src: 'orb.png', alpha: '$cell.hot' } }],
+    };
+    const { scenes } = boot([hot]);
+    const cell = scenes.mountCell('hot', { hot: 0.25 })!;
+    const view = cell.view.getChildByLabel('art', true)!;
+    expect(view.alpha).toBe(0.25);
+    cell.bind({ hot: 1 });
+    expect(view.alpha).toBe(1);
+    // `bound` is what a caller skipping the whole bind reads.
+    expect(cell.bound).toBe(true);
+    expect(scenes.mountCell('hot')!.bound).toBe(true);
+  });
+
+  it('a node type nothing registered is one diagnostic per type, per call', () => {
+    const { scenes, report } = boot([
+      {
+        id: 'gap',
+        nodes: [
+          { id: 'a', type: 'nope', props: {} },
+          { id: 'b', type: 'nope', props: {} },
+        ],
+      },
+    ]);
+    report.mockClear();
+    const cell = scenes.mountCell('gap')!;
+    expect(cell.bound).toBe(false);
+    expect(report).toHaveBeenCalledTimes(1);
+    expect(report.mock.calls[0][0]).toMatchObject({
+      severity: 'error',
+      where: 'gap',
+      message: 'node type "nope" is not registered — the node is skipped',
+    });
+  });
+
+  it('a bound OWN prop of a type with no update is an error naming the node and the prop', () => {
+    const plain: NodeType<any> = {
+      type: 'plain',
+      schema: Schema.object({ kind: Schema.string().default('') }),
+      mount: () => new Container(),
+    };
+    const { scenes, report } = boot(
+      [
+        {
+          id: 'p',
+          nodes: [{ id: 'n', type: 'plain', props: { kind: '$cell.kind', alpha: '$cell.hot' } }],
+        },
+      ],
+      [plain],
+    );
+    const cell = scenes.mountCell('p', { kind: 'a', hot: 1 })!;
+    report.mockClear();
+    // A COMMON prop alone is fine — the runtime applies that one itself.
+    cell.bind({ kind: 'a', hot: 0.5 });
+    expect(cell.view.getChildByLabel('n', true)!.alpha).toBe(0.5);
+    expect(report).not.toHaveBeenCalled();
+    cell.bind({ kind: 'b', hot: 0.5 });
+    expect(report).toHaveBeenCalledTimes(1);
+    expect(report.mock.calls[0][0]).toMatchObject({
+      severity: 'error',
+      where: 'p/n',
+      message: 'plain "n" cannot take a new kind: the type has no update',
+    });
+    // Once per entry, like every other report a copy makes.
+    cell.bind({ kind: 'c', hot: 0.5 });
+    expect(report).toHaveBeenCalledTimes(1);
   });
 
   it('destroy unmounts every node and empties the copy', () => {

@@ -320,6 +320,61 @@ describe('named and scene states', () => {
     expect(report).not.toHaveBeenCalled();
   });
 
+  // The two boot GETs are unordered: `assetsOf` answers `[]` for a document
+  // the scenes row has not fetched yet, and a cell copy has no `refresh` —
+  // art missed here reaches the symbol through nothing at all.
+  it("waits for the scenes row's own documents before asking it for the assets", async () => {
+    const { ctx, symbols, loader } = await boot();
+    await symbols.ready;
+    let fetched = false;
+    const ready = new Promise<void>((r) =>
+      setTimeout(() => {
+        fetched = true;
+        r();
+      }, 0),
+    );
+    const assetsOf = vi.fn((id: string) => (fetched && id === 'orb' ? ['assets/orb.png'] : []));
+    ctx.provide('scenes', { ready, assetsOf } as unknown as ScenesService);
+    symbols.replace(doc30);
+    await settle();
+    expect(loader.load).toHaveBeenCalledWith([
+      'assets/symbols/3.png',
+      'assets/death.png',
+      'assets/orb.png',
+    ]);
+  });
+
+  it('a scenes row whose own GET failed holds nothing up: the other states still load', async () => {
+    const { ctx, symbols, loader, report } = await boot();
+    await symbols.ready;
+    const ready = Promise.reject(new Error('down'));
+    ready.catch(() => {});
+    ctx.provide('scenes', { ready, assetsOf: () => [] } as unknown as ScenesService);
+    symbols.replace(doc30);
+    await settle();
+    expect(loader.load).toHaveBeenCalledWith(['assets/symbols/3.png', 'assets/death.png']);
+    expect(report).not.toHaveBeenCalled();
+  });
+
+  // The adapter in `runtime.ts` maps `(where, message, severity)` onto
+  // `diagnostic(severity, …)`; swapping the last two would still pass every
+  // test that only reads `message`.
+  it('a state the def has not got arrives as an info, not an error', async () => {
+    const { symbols, resolve, report } = await boot(fetchOk({ doc, known: [], diagnostics: [] }));
+    await symbols.ready;
+    await settle();
+    const view = resolve('1') as Container & { playState(state: string): Promise<void> };
+    await view.playState('death');
+    expect(report).toHaveBeenCalledWith(
+      expect.objectContaining({
+        severity: 'info',
+        plugin: 'symbols',
+        where: 'symbols/1',
+        message: 'no state "death"',
+      }),
+    );
+  });
+
   it('preview pins a named state', async () => {
     const { symbols } = await boot();
     await symbols.ready;

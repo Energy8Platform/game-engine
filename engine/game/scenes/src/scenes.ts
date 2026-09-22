@@ -10,6 +10,16 @@
  * nodes only. `show(id)` of a document some visible scene nests just flips
  * that node visible; otherwise the document's own view joins `container`.
  *
+ * `mountCell` is the third kind, and the odd one out: a private copy for
+ * ONE cell of a reel board (a symbol state of type `scene`), with its own
+ * entry list and no `Mount` at all — `view`/`setProps`/`refresh` never
+ * find it, nothing shows or hides it, it is never `fit`, and it dies with
+ * the cell rather than with a scene on screen. Its roots take the
+ * `portrait` override in force AT MOUNT TIME and never flip afterwards:
+ * `applyVariant` walks the mounts, and the copy is in none of them — a
+ * cell that outlives a rotation is redrawn by the board, not re-laid-out
+ * here.
+ *
  * A `pin` (COMMON) applies to a document's OWN top-level mount; an
  * embedded copy is laid out by its host — the safe rect is in the outer
  * root's coordinates, which a `scene` node's subtree does not share. The
@@ -79,10 +89,12 @@ export interface SceneRef {
  */
 export interface CellMount {
   view: Container;
+  /** Whether any node of the copy carries a `$cell` prop — `false` means `bind` has nothing to do, and a caller can skip it (and whatever it does around it). */
+  readonly bound: boolean;
   /** Re-resolves every `$cell` prop of the copy against `data` (`update` + the common pass). */
   bind(data: Record<string, unknown>): void;
-  /** Every node's `once` (a strip, a spritesheet, a spine) awaited together; resolves at once when none has one. */
-  once(): Promise<void>;
+  /** Every node's `once` (a strip, a spritesheet, a spine) awaited together; resolves at once when none has one. Answers whether any node HAD one — a caller showing the copy for a while (`@energy8engine/symbols`' `playState`) floors it instead. */
+  once(): Promise<boolean>;
   destroy(): void;
 }
 
@@ -966,7 +978,8 @@ export function createScenes(options: CreateScenesOptions): ScenesService {
       // cleared, since a node type's own `mount` may be what called us,
       // mid-`mountTop`.
       const prev = building;
-      building = { view, nodes: new Map(), all: entries, types: new Map(), missing: [] };
+      const m: Mount = { view, nodes: new Map(), all: entries, types: new Map(), missing: [] };
+      building = m;
       try {
         // Not `top` — nothing pins a cell copy — but its roots are the
         // document's. `[id]` as the host chain keeps the copy out of
@@ -979,14 +992,43 @@ export function createScenes(options: CreateScenesOptions): ScenesService {
       } finally {
         building = prev;
       }
+      // A copy is never shown, so `reportMissing`'s "wait until it is on
+      // screen" rule has nothing to wait for: an unregistered type is a hole
+      // in what the cell draws, now. One diagnostic per type per call — a
+      // grid of 30 cells asks for this document 30 times.
+      for (const type of new Set(m.missing.map((x) => x.type)))
+        error(
+          id,
+          `node type "${type}" is not registered — the node is skipped`,
+          'register it, or pick a type that is',
+        );
       const ctx = mountCtx([id]);
       return {
         view,
+        bound: entries.some((e) => e.bound?.length),
         bind(next) {
           for (const e of entries) {
             if (!e.bound?.length) continue;
             try {
               const r = resolveCell(e.type, rawOf(e), next);
+              // A copy has no remount path (`setProps`' own is for mounted
+              // nodes), so a type with no `update` can never show a new own
+              // prop: `scene: '$cell.kind'` would swap in silence. One report
+              // per entry, like the catch below.
+              if (
+                !e.failed &&
+                !e.type.update &&
+                ownOf(e.type, r.props) !== ownOf(e.type, e.props)
+              ) {
+                e.failed = true;
+                const dict = e.type.schema.dict ?? {};
+                const own = (e.bound ?? []).filter((k) => Object.hasOwn(dict, k));
+                error(
+                  e.where,
+                  `${e.node.type} "${e.node.id}" cannot take a new ${own.join(', ')}: the type has no update`,
+                  'bind a prop the runtime applies itself, or give the type an update',
+                );
+              }
               e.type.update?.(e.view, r.props, ctx);
               // No `fit`: a cell copy is never `top`, so its `pin` is inert.
               applyCommon(e.view, r.raw, e.type);
@@ -1001,16 +1043,17 @@ export function createScenes(options: CreateScenesOptions): ScenesService {
           }
         },
         async once() {
+          const ran = entries.filter((e) => e.type.once);
           await Promise.all(
-            entries.map(async (e) => {
-              if (!e.type.once) return;
+            ran.map(async (e) => {
               try {
-                await e.type.once(e.view, e.props, ctx);
+                await e.type.once!(e.view, e.props, ctx);
               } catch (err) {
                 error(e.where, `${e.node.type} "${e.node.id}" failed to play: ${why(err)}`);
               }
             }),
           );
+          return ran.length > 0;
         },
         destroy() {
           // `unmountTop`'s order, on the copy's own list: deepest first,

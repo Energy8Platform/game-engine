@@ -120,6 +120,13 @@ export function apply(ctx: Context, config: SymbolsConfig = {}): void {
     // They matter more than any other state's — a cell copy has no `refresh`, so art that
     // lands after it mounted reaches it through a REMOUNT alone (the repaint below).
     const scenes = ctx.reflect.get('scenes', false) as ScenesService | undefined;
+    // And only once its own boot GET has landed: `assetsOf` answers `[]` for
+    // a document the scenes row has not fetched yet, and the two GETs are
+    // unordered — in a built `dist` this one usually wins. Lenient (no row,
+    // no `ready`, a rejected one): a scenes row that never answered must not
+    // hold up every other state's art. No cycle — scenes waits on nothing here.
+    await Promise.resolve(scenes?.ready).catch(() => {});
+    if (!alive) return;
     const urls = new Set<string>();
     for (const def of defs.values())
       for (const state of statesOf(def)) {

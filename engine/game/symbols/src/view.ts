@@ -19,20 +19,24 @@
  * state a preview pins). `playState(name)` — `view.playState`, with
  * `playWin` as its `'win'` shorthand where the def has one, so the cell's
  * own scale pop stands in otherwise — hides the rest wrapper, mounts the
- * state, awaits its `once` (the copy's for a scene, 600 ms for a type
- * without one), unmounts it and shows the rest wrapper again. A state
- * already playing is replaced rather than queued, and a state the def
- * does not declare resolves at once against one `info`: a mechanic names
- * `death` for every loser, and not every symbol dies. `showStatic` tears
- * a state in flight down early; the `once` it was awaiting then resolves
- * into a no-op (the wrapper it would restore is not the current one).
+ * state, awaits its `once` — the copy's for a scene, and 600 ms wherever
+ * nothing had one at all (a type without `once`, a copy of nodes that
+ * carry none), so the state is seen — unmounts it and shows the rest
+ * wrapper again. A state already playing is replaced rather than queued
+ * (and its promise settles then, whatever its own `once` does), and a
+ * state the def does not declare resolves at once against one `info`: a
+ * mechanic names `death` for every loser, and not every symbol dies.
+ * `showStatic` tears a state in flight down early; the `once` it was
+ * awaiting then resolves into a no-op (the wrapper it would restore is not
+ * the current one).
  *
  * A state's props may read the data of the cell the symbol landed in:
  * `'$cell.<field>'` (an orb's `text: '$cell.multiplier'`). `bind(data)` —
  * the reels board calls it on every seated cell — resolves those against
  * that data (`cellProps`) and re-runs the type's `update`, or hands the
- * data to the cell copy; until then each stands at its prop's empty, so
- * no type and no schema ever sees the raw string.
+ * data to the cell copy — a copy with no `$cell` prop in it is left
+ * alone, as a wrapper with no binding is; until then each stands at its
+ * prop's empty, so no type and no schema ever sees the raw string.
  *
  * Every call into a node type's `update`/`once`/`unmount` is guarded:
  * slice 20's lesson — a throwing type is one report per wrapper (until a
@@ -103,6 +107,8 @@ interface Wrapper {
   raw?: Record<string, unknown>;
   /** A `scene` state: the private copy of the document, which owns its binding, `once` and teardown. */
   cell?: CellMount;
+  /** A `scene` state: the document the copy is of — what a diagnostic names, there being no node type. */
+  scene?: string;
   /** The props that carried a `$cell.<field>` — the only ones a `bind` re-resolves. */
   bound?: string[];
   /** Reported once; a remount rebuilds the wrapper and clears it. */
@@ -127,6 +133,8 @@ export function createSymbolHandle(
   let rest: Wrapper | null = null;
   /** The state `playState` is running over `rest`, if any — a `win`, a `death`. */
   let playing: Wrapper | null = null;
+  /** Settles the promise of the state a newer `playState` replaces; see there. */
+  let supersede: (() => void) | undefined;
   let fallback: Container | null = null;
   /** States already reported absent; cleared when a new def arrives — it may declare them. */
   const noState = new Set<SymbolState>();
@@ -134,9 +142,12 @@ export function createSymbolHandle(
   const fail = (w: Wrapper, what: string, e: unknown) => {
     if (w.failed) return;
     w.failed = true;
+    // A cell wrapper has no node type to name — the document it copied is
+    // what a person can go and look at.
+    const who = w.type?.type ?? (w.scene === undefined ? '?' : `scene "${w.scene}"`);
     deps.report(
       `symbols/${id}/${w.state}`,
-      `${w.type?.type ?? '?'} failed to ${what}: ${e instanceof Error ? e.message : String(e)}`,
+      `${who} failed to ${what}: ${e instanceof Error ? e.message : String(e)}`,
     );
   };
 
@@ -178,6 +189,7 @@ export function createSymbolHandle(
   function mountCell(w: Wrapper, node: SymbolNode): void {
     const where = `symbols/${id}/${w.state}`;
     const scene = String(node.props.scene ?? '');
+    w.scene = scene;
     const scenes = deps.ctx.reflect.get('scenes', false) as ScenesService | undefined;
     if (!scenes) {
       deps.report(where, `no scenes runtime to mount the scene "${scene}"`);
@@ -254,13 +266,19 @@ export function createSymbolHandle(
       }
       return;
     }
-    // A state already playing is replaced, not queued — its own `once` is
-    // left to resolve (the wrapper's teardown settles a media type's) into
-    // the no-op below.
+    // A state already playing is replaced, not queued — and the caller
+    // awaiting THAT one is let go of here: its `once` may never settle on
+    // its own (a stuck media load, a custom type), and the wrapper it was
+    // waiting for is about to be torn down. It resolves into the same no-op
+    // as any other late `once` (`playing !== w` below).
+    supersede?.();
     showStatic();
     if (rest) rest.container.visible = false;
     const w = mount(state, node);
     playing = w;
+    const replaced = new Promise<void>((resolve) => {
+      supersede = resolve;
+    });
     // A node type's `once` that never settles (a stuck media load, a bug in a
     // custom type) must not hang the whole reveal step forever: raced against
     // the view's own pixi `'destroyed'` event (fired by `Container.destroy()`
@@ -273,11 +291,14 @@ export function createSymbolHandle(
     });
     try {
       const once = w.cell
-        ? w.cell.once()
+        ? // `false`: no node of the copy had an `once` of its own, so it would
+          // mount and unmount inside one microtask — the same 600 ms floor a
+          // node type without an `once` gets. A copy that DID run one ends with it.
+          w.cell.once().then((ran) => (ran ? undefined : wait(600)))
         : w.type?.once && w.child
           ? w.type.once(w.child, w.props!, deps.ctx)
           : wait(600);
-      await Promise.race([once, destroyed]);
+      await Promise.race([once, destroyed, replaced]);
     } catch (e) {
       fail(w, 'play once', e);
     } finally {
@@ -336,9 +357,13 @@ export function createSymbolHandle(
       for (const w of [rest, playing]) {
         if (!w) continue;
         try {
-          // A cell copy resolves its own nodes; a wrapper with no binding is left alone.
-          if (w.cell) w.cell.bind(data);
-          else if (!w.bound?.length || !w.type || !w.child) continue;
+          // A cell copy resolves its own nodes; a wrapper with no binding is
+          // left alone — a copy included, whose `fit` below would otherwise
+          // walk every node of it on every seated cell.
+          if (w.cell) {
+            if (!w.cell.bound) continue;
+            w.cell.bind(data);
+          } else if (!w.bound?.length || !w.type || !w.child) continue;
           else {
             w.props = cellProps(w.type, w.raw!, data).props;
             applyCommon(w.child, w.props, w.type);
