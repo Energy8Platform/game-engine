@@ -9,8 +9,9 @@
  *     (`lastStepOpts()`) and the run is measurably faster than a plain one.
  *  3. `skip()` 100 ms into a spin collapses the presentation — the spin
  *     resolves within 1 s of the skip.
- *  4. The flow palette lists `audio` (`flow-fx`'s third kind, alongside
- *     `tween`/`sound` — `fx.spec.ts`'s own case for those two).
+ *  4. The flow palette lists `audio` (one of `flow-fx`'s four kinds —
+ *     `tween`, `sound`, `audio` and `count`; `fx.spec.ts` has its own case
+ *     for `tween`/`sound`).
  *
  * Plus case 5, from the slice's final review: tumble AND skip in one run —
  * the two halves of the fix wave that only meet in a browser. A skip

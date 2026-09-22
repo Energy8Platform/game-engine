@@ -846,7 +846,10 @@ ctx.inject(['flow'], (c) =>
    * `cellArt`'s companion, and it answers the question `cellArt` cannot: a
    * cell scene's own art is a `Sprite` like any plain `image` state's, so
    * the constructor name alone cannot tell "a document mounted for THIS
-   * cell" from "an image mounted". A text node inside the cell can — and
+   * cell" from "an image mounted". Unlike `cellArt`, which walks down the
+   * first child of each node, this one searches EVERY child: a cell
+   * scene's text node is a sibling of its art node, not below it. A text
+   * node inside the cell can — and
    * when its `text` is bound (`'$cell.<field>'`), what this reads back is
    * what that binding resolved to against the cell's data: `''` for a
    * field this game's math does not carry, which is a mounted-and-bound

@@ -9,7 +9,7 @@ nodes:
   - { id: click,    kind: sound,   props: { src: assets/spin.wav }, ui: { x: 760,  y: 80 } }
   - { id: spin,     kind: spin,    props: { betLevel: '$shell.bet' }, ui: { x: 940,  y: 80 } }
   - { id: draw,     kind: present, props: { turbo: '$shell.turbo' }, ui: { x: 1120, y: 80 } }
-  - { id: show_win, kind: count,   props: { target: base_game/win, to: '$result.winAmount', ms: 400, format: currency }, ui: { x: 1300, y: 80 } }
+  - { id: show_win, kind: count,   props: { target: base_game/win, to: '$result.winAmount', ms: 400, format: currency, wait: false }, ui: { x: 1300, y: 80 } }
   - { id: win,      kind: shell,   props: { win: '$result.totalWinAmount' }, ui: { x: 1480, y: 80 } }
   - { id: bal,      kind: shell,   props: { balance: '$result.balance' }, ui: { x: 1660, y: 80 } }
   - { id: done,     kind: if,      props: { when: '$result.roundComplete' }, ui: { x: 1840, y: 80 } }

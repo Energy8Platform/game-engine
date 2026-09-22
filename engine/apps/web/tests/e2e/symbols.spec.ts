@@ -294,6 +294,10 @@ test("a mechanic names a symbol's own state, and the plan the game ran carries i
     })
     .toBe('reel-step');
 
+  // How many of those spins actually paid: a search that runs out having
+  // paid nothing was unlucky, one that paid and still saw no `playState` is
+  // the mechanic having stopped emitting it. The message has to tell them apart.
+  let paid = 0;
   for (let attempt = 0; attempt < 40; attempt += 1) {
     // The spin completing at all is half the case: `wait: true` means the
     // plan is held while every named cell plays its state, so a state that
@@ -301,8 +305,11 @@ test("a mechanic names a symbol's own state, and the plan the game ran carries i
     expect(await frame.evaluate(() => (window as any).__e8.spin())).toEqual({ out: 'next' });
     const spins = (await frame.evaluate(() => (window as any).__e8.spins())) as {
       plan: { kind: string; state?: string; cells?: unknown[]; wait?: boolean }[];
+      result: { winAmount: number };
     }[];
-    const played = spins.at(-1)!.plan.filter((step) => step.kind === 'playState');
+    const last = spins.at(-1)!;
+    if (last.result.winAmount > 0) paid += 1;
+    const played = last.plan.filter((step) => step.kind === 'playState');
     if (played.length === 0) continue;
     for (const step of played) {
       expect(step).toMatchObject({ state: 'pop', wait: true });
@@ -310,5 +317,11 @@ test("a mechanic names a symbol's own state, and the plan the game ran carries i
     }
     return;
   }
-  throw new Error('no paying spin in 40 attempts — the math or the reel-step mechanic regressed');
+  throw new Error(
+    `no playState step in 40 spins, ${paid} of which paid — ${
+      paid > 0
+        ? 'the reel-step mechanic has stopped naming a state on a paying spin'
+        : 'the math pays nothing at all'
+    }`,
+  );
 });
