@@ -505,7 +505,14 @@ describe('the example flow.yml', () => {
       'utf8',
     );
     const doc = yaml.load(text) as FlowDoc;
-    const kinds: KindShape[] = [...BUILTIN_KINDS, { kind: 'sound', outs: ['next'] }];
+    // The example also uses `flow-fx`'s own kinds, which the host only ever
+    // learns from a game's report — named here so this check covers the
+    // whole document rather than its built-in half.
+    const kinds: KindShape[] = [
+      ...BUILTIN_KINDS,
+      { kind: 'sound', outs: ['next'] },
+      { kind: 'count', outs: ['next'] },
+    ];
     expect(validateFlow(doc, kinds, null)).toEqual([]);
   });
 });
