@@ -27,7 +27,9 @@ import { map, patchVariant, renameVariant, walk } from './SceneDocument';
  * A string field with `meta.asset` (`.extra('asset', ['png'])`) is a
  * select of the project's files with those extensions — `useAssetPicker`;
  * one with `pick: 'node'` a select of every scene's nodes —
- * `useNodePicker`. Both shared with `FlowProperties`/`SymbolsProperties`.
+ * `useNodePicker`; one with `pick: 'scene'` (a `scene` node's own `scene`)
+ * a select of the document ids. All three shared with
+ * `FlowProperties`/`SymbolsProperties`, which draw the same fields.
  */
 
 /**
@@ -267,7 +269,7 @@ function NodeProperties({
           value={value}
           onChange={onChange}
           commit="blur"
-          pickers={{ asset, node: nodePicker }}
+          pickers={{ asset, node: nodePicker, scene: () => ctx.scenes.docs().map((d) => d.id) }}
         />
       </div>
     </>

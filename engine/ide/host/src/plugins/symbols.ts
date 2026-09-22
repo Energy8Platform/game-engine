@@ -4,7 +4,7 @@
  * is everything the host can say about it without running the game — a
  * parse failure, an empty or duplicate id, a missing `static` state, a
  * named state (`states`) whose key shadows a built-in or is not an
- * identifier, a `scene` state naming a document that is not there, a
+ * identifier, a `scene` state naming no document or one that is not there, a
  * state whose type/props/assets `checkNode` (`scenes.ts`, shared) refuses,
  * and the two-way mismatch against `game/spec.json`'s own `symbols` list
  * (`known`). Reported through `ideRpc.reportGameDiagnostics('symbols', …)`,
@@ -220,7 +220,10 @@ export function checkSymbols(
     for (const [state, node] of statesOf(def)) {
       const at = `${where}/${state}`;
       const scene = node.type === 'scene' ? node.props.scene : undefined;
-      if (typeof scene === 'string' && !scenes.includes(scene))
+      // An empty id is a state nobody has finished writing, not a dangling
+      // reference: `unknown scene ""` would send them looking for a document.
+      if (scene === '') err(at, 'a scene state needs a scene', 'pick one');
+      else if (typeof scene === 'string' && !scenes.includes(scene))
         err(at, `unknown scene "${scene}"`, 'create it, or name one that exists');
       out.push(
         ...checkNode(

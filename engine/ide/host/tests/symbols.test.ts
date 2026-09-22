@@ -17,7 +17,7 @@ import type {
 import { Context } from 'cordis';
 import { createIdeHost, type IdeHost } from '../src/index';
 import * as symbolsPlugin from '../src/plugins/symbols';
-import { checkSymbols } from '../src/plugins/symbols';
+import { cellScenes, checkSymbols } from '../src/plugins/symbols';
 
 const json = (s: Schema): unknown => JSON.parse(JSON.stringify(s));
 /** Same shape as `scenes.test.ts`'s own `types` — `checkNode` is the exact function both plugins call. */
@@ -265,6 +265,15 @@ describe('checkSymbols', () => {
       }),
     );
     expect(named(pop, ['orb'])).toEqual([]);
+    // An unfinished state names nothing: it is not a dangling reference.
+    expect(named({ pop: { type: 'scene', props: { scene: '' } } }, ['orb'])).toContainEqual(
+      expect.objectContaining({
+        severity: 'error',
+        where: 'symbols/1/pop',
+        message: 'a scene state needs a scene',
+        fix: 'pick one',
+      }),
+    );
     // A built-in state carries the same rule.
     expect(
       checkSymbols(
@@ -277,6 +286,27 @@ describe('checkSymbols', () => {
     ).toContainEqual(
       expect.objectContaining({ where: 'symbols/1/static', message: 'unknown scene "orb"' }),
     );
+  });
+
+  it('cellScenes is every scene some state names, each once; no document is none', () => {
+    expect(cellScenes(null)).toEqual([]);
+    expect(cellScenes(doc([]))).toEqual([]);
+    expect(
+      cellScenes(
+        doc([
+          {
+            id: '1',
+            static: { type: 'scene', props: { scene: 'orb' } },
+            states: {
+              pop: { type: 'scene', props: { scene: 'orb' } },
+              die: { type: 'scene', props: { scene: 'dust' } },
+              plain: IMG,
+            },
+          },
+          { id: '2', static: { type: 'scene', props: { scene: '' } } },
+        ]),
+      ),
+    ).toEqual(['orb', 'dust']);
   });
 
   it("a `scene` state's props go through the type's schema like any other node", () => {

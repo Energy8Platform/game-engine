@@ -97,15 +97,29 @@ describe('symbols-doc reducers', () => {
     });
   });
 
-  it('addState creates states.<name> with an empty image; a duplicate, built-in or invalid name is refused', () => {
+  it('addState creates states.<name> with an empty image', () => {
     const next = addState(ONE, '1', 'death');
     expect(next.symbols[0].states).toEqual({ death: IMAGE });
-    expect(addState(next, '1', 'death')).toBe(next); // duplicate name
-    expect(addState(ONE, '1', 'win')).toBe(ONE); // built-in
-    expect(addState(ONE, '1', 'static')).toBe(ONE); // built-in
-    expect(addState(ONE, '1', '1bad')).toBe(ONE); // must start with a letter/underscore
-    expect(addState(ONE, '1', 'has space')).toBe(ONE); // no spaces
-    expect(addState(ONE, '9', 'death')).toBe(ONE); // unknown id
+    expect(ONE.symbols[0].states).toBeUndefined();
+  });
+
+  // One refusal per case: a failure in the first must not hide the rest.
+  it('addState refuses a name the symbol already has', () => {
+    const next = addState(ONE, '1', 'death');
+    expect(addState(next, '1', 'death')).toBe(next);
+  });
+
+  it('addState refuses a built-in name', () => {
+    for (const state of ['static', 'idle', 'win']) expect(addState(ONE, '1', state)).toBe(ONE);
+  });
+
+  it('addState refuses a name that is not an identifier', () => {
+    for (const state of ['1bad', 'has space', 'a.b', ''])
+      expect(addState(ONE, '1', state)).toBe(ONE);
+  });
+
+  it('addState refuses an id no symbol has', () => {
+    expect(addState(ONE, '9', 'death')).toBe(ONE);
   });
 
   it('removeState drops the key, and the whole `states` map when it empties; an unknown name is a no-op', () => {
