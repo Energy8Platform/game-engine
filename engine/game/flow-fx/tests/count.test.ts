@@ -190,6 +190,45 @@ describe('createCount', () => {
     expect(rc.report).toHaveBeenCalledWith(`no 'scenes' service in this composition`);
   });
 
+  it('a second count on the same node takes it over: the first ends at its own value and settles', async () => {
+    const { clock, advance } = fakeClock();
+    const scenes = fakeScenes();
+    const { rc } = runCtx({ scenes });
+    const kind = createCount({ clock });
+
+    // One ramp left running (`wait: false`), as the example's show_win does
+    // once per tumble segment.
+    await kind.run!(props({ to: '10', wait: false, format: 'int' }), rc);
+    advance(300);
+    expect(written(scenes)).toEqual(['0', '3']);
+
+    // The next segment's count claims the node: the first writes its end
+    // value once and stops.
+    const second = kind.run!(props({ from: '10', to: '20', format: 'int' }), rc);
+    expect(written(scenes)).toEqual(['0', '3', '10', '10']);
+    advance(1000);
+    await expect(second).resolves.toEqual({ out: 'next' });
+    expect(written(scenes).at(-1)).toBe('20');
+    // The first ramp is unhooked: its clock entry never writes again.
+    const after = written(scenes).length;
+    advance(1000);
+    expect(written(scenes)).toHaveLength(after);
+  });
+
+  it('a count that finished lets the next one start clean', async () => {
+    const { clock, advance } = fakeClock();
+    const scenes = fakeScenes();
+    const { rc } = runCtx({ scenes });
+    const kind = createCount({ clock });
+    const first = kind.run!(props({ to: '10', format: 'int' }), rc);
+    advance(1000);
+    await expect(first).resolves.toEqual({ out: 'next' });
+    const before = written(scenes).length;
+    await kind.run!(props({ from: '10', to: '20', wait: false, format: 'int' }), rc);
+    // No takeover write: the first was already gone from the registry.
+    expect(written(scenes).slice(before)).toEqual(['10']);
+  });
+
   it('wait: false leaves at once and the count keeps writing', async () => {
     const { clock, advance } = fakeClock();
     const scenes = fakeScenes();

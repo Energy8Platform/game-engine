@@ -66,6 +66,17 @@ const FORMATS = ['', 'currency', 'int', 'fixed:1', 'fixed:2', 'multiplier'];
 
 export function createCount(deps: CountDeps = {}): FlowNodeKind<CountProps> {
   const clock = deps.clock ?? rafClock;
+  /**
+   * The count running on each `<scene>/<node>`, so a second one takes the
+   * node over instead of racing the first for its `text`. One node holds
+   * one value: two ramps writing it interleave, and the loser's last frame
+   * can land after the winner's end value — a flow that counts once per
+   * tumble segment under `wait: false` (the example's own `show_win`) is
+   * the ordinary case, not an edge one. The incumbent is finished as if it
+   * had been skipped: it writes its own end value and settles, so a branch
+   * awaiting it is released rather than abandoned.
+   */
+  const running = new Map<string, () => void>();
   return {
     kind: 'count',
     schema: Schema.object({
@@ -126,6 +137,10 @@ export function createCount(deps: CountDeps = {}): FlowNodeKind<CountProps> {
       const write = (n: number): boolean =>
         scenes.setProps(ref, { text: name ? formatValue(name, n, arg, vars) : String(n) });
 
+      // Whatever was counting this node stops here, at its own end value.
+      const where = `${ref.scene}/${ref.node}`;
+      running.get(where)?.();
+
       // The first value goes down before any frame passes, and its refusal
       // is the one diagnostic worth raising: a per-tick report would spam
       // the node with one copy per frame for the whole count.
@@ -150,9 +165,12 @@ export function createCount(deps: CountDeps = {}): FlowNodeKind<CountProps> {
        */
       const finish = (aborted: boolean): void => {
         for (const off of offs.splice(0)) off();
+        if (running.get(where) === superseded) running.delete(where);
         if (!aborted) write(to);
         settle(aborted);
       };
+      const superseded = () => finish(false);
+      running.set(where, superseded);
 
       const started = clock.now();
       offs.push(
