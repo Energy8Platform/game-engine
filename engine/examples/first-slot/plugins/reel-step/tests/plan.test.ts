@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { plan } from '../src/mechanic';
+import { banded, plan } from '../src/mechanic';
 
 // The brief's fixture, verbatim: two reels, three rows, one paying step
 // followed by a step that neither pays nor shifts. Note what it does NOT
@@ -56,7 +56,7 @@ describe('reel-step: one spin result becomes a presentation plan', () => {
 
   it('the reelStep step carries the shifts and the settled board', () => {
     const step = plan(DATA).find((s) => s.kind === 'reelStep')!;
-    expect(step).toMatchObject({ shifts: [1, 0], settled: DATA.reel_steps[0].settled });
+    expect(step).toMatchObject({ shifts: [1, 0], settled: banded(DATA.reel_steps[0].settled) });
   });
 
   it('stops at a step that neither pays nor shifts', () => {
@@ -135,14 +135,14 @@ describe('reel-step: what each step actually carries', () => {
         kind: 'reelStep',
         winning: CHAIN.reel_steps[0].winning,
         shifts: [1, 0],
-        settled: CHAIN.reel_steps[0].settled,
+        settled: banded(CHAIN.reel_steps[0].settled),
         index: 0,
       },
       {
         kind: 'reelStep',
         winning: CHAIN.reel_steps[1].winning,
         shifts: [0, 2],
-        settled: CHAIN.reel_steps[1].settled,
+        settled: banded(CHAIN.reel_steps[1].settled),
         index: 1,
       },
     ]);
@@ -153,7 +153,7 @@ describe('reel-step: what each step actually carries', () => {
     // not the credited total, which no presentation step carries (see the
     // module doc in `@energy8engine/contracts`' `presentation.ts`).
     expect(chainSteps()).toEqual([
-      { kind: 'spinTo', board: CHAIN.grid },
+      { kind: 'spinTo', board: banded(CHAIN.grid) },
       { kind: 'revealWins', total: 0.5, lines: [] },
       { kind: 'playState', cells: CHAIN.reel_steps[0].winning, state: 'pop', wait: true },
       expect.objectContaining({ kind: 'reelStep', index: 0 }),
@@ -184,14 +184,41 @@ describe('reel-step: what each step actually carries', () => {
       reel_steps: [{ winning: [], shifts: [0, 2], settled: CHAIN.reel_steps[1].settled }],
     });
     expect(moved).toEqual([
-      { kind: 'spinTo', board: CHAIN.grid },
+      { kind: 'spinTo', board: banded(CHAIN.grid) },
       {
         kind: 'reelStep',
         winning: [],
         shifts: [0, 2],
-        settled: CHAIN.reel_steps[1].settled,
+        settled: banded(CHAIN.reel_steps[1].settled),
         index: 0,
       },
     ]);
+  });
+});
+
+describe('reel-step: the orb carries a band from its row', () => {
+  it('wraps every 6 as { symbol, band }, band by row, and leaves every other leaf alone', () => {
+    expect(
+      banded([
+        [6, 6, 6, 6, 6],
+        [1, '6', 2, 3, 4],
+      ]),
+    ).toEqual([
+      [
+        { symbol: 6, band: 'green' },
+        { symbol: 6, band: 'blue' },
+        { symbol: 6, band: 'purple' },
+        { symbol: 6, band: 'red' },
+        { symbol: 6, band: 'green' },
+      ],
+      [1, { symbol: '6', band: 'blue' }, 2, 3, 4],
+    ]);
+  });
+
+  it('the plan spins to, and settles on, banded boards', () => {
+    const steps = plan(CHAIN);
+    expect(steps[0]).toEqual({ kind: 'spinTo', board: [[1, 2, 3], [4, 5, { symbol: 6, band: 'purple' }]] });
+    const first = steps.find((s) => s.kind === 'reelStep') as { settled: unknown };
+    expect(first.settled).toEqual([[7, 1, 2], [4, 5, { symbol: 6, band: 'purple' }]]);
   });
 });

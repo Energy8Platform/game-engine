@@ -2,7 +2,14 @@ id: orb
 nodes:
   - id: art
     type: image
-    props: { src: assets/symbols/6.png }
+    props:
+      src: assets/symbols/6.png
+      srcOf:
+        green: assets/symbols/1.png
+        blue: assets/symbols/2.png
+        purple: assets/symbols/3.png
+        red: assets/symbols/4.png
+      srcKey: $cell.band
   - id: value
     type: text
     props: { text: 'x{$cell.multiplier}', size: 28, fill: '#ffffff', anchor: 0.5, y: 34 }

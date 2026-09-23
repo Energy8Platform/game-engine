@@ -48,7 +48,7 @@ vi.mock('@energy8platform/game-engine/slot', async (importOriginal) => {
 
 // Imported AFTER the mock declaration on purpose — `vi.mock` is hoisted, so
 // these pick up the replacement.
-const { plan } = await import('../src/mechanic');
+const { plan, banded } = await import('../src/mechanic');
 const { createReelStepHandler } = await import('../src/step');
 
 const DATA = {
@@ -138,9 +138,11 @@ describe('reel-step: the plan the mechanic emits is the plan the board runs', ()
         // Symbol ids are numbers in the step vocabulary and strings to the
         // legacy resolver — asserted, not assumed, because the conversion
         // is the handler's and nothing else checks it.
+        // The orb (`6`) arrives with the band its row gave it (`banded`),
+        // spread through `cellData` like any other per-cell field.
         settledGrid: [
           [{ symbol: '7' }, { symbol: '1' }, { symbol: '2' }],
-          [{ symbol: '4' }, { symbol: '5' }, { symbol: '6' }],
+          [{ symbol: '4' }, { symbol: '5' }, { symbol: '6', band: 'purple' }],
         ],
         index: 0,
       },
@@ -167,13 +169,13 @@ describe('reel-step: the plan the mechanic emits is the plan the board runs', ()
     // out and its paid cells pop before its scroll, and each scroll
     // re-syncs the board it settled onto — the whole sequence, by content.
     expect(board.calls).toEqual([
-      `spinTo:${JSON.stringify(DATA.grid)}`,
+      `spinTo:${JSON.stringify(banded(DATA.grid))}`,
       'revealWins:0.5',
       `playState:pop:${JSON.stringify(DATA.reel_steps[0].winning)}`,
-      `refill:${JSON.stringify(DATA.reel_steps[0].settled)}`,
+      `refill:${JSON.stringify(banded(DATA.reel_steps[0].settled))}`,
       'revealWins:1.25',
       `playState:pop:${JSON.stringify(DATA.reel_steps[1].winning)}`,
-      `refill:${JSON.stringify(DATA.reel_steps[1].settled)}`,
+      `refill:${JSON.stringify(banded(DATA.reel_steps[1].settled))}`,
     ]);
   });
 });

@@ -270,7 +270,7 @@ test("a symbol whose static state is a cell scene draws that document in its cel
   //
   // `'x'` is what that renders here, and it is the honest answer rather
   // than a missing one. `first-slot`'s math hands its board over as
-  // `[[int]]`, so a cell's data is `{ symbol }` and nothing else;
+  // `[[int]]`, so a cell's data is `{ symbol }` (plus the `band` reel-step gives a `6`);
   // `resolveValue` renders a template span whose expression reads
   // `null`/`undefined` as `''` (`@energy8engine/contracts`' `expression.ts`),
   // leaving the literal `x` the document wrote around it. So this one
@@ -285,6 +285,43 @@ test("a symbol whose static state is a cell scene draws that document in its cel
   expect(
     await frame.evaluate(([c, r]) => (window as any).__e8.cellText(c, r), plain),
   ).toBeNull();
+});
+
+/**
+ * The art `orb.scene.yml`'s `srcOf` holds for each band, and the band the
+ * `reel-step` mechanic gives a `6` by its row (`BANDS[row % 4]`,
+ * `plugins/reel-step/src/mechanic.ts`) — restated here rather than imported,
+ * so a change on either side has to be made on purpose.
+ */
+const BAND_ART = ['assets/symbols/1.png', 'assets/symbols/2.png', 'assets/symbols/3.png', 'assets/symbols/4.png'];
+
+test('an orb picks its art from its set by the band its row carries', async ({ page }) => {
+  const frame = await readyPreview(page);
+
+  // Two `6`s in different rows. `6` is the heaviest reel weight the math
+  // has, so most spins land one in every row; the loop covers the rest.
+  let orbs: [number, number][] = [];
+  for (let attempt = 0; attempt < 10 && orbs.length < 2; attempt += 1) {
+    const board = await boardShowing(frame, '6');
+    const byRow = new Map<number, [number, number]>();
+    board.forEach((col, c) =>
+      col.forEach((cell, r) => {
+        if (cell === '6' && !byRow.has(r)) byRow.set(r, [c, r]);
+      }),
+    );
+    orbs = [...byRow.values()].slice(0, 2);
+  }
+  expect(orbs, 'no two rows showed a "6" in ten spins').toHaveLength(2);
+
+  const texture = ([c, r]: [number, number]) =>
+    frame.evaluate(([col, row]) => (window as any).__e8.cellTexture(col, row) as string | null, [c, r]);
+  const [a, b] = await Promise.all(orbs.map(texture));
+  // Each shows the file its row's band names — not `src` (`6.png`), the
+  // fallback a cell with no band, or an unpicked set, would show.
+  for (const [cell, shown] of [[orbs[0], a], [orbs[1], b]] as const) {
+    expect(shown, `cell ${cell}`).toContain(BAND_ART[cell[1] % 4]);
+  }
+  expect(a).not.toBe(b);
 });
 
 test("a row's own art loads: the reel-step plugin requires a path no document names", async ({

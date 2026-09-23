@@ -871,6 +871,20 @@ ctx.inject(['flow'], (c) =>
     return view ? found(view) : null;
   },
   /**
+   * Which texture the cell at `(col, row)` draws — the `label` of the
+   * texture on the same deepest first descendant `cellArt` names, which
+   * pixi's loader sets to the URL it loaded from. It tells two `image`s
+   * apart where `cellArt` cannot: `orb.scene.yml` picks its art from
+   * `srcOf` by `$cell.band`, and both picks are a `Sprite`. `null` with no
+   * view, or when that node draws no texture.
+   */
+  cellTexture(col: number, row: number): string | null {
+    let node = liveGrid()?.getCell(col, row)?.view;
+    if (!node) return null;
+    while (node.children && node.children.length > 0) node = node.children[0];
+    return node.texture?.label ?? null;
+  },
+  /**
    * Whether the asset loader HAS `path` — `assetLoader.get(path)`, the same
    * read every `image` node makes when it fills its sprite in. The one
    * honest way to see a `scenes.require(...)` from outside: what a row
@@ -1001,6 +1015,8 @@ interface ViewNode {
   readonly constructor: { readonly name: string };
   /** A `Text`/`BitmapText` has one; every other display object does not — what `cellText` looks for. */
   readonly text?: unknown;
+  /** A `Sprite` has one; its `label` is the URL it was loaded from — what `cellTexture` reads. */
+  readonly texture?: { readonly label?: string };
 }
 
 /**

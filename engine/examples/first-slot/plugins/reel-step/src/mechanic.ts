@@ -26,6 +26,7 @@
  */
 import type {
   Board,
+  BoardCell,
   Cell,
   KnownPresentationStep,
   SpinMechanic,
@@ -93,6 +94,26 @@ export interface ReelStepStep {
  */
 export type ReelStepPlan = (KnownPresentationStep | ReelStepStep)[];
 
+/**
+ * The orb's colour bands, by row: `orb.scene.yml` picks its art with
+ * `srcKey: '$cell.band'`, and this game's math hands its board over as
+ * `[[int]]`, so no cell would carry a band of its own. The mechanic is where
+ * the math's board becomes the board's, so this is where one is given —
+ * deterministic (a cell's row on the board it sits in, not a roll) and with
+ * no math change. Only symbol `6` (the orb) gets one; every other leaf stays
+ * the bare id the math sent.
+ */
+export const BANDS = ['green', 'blue', 'purple', 'red'] as const;
+
+/** `board` with each `6` wrapped as `{ symbol, band }`, its band from its row. */
+export function banded(board: Board): Board {
+  return board.map((col) =>
+    col.map((cell, row): number | string | BoardCell =>
+      String(cell) === '6' ? { symbol: cell as number | string, band: BANDS[row % BANDS.length] } : cell,
+    ),
+  );
+}
+
 /** `reel-step` needs the landed board to spin to, plus the chain to walk. */
 export const expects: SpinShapeRequirement = {
   fields: { grid: 'grid', reel_steps: 'list' },
@@ -135,7 +156,7 @@ export const expects: SpinShapeRequirement = {
  * are in `@energy8engine/contracts`' `tests/mechanic-open.test.ts`.
  */
 export function plan(data: ReelStepStageData): ReelStepPlan {
-  const steps: ReelStepPlan = [{ kind: 'spinTo', board: data.grid }];
+  const steps: ReelStepPlan = [{ kind: 'spinTo', board: banded(data.grid) }];
 
   data.reel_steps.every((round, index) => {
     const paid = round.winning.length > 0;
@@ -158,7 +179,7 @@ export function plan(data: ReelStepStageData): ReelStepPlan {
       kind: 'reelStep',
       winning: round.winning,
       shifts: round.shifts,
-      settled: round.settled,
+      settled: banded(round.settled),
       index,
     });
     return true;
