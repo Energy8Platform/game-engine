@@ -124,6 +124,14 @@ describe('checkScenes', () => {
       ]),
     );
     expect(out.every((d) => d.plugin === 'scenes')).toBe(true);
+    // Word for word the runtime's own refusal (`@energy8engine/scenes`'
+    // `mountNode`): one rule, one wording, whichever surface the author
+    // happens to read it on.
+    expect(out.find((d) => d.where === 'bad/a')).toMatchObject({
+      message:
+        'node id "a" is declared twice in "bad" — ids are unique per document, not per parent, and the later one is skipped',
+      fix: 'prefix them, e.g. "rock_bar" and "paper_bar"',
+    });
     // The props failure names the field.
     expect(out.find((d) => d.where === 'bad/d')?.message).toContain('src');
   });
@@ -243,7 +251,7 @@ describe('checkScenes', () => {
       expect.objectContaining({
         severity: 'error',
         where: 'a/n',
-        message: expect.stringContaining('$cell.'),
+        message: expect.stringContaining('$cell'),
       }),
     ]);
   });
@@ -258,7 +266,7 @@ describe('checkScenes', () => {
         severity: 'error',
         where: 'a/n',
         message:
-          'prop "text" binds "$cell." — only a cell scene (one a symbols.yml state names) reads a cell',
+          'prop "text" reads "$cell" — only a cell scene (one a symbols.yml state names) has a cell to read',
       }),
     ]);
   });
@@ -302,7 +310,7 @@ describe('checkScenes', () => {
         severity: 'error',
         where: 'a/n',
         message:
-          'prop "text" binds "$cell." — only a cell scene (one a symbols.yml state names) reads a cell',
+          'prop "text" reads "$cell" — only a cell scene (one a symbols.yml state names) has a cell to read',
       }),
     ]);
   });
@@ -612,7 +620,7 @@ describe('checkScenes', () => {
       expect.objectContaining({
         severity: 'error',
         where: 'a/tag (portrait)',
-        message: expect.stringContaining('$cell.'),
+        message: expect.stringContaining('$cell'),
       }),
       {
         severity: 'warning',

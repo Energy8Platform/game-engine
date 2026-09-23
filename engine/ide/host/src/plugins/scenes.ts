@@ -188,7 +188,7 @@ export function checkNode(
         const bound = isCellBinding(v);
         if (bound && !cellBindings)
           err(
-            `prop "${k}" binds "$cell." — only a cell scene (one a symbols.yml state names) reads a cell`,
+            `prop "${k}" reads "$cell" — only a cell scene (one a symbols.yml state names) has a cell to read`,
             'use a literal value',
           );
         target[k] = bound ? emptyProp(dict[k] ?? COMMON.dict?.[k]) : v;
@@ -294,7 +294,14 @@ export function checkScenes(
     for (const node of walk(doc.nodes)) {
       const where = `${scene}/${node.id}`;
       if (seen.has(node.id))
-        err(where, `node "${node.id}" is declared twice`, 'give each node one id');
+        err(
+          where,
+          // Word for word the runtime's (`@energy8engine/scenes`' `mountNode`):
+          // the diagnostics panel is where an author reads the rule, and one
+          // rule may not have two wordings.
+          `node id "${node.id}" is declared twice in "${scene}" — ids are unique per document, not per parent, and the later one is skipped`,
+          'prefix them, e.g. "rock_bar" and "paper_bar"',
+        );
       seen.add(node.id);
       if (node.type === 'reels') reelsNodes.push(where);
       out.push(
