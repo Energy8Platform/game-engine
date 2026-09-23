@@ -19,6 +19,10 @@
  * or a ref nothing is mounted at, is a diagnostic on the flow node
  * (`report`) and an exit by `next`, never a thrown branch.
  *
+ * `scenes.setProps` does not check visibility, so a count writes its
+ * node's `text` whether or not the node's scene is shown — show the
+ * scene first, or accept that the value is final by the time it appears.
+ *
  * Leaving: `wait: true` (the default) waits for the count, `wait: false`
  * leaves at once and lets it finish in the background. Either way a
  * `ui.skip` on the flow bus jumps straight to the end value, and the

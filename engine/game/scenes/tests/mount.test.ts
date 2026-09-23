@@ -290,7 +290,13 @@ describe('mounting', () => {
       },
     ]);
     expect(byId(scenes, 'a', 'n')!.x).toBe(1);
-    expect(report).toHaveBeenCalledWith(expect.objectContaining({ where: 'a/n' }));
+    expect(report).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: 'a/n',
+        message: 'node id "n" is declared twice in "a" — ids are unique per document, not per parent',
+        fix: 'prefix them, e.g. "rock_bar" and "paper_bar"',
+      }),
+    );
   });
 
   it('a scene node mounts the referenced document as a child, hidden by default when told so', () => {

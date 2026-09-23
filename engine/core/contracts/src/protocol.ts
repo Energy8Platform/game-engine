@@ -299,6 +299,7 @@ export interface SceneNode {
 /** `scenes/<id>.scene.yml`, parsed. List order is draw order, first at the back. */
 export interface SceneDoc {
   id: string;
+  /** Every id here — nested or not — is unique across the WHOLE document, not just among its own parent's siblings. */
   nodes: SceneNode[];
   /**
    * The portrait variant (spec §6): per TOP-LEVEL node id, the props the

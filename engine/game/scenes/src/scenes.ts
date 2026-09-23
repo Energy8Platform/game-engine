@@ -127,6 +127,20 @@ export interface ScenesService {
    * unneeded is what unloads it.
    */
   require(paths: string[]): () => void;
+  /**
+   * `fn` runs once per tick with the ticker's `deltaMS` — for code with no
+   * node of its own to hang an `update` off (paper-duel's tier overlay
+   * follows falling cells this way, the one place that migration reaches
+   * a renderer's `app.ticker` directly). No ticker (`options.ticker` is
+   * absent or `null`, a headless composition) and the registration is
+   * still accepted, just never fires; the returned disposer is a no-op
+   * either way. One ticker callback fans out to every registration —
+   * hooked on the FIRST `onFrame`, unhooked once the LAST disposer runs,
+   * so a composition that never calls this adds no per-frame work. A
+   * throwing `fn` is unhooked and reported once (`scenes`, `onFrame`);
+   * its siblings keep firing.
+   */
+  onFrame(fn: (dt: number) => void): () => void;
   /** Mounts `id`'s tree into a fresh container for a `scene` node; `null` on a cycle or a missing id. Internal to `scene` nodes. */
   mountDoc(id: string, chain: string[]): Container | null;
   /**
@@ -382,8 +396,8 @@ export function createScenes(options: CreateScenesOptions): ScenesService {
     if (seen.has(node.id)) {
       error(
         where,
-        `node id "${node.id}" is declared twice — the later one is skipped`,
-        'give it an id of its own',
+        `node id "${node.id}" is declared twice in "${sceneId}" — ids are unique per document, not per parent`,
+        'prefix them, e.g. "rock_bar" and "paper_bar"',
       );
       return;
     }
@@ -858,6 +872,33 @@ export function createScenes(options: CreateScenesOptions): ScenesService {
     await loadPaths(id, [...want].filter((p) => !loaded.has(p)));
   }
 
+  /** Live `onFrame` registrations — holder objects, so the same function registered twice is two entries, not one collapsed by `Set` identity. */
+  const frameHolders = new Set<{ fn: (dt: number) => void }>();
+  /** The one ticker callback every `onFrame` fans out through; hooked only while `frameHolders` is non-empty. */
+  const onTick = (t: { deltaMS: number }) => {
+    for (const h of [...frameHolders])
+      try {
+        h.fn(t.deltaMS);
+      } catch (e) {
+        // Unhooked before it can throw again; the siblings in this same
+        // tick (the snapshot above) still get their call.
+        frameHolders.delete(h);
+        error('onFrame', `onFrame callback failed: ${why(e)}`, 'fix the callback, or stop registering it');
+        if (frameHolders.size === 0) options.ticker?.remove(onTick);
+      }
+  };
+
+  /** `ScenesService.onFrame` — see its doc for the lazy-hook contract. */
+  function onFrame(fn: (dt: number) => void): () => void {
+    const holder = { fn };
+    frameHolders.add(holder);
+    if (options.ticker && frameHolders.size === 1) options.ticker.add(onTick);
+    return () => {
+      if (!frameHolders.delete(holder)) return;
+      if (frameHolders.size === 0) options.ticker?.remove(onTick);
+    };
+  }
+
   /** `ScenesService.require` — see its doc for what a holder is worth. */
   function requireAssets(paths: string[]): () => void {
     const holder = { paths: [...new Set(paths)] };
@@ -996,6 +1037,7 @@ export function createScenes(options: CreateScenesOptions): ScenesService {
     },
     assetsOf: (id) => assetsOf(id),
     require: (paths) => requireAssets(paths),
+    onFrame: (fn) => onFrame(fn),
     mountDoc(id, chain) {
       const doc = docs.get(id);
       if (!doc || chain.includes(id)) return null;
@@ -1221,6 +1263,14 @@ export function createScenes(options: CreateScenesOptions): ScenesService {
       container.removeChildren();
       options.root.removeChild(container);
       container.destroy();
+      // Nothing left to unhook FOR (`frameHolders` is this composition's
+      // own state), but the ticker is the renderer's and outlives us —
+      // leaving the hook would call `onTick` forever against a torn-down
+      // scope.
+      if (frameHolders.size > 0) {
+        frameHolders.clear();
+        options.ticker?.remove(onTick);
+      }
     },
   };
   return service;
