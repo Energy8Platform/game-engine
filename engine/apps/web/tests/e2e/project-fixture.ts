@@ -41,7 +41,10 @@ export const FIXTURE = join(EXAMPLES, 'first-slot');
  * everything behaves exactly as it did when the number was written out in
  * each file.
  */
-export { IDE_HOST_PORT } from '../../e2e-ports';
+import { IDE_HOST_PORT } from '../../e2e-ports';
+// Imported, then re-exported: `export { … } from` binds nothing locally, and
+// `startDevHost`/`startBareHost` below read the name themselves.
+export { IDE_HOST_PORT };
 
 /**
  * A private, writable copy of `first-slot`. Never the checked-in example
