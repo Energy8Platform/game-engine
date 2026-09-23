@@ -155,6 +155,15 @@ export interface EmitStep {
  * `wait` (default true) is what the plan does, not what the cells do: with
  * `false` the states start and the plan moves on, so a morph can play over
  * the tumble that follows it.
+ *
+ * It is read by `executePlan` (`@energy8engine/play-loop`), not by the board
+ * — and read there for EVERY step kind, this one and a plugin's alike, off
+ * `UnknownPresentationStep`'s index signature when the shape has no field of
+ * its own. The rule is one line: `wait === false` starts the step and the
+ * plan carries on. The plan still stays atomic — `executePlan` awaits every
+ * such step at the end, before it returns, so a state cannot outlive the
+ * plan that played it, and a failure is the ordinary `step "<kind>" failed`
+ * diagnostic naming the index it started at.
  */
 export interface PlayStateStep {
   kind: 'playState';

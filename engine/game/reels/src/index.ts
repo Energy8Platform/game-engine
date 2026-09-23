@@ -250,16 +250,22 @@ export function boardFromReelSystem(
     // view) and a plain `SymbolView` with no `playState` of its own are all
     // skipped rather than thrown over — the same tolerance `bindAll` already
     // has for a ragged grid.
+    //
+    // `step.wait` is not read here, on purpose: it is the PLAN's field, not
+    // the board's. Every cell is started and this settles when the last one
+    // ends; whether `executePlan` holds for that promise or starts the next
+    // step over the top of it (`wait: false`) is its call, for every step
+    // kind at once — see `@energy8engine/play-loop`'s module doc.
     playState: tracked(async (step: PlayStateStep) => {
       const views = step.cells
         .map(({ col, row }) => (reelSystem.grid.getCell(col, row) as CellLike | undefined)?.view)
         .filter((v): v is NonNullable<typeof v> => !!v?.playState);
-      const playing = views.map((v) => {
-        statesPlaying.add(v);
-        return v.playState!(step.state).finally(() => statesPlaying.delete(v));
-      });
-      if (step.wait === false) return;
-      await Promise.all(playing);
+      await Promise.all(
+        views.map((v) => {
+          statesPlaying.add(v);
+          return v.playState!(step.state).finally(() => statesPlaying.delete(v));
+        }),
+      );
     }),
 
     refill: tracked(async (step: RefillStep) => {

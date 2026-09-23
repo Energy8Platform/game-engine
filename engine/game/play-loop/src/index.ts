@@ -17,6 +17,15 @@
  * matter what the plan contains (including a step whose `kind` matches
  * nothing in the vocabulary).
  *
+ * **`wait: false`.** One rule for every step, known kind or registered
+ * handler: a step carrying `wait === false` is STARTED where it sits and
+ * not awaited there, so the next step begins over the top of it — a death
+ * morph playing through the tumble that follows it. The plan is still
+ * atomic: everything started that way is awaited at the END of
+ * `executePlan`, before it returns, and a rejection becomes the ordinary
+ * `step "<kind>" failed` diagnostic naming the index it STARTED at. A step
+ * that outlives its own plan is not something this vocabulary offers.
+ *
  * **The registry.** `BoardApi` is the closed vocabulary the shipped
  * mechanics stand on — one method per known kind, not opened here. Any
  * OTHER kind (task 9's `reelStep` among them) has nowhere to land on `BoardApi`
@@ -305,7 +314,9 @@ export interface ExecuteHooks {
 
 /**
  * Plays `plan` against `board`, one step at a time, awaiting each before
- * starting the next. Returns the diagnostics collected along the way —
+ * starting the next — unless the step says `wait: false`, which starts it
+ * and moves on (see this file's module doc, and `PlayStateStep.wait` in
+ * `@energy8engine/contracts`). Returns the diagnostics collected along the way —
  * empty when everything ran clean. Never rejects and never throws: a step
  * the board can't perform and has no registered handler either, or one
  * whose handler throws or rejects, is recorded as a `Diagnostic` and the
@@ -370,6 +381,30 @@ export async function executePlan(
       // Swallowed: announcing a step must not be able to fail it.
     }
   };
+  const problems: Diagnostic[] = [];
+  // The one wording for a step that failed, shared by the two paths that can
+  // see one: the `catch` around the loop body, and a `wait: false` step whose
+  // rejection lands long after the loop moved on — which is why `where` and
+  // `kind` are arguments rather than read from the loop's own variables.
+  const failed = (where: string, kind: string, error: unknown): void => {
+    problems.push(
+      diagnostic(
+        'error',
+        'play-loop',
+        where,
+        `step "${kind}" failed: ${error instanceof Error ? error.message : String(error)}`,
+      ),
+    );
+  };
+  /**
+   * The steps that declined to hold the plan (`wait: false`). Started in
+   * order with everything else and awaited HERE, at the end, so a plan stays
+   * atomic — `present` is one node in the flow, and a beat that outlives its
+   * own plan is not a thing this vocabulary offers. Each one carries its own
+   * `catch`, closed over the index it STARTED at, because by the time it
+   * fails the loop is somewhere else entirely.
+   */
+  const pending: Promise<void>[] = [];
   // Read before the `!board` early return, on purpose: a collision is a
   // fact about the composition, not about this plan, so it must not be
   // swallowed by a plan that had nothing to run or no board to run it on.
@@ -378,7 +413,6 @@ export async function executePlan(
   // call into an interface a THIRD PARTY implements, and `executePlan`
   // promises never to throw no matter what the registry does. See
   // `tests/registry.test.ts`'s "a registry whose collisions() throws".
-  const problems: Diagnostic[] = [];
   if (registry) {
     try {
       problems.push(...registry.collisions());
@@ -413,7 +447,6 @@ export async function executePlan(
   for (let index = 0; index < plan.length; index += 1) {
     const step = plan[index];
     const where = `plan[${index}]`;
-
     // A mechanic's plan is data a THIRD party produced (Task 5's own
     // vocabulary, but any mechanic — ours or a plugin's — can emit a
     // malformed entry: `null`, a step missing `kind`, or `spinTo` whose
@@ -429,6 +462,16 @@ export async function executePlan(
       );
       continue;
     }
+
+    // `wait: false` is read off the step itself, for ANY kind, known or
+    // registered: `SpinToStep` and friends never declare the field, and a
+    // plugin's step carries it through `UnknownPresentationStep`'s index
+    // signature, so the cast is what asking a union this question costs. Only
+    // an explicit `false` counts — absent and `true` both hold the plan, as
+    // they always have. Read AFTER the guard above, not before: reading any
+    // field off a `null` step is the exact TypeError that guard exists to
+    // keep out of this function.
+    const nonBlocking = (step as { wait?: unknown }).wait === false;
 
     // Everything from here down — RESOLVING who handles `step.kind`, and
     // RUNNING them — sits inside one try/catch, not just the running half.
@@ -478,6 +521,15 @@ export async function executePlan(
       if (typeof method === 'function') {
         const running = method.call(board, step, opts);
         started(step);
+        if (nonBlocking) {
+          // `Promise.resolve` because a board method is someone else's code: one
+          // that returns nothing at all is fine to `await`, and must stay fine
+          // to leave running.
+          pending.push(
+            Promise.resolve(running).catch((error: unknown) => failed(where, step.kind, error)),
+          );
+          continue;
+        }
         await running;
         continue;
       }
@@ -487,6 +539,12 @@ export async function executePlan(
       if (handler) {
         const running = handler.run(step, board, opts);
         started(step);
+        if (nonBlocking) {
+          pending.push(
+            Promise.resolve(running).catch((error: unknown) => failed(where, step.kind, error)),
+          );
+          continue;
+        }
         await running;
         continue;
       }
@@ -509,12 +567,14 @@ export async function executePlan(
         ),
       );
     } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      problems.push(
-        diagnostic('error', 'play-loop', where, `step "${step.kind}" failed: ${message}`),
-      );
+      failed(where, step.kind, error);
     }
   }
+
+  // Every `wait: false` step, awaited before the plan calls itself done. None
+  // of these can reject: each carries its own `catch` above, which turns a
+  // failure into a diagnostic instead.
+  await Promise.all(pending);
 
   return problems;
 }

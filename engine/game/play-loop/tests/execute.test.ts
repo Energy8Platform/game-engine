@@ -324,3 +324,143 @@ describe('executePlan: playState', () => {
     expect(problems[0].message).toContain('board cannot perform step "playState"');
   });
 });
+
+/**
+ * Slice 31 — `wait: false`. A generic `executePlan` rule, not a per-kind
+ * one: any step, known kind or registered handler, that carries
+ * `wait === false` is STARTED and not awaited where it sits, so the next
+ * step begins over the top of it. The plan is still atomic — everything
+ * started this way is awaited at the very end, before the diagnostics are
+ * returned.
+ */
+describe('executePlan: a step that does not hold the plan', () => {
+  it('wait: false starts the step and moves on; the plan still awaits it before returning', async () => {
+    const board = fakeBoard();
+    let release!: () => void;
+    const held = new Promise<void>((r) => (release = r));
+    board.playState.mockImplementation(async () => {
+      board.calls.push('playState:start');
+      await held;
+      board.calls.push('playState:end');
+    });
+
+    const running = executePlan(
+      [
+        { kind: 'playState', cells: [{ col: 0, row: 0 }], state: 'death', wait: false },
+        { kind: 'spinTo', board: [[1]] },
+      ],
+      board,
+    );
+
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(board.calls).toEqual(['playState:start', 'spinTo']);
+
+    release();
+    expect(await running).toEqual([]);
+    expect(board.calls).toEqual(['playState:start', 'spinTo', 'playState:end']);
+  });
+
+  it('a non-blocking step that rejects is a diagnostic naming the index it started at', async () => {
+    const board = fakeBoard();
+    board.playState.mockImplementation(async () => {
+      throw new Error('nope');
+    });
+
+    const problems = await executePlan(
+      [
+        { kind: 'playState', cells: [], state: 'death', wait: false },
+        { kind: 'spinTo', board: [[1]] },
+      ],
+      board,
+    );
+
+    expect(problems.map((d) => [d.where, d.message])).toEqual([
+      ['plan[0]', 'step "playState" failed: nope'],
+    ]);
+    expect(board.calls).toEqual(['spinTo']);
+  });
+
+  it('a registered kind takes the same rule', async () => {
+    const board = fakeBoard();
+    let release!: () => void;
+    const held = new Promise<void>((r) => (release = r));
+    const run = vi.fn(async () => {
+      board.calls.push('reelStep:start');
+      await held;
+      board.calls.push('reelStep:end');
+    });
+    const handler = { kind: 'reelStep', run };
+    const registry = {
+      register: () => () => {},
+      has: (kind: string) => kind === 'reelStep',
+      get: (kind: string) => (kind === 'reelStep' ? handler : undefined),
+      kinds: () => ['reelStep'],
+      collisions: () => [],
+    };
+
+    const running = executePlan(
+      [
+        { kind: 'reelStep', wait: false },
+        { kind: 'spinTo', board: [[1]] },
+      ],
+      board,
+      registry,
+    );
+
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(board.calls).toEqual(['reelStep:start', 'spinTo']);
+
+    release();
+    expect(await running).toEqual([]);
+    expect(board.calls).toEqual(['reelStep:start', 'spinTo', 'reelStep:end']);
+  });
+
+  it('wait: true and wait absent both hold the plan', async () => {
+    for (const wait of [true, undefined]) {
+      const board = fakeBoard();
+      let release!: () => void;
+      const held = new Promise<void>((r) => (release = r));
+      board.playState.mockImplementation(async () => {
+        board.calls.push('playState:start');
+        await held;
+        board.calls.push('playState:end');
+      });
+
+      const running = executePlan(
+        [
+          { kind: 'playState', cells: [{ col: 0, row: 0 }], state: 'death', wait },
+          { kind: 'spinTo', board: [[1]] },
+        ],
+        board,
+      );
+
+      await Promise.resolve();
+      await Promise.resolve();
+      expect(board.calls).toEqual(['playState:start']);
+
+      release();
+      expect(await running).toEqual([]);
+      expect(board.calls).toEqual(['playState:start', 'playState:end', 'spinTo']);
+    }
+  });
+
+  it('the started hook still announces a step that does not hold the plan', async () => {
+    const board = fakeBoard();
+    const announced: string[] = [];
+
+    await executePlan(
+      [
+        { kind: 'playState', cells: [], state: 'death', wait: false },
+        { kind: 'spinTo', board: [[1]] },
+      ],
+      board,
+      undefined,
+      undefined,
+      { onStepStarted: (step) => announced.push(step.kind) },
+    );
+
+    expect(announced).toEqual(['playState', 'spinTo']);
+  });
+});

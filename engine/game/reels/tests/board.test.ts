@@ -752,22 +752,38 @@ describe('boardFromReelSystem: playState', () => {
     expect(settled).toBe(true);
   });
 
-  it('returns at once with `wait: false` — the states keep playing on their own', async () => {
-    const playState = vi.fn(() => new Promise<void>(() => {})); // never settles within this test
+  // Slice 31: the board does not read `wait` at all any more — `executePlan`
+  // does, for every step kind (see `@energy8engine/play-loop`). What the board
+  // owes is one promise that settles when every named cell has finished; whether
+  // the PLAN holds for it there or picks it up at the end is the plan's call.
+  it('ignores `wait: false` — it still settles only once every named cell has ended; the plan is what decides', async () => {
+    let release!: () => void;
+    const gate = new Promise<void>((r) => (release = r));
+    const playState = vi.fn(() => gate);
     const cell = cellWithView({ playState });
     const { reelSystem, getCell } = fakeReelSystem();
     getCell.mockImplementation(() => cell);
     const board = boardFromReelSystem(reelSystem);
 
-    await expect(
-      board.playState({
+    let settled = false;
+    const running = board
+      .playState({
         kind: 'playState',
         cells: [{ col: 0, row: 0 }],
         state: 'death',
         wait: false,
-      }),
-    ).resolves.toBeUndefined();
+      })
+      .then(() => {
+        settled = true;
+      });
+
+    await Promise.race([running, new Promise((r) => setTimeout(r, 20))]);
+    expect(settled).toBe(false);
     expect(playState).toHaveBeenCalledWith('death');
+
+    release();
+    await running;
+    expect(settled).toBe(true);
   });
 
   it('skips a cell with no view, a view with no playState, and a cell past a short reel — not a throw', async () => {
