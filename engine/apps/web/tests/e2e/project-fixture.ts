@@ -34,14 +34,14 @@ export const FIXTURE = join(EXAMPLES, 'first-slot');
  * spec that goes through the IDE on 5680 needs the host exactly there, and
  * `playwright.config.ts` runs `workers: 1` for the same reason.
  *
- * `E8_E2E_HOST_PORT` moves BOTH ends of that pair — `vite.config.ts` reads
- * the same variable (it cannot import this file, so it re-reads the env
- * with the same default) — for the one case the default cannot serve: a
- * developer whose own `e8 dev` already holds 5679, which otherwise makes
- * the whole suite unrunnable while they work. Unset, everything behaves
- * exactly as it did when the number was written out in each file.
+ * Re-exported from `../../e2e-ports.ts` — the one module both this fixture
+ * and `vite.config.ts` now read it from (a vite config cannot import this
+ * fixture, and this fixture must not drag vite in, so neither reads
+ * `E8_E2E_HOST_PORT` directly any more; `e2e-ports.ts` does, once). Unset,
+ * everything behaves exactly as it did when the number was written out in
+ * each file.
  */
-export const IDE_HOST_PORT = Number(process.env.E8_E2E_HOST_PORT ?? 5679);
+export { IDE_HOST_PORT } from '../../e2e-ports';
 
 /**
  * A private, writable copy of `first-slot`. Never the checked-in example

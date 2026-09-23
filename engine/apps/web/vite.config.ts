@@ -1,13 +1,15 @@
 import react from '@vitejs/plugin-react';
 import { defineConfig } from 'vite';
+import { IDE_HMR_PORT, IDE_HOST_PORT, IDE_WEB_PORT } from './e2e-ports';
 
-// The IDE host this dev server proxies to. `E8_E2E_HOST_PORT` moves it —
-// the same variable `tests/e2e/project-fixture.ts`'s `IDE_HOST_PORT`
-// reads, re-read here because a vite config cannot import a Playwright
-// fixture. Same default either way: unset, this is the fixed 5679 it
-// always was. It exists for the one case the fixed port cannot serve — a
+// The IDE host this dev server proxies to. `IDE_HOST_PORT` (from
+// `./e2e-ports.ts`, which has no imports of its own — a vite config cannot
+// import a Playwright fixture) resolves `E8_E2E_HOST_PORT` with the same
+// default `tests/e2e/project-fixture.ts` re-exports it with, so the two
+// can no longer drift apart. Unset, this is the fixed 5679 it always was —
+// the env var exists for the one case the fixed port cannot serve: a
 // developer whose own `e8 dev` already holds 5679 while the suite runs.
-const HOST = `http://127.0.0.1:${process.env.E8_E2E_HOST_PORT ?? 5679}`;
+const HOST = `http://127.0.0.1:${IDE_HOST_PORT}`;
 
 export default defineConfig({
   plugins: [react()],
@@ -46,15 +48,15 @@ export default defineConfig({
     // above, this app's Playwright config — already hardcodes `127.0.0.1`,
     // so the dev server needs to actually listen there.
     host: '127.0.0.1',
-    port: 5680,
+    port: IDE_WEB_PORT,
     // The host's cross-origin allowlist names this port; a silent move to
     // 5681+ would leave every write from the dev IDE refused with a 403.
     strictPort: true,
     // Vite's default HMR websocket port (24678) is shared machine-wide, not
     // per-project — a second vite anywhere on the box (another `e8 dev`)
-    // holds it first and this one's HMR client fails silently. 5690 sits
-    // alongside this app's other fixed ports (5679-5682) instead.
-    hmr: { port: 5690 },
+    // holds it first and this one's HMR client fails silently. IDE_HMR_PORT
+    // (5690) sits alongside this app's other fixed ports (5679-5682) instead.
+    hmr: { port: IDE_HMR_PORT },
     proxy: {
       '/api': HOST,
       '/plugin-client': HOST,
