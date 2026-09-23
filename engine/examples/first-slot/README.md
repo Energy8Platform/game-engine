@@ -69,8 +69,12 @@ node (`spritesheet`, onto `assets/coin.json`, `loop: false`) that plays once
 on a win. `6` is the exception and shows the other two things a state can
 be: its `static` is `{ type: scene, props: { scene: orb } }`, so
 `scenes/orb.scene.yml` is mounted as a private copy for every cell that
-lands a `6` — a whole document per cell, whose `text` reads
-`'x{$cell.multiplier}'` off that cell's own data. A `$cell` prop is a whole
+lands a `6` — one document for every orb, whose `image` picks its art from
+a four-entry asset set (`srcOf`: `green`, `blue`, `purple`, `red`) keyed by
+`srcKey: $cell.band`, and whose `text` reads `'x{$cell.multiplier}'` off
+that cell's own data. The band is fed by the `reel-step` mechanic, which
+gives each `6` its row's band (`banded()`) — demo data, not the math's;
+a cell with no band shows the `src` fallback. A `$cell` prop is a whole
 expression, so a template, a format pipe and arithmetic over the cell are
 all allowed; this math hands its board over as plain ids, so the span
 inside the braces resolves to nothing and the cell reads a bare `x` until a

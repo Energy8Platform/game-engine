@@ -49,11 +49,12 @@ Two ordinary props beside the asset prop, not an object on it:
 - `srcKey` is a plain string prop. It is NOT an asset prop, so the existing
   refusal ("an asset prop cannot be bound to `$cell`") does not touch it, and
   `cellProps` resolves it like any other bound prop.
-- The pick, in `mount` and `update`: `srcOf[String(srcKey)] ?? src`. An unknown
+- The pick, in `mount` and `update`: `srcOf[srcKey]` when it is an OWN key
+  with a non-empty value, else `src` (so `'toString'` is no key). An unknown
   key, an empty `srcKey`, or no `srcOf` at all falls back to `src` — which is
   what every document written before this slice has.
-- Preload: the type's `assets(props)` returns `[src, ...Object.values(srcOf)]`,
-  so the whole set is loaded with the document, and a `bind` that changes the
+- Preload: the type's `assets(props)` returns `src` then every `srcOf` value,
+  deduped and with `''` dropped (a fresh node's empty `src` included), so the whole set is loaded with the document, and a `bind` that changes the
   key swaps a texture that is already there. This is the property that makes
   the map the right shape and an interpolated path the wrong one.
 
@@ -87,7 +88,11 @@ runtime reports it once per node+prop, as a `warning` at the node's `where`:
 > message: `"<prop>" reads $cell, but this document was not mounted for a cell`
 > fix: `only a symbol state's own document is mounted per cell`
 
-Mount-time only (a `bind` always has a cell), and once per prop — a 5×6 board
+Shown-time, not mount-time: `replace()` mounts every declared document
+hidden — cell scenes included — so a mount-time check would warn on every
+correct cell scene. It fires when the game `show`s a document (or remounts a
+shown one); a preview `show` (`opts.preview`, the IDE looking at a document)
+does not report. A `bind` always has a cell. Once per prop — a 5×6 board
 re-mounting is not thirty rows (the diagnostics service already collapses by
 plugin+where+message).
 
@@ -99,7 +104,10 @@ cannot see it (the paths live in TypeScript), so the RUNTIME says it:
 `require(paths)` reports once per offending path, a `warning` at `assetLoader`:
 
 > message: `"<path>" is outside assets/ — a built dist will not carry it`
-> fix: `move it under assets/, or name it in a document`
+> fix: `move it under assets/`
+
+(A leading `./` is normalised first — `./assets/x.png` ships; `/assets/x.png`
+still warns.)
 
 ### 2.3 A `wait: false` step that never settles releases the plan
 

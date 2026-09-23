@@ -86,7 +86,10 @@ be: its `static` is `{ type: scene, props: { scene: orb } }` — a whole
 scene document mounted as a private copy inside every cell that lands a
 `6`, whose `text` reads `'x{$cell.multiplier}'` off that cell's own data (a
 `$cell` prop is a whole expression: a template, a format pipe and
-arithmetic over the cell are all allowed) — and
+arithmetic over the cell are all allowed). Its `image` is one document for
+every orb, picking its art from a four-entry asset set (`srcOf`) keyed by
+`srcKey: $cell.band` — but nothing in this template feeds a `band`, so the
+orb shows its `src` fallback until a mechanic or the math carries one — and
 under `states:` it declares `pop`, a NAMED state. A named state is not one
 of the three built-ins and nothing plays it on its own: a mechanic asks for
 it by name, with a `{ kind: 'playState', cells, state: 'pop' }` step. The
