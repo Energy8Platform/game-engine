@@ -22,7 +22,12 @@
  *  - **A cell scene.** The example's symbol `'6'` no longer draws an
  *    `image`: its `static` is `{ type: scene, props: { scene: orb } }`, and
  *    `scenes/orb.scene.yml` is mounted as a PRIVATE copy for each cell that
- *    lands a `'6'`, with its `text` bound to `'$cell.multiplier'`.
+ *    lands a `'6'`, with its `text` a TEMPLATE over the cell's own data
+ *    (`'x{$cell.multiplier}'`) rather than a bare field.
+ *  - **Art a row claims.** The project's `reel-step` plugin calls
+ *    `scenes.require(['assets/coin.png'])` from its `apply` — a path no
+ *    document in the project names, so nothing but that call can put it in
+ *    the loader.
  *  - **A named state.** That symbol also declares a `pop` state, and the
  *    project's own `reel-step` mechanic names it in the plan it emits
  *    (`{ kind: 'playState', cells, state: 'pop', wait: true }`, after each
@@ -260,19 +265,58 @@ test("a symbol whose static state is a cell scene draws that document in its cel
   ).toMatch(/Sprite$/);
 
   // The other half, and the half that only a cell scene can produce: a text
-  // node inside a CELL. It reads empty, and that is the honest answer rather
-  // than a missing one — `first-slot`'s math hands its board over as
-  // `[[int]]`, so a cell's data is `{ symbol }` and nothing else, and
-  // `'$cell.multiplier'` therefore stands at its prop's empty value
-  // (`cellProps`, `@energy8engine/scenes`) instead of failing the schema.
-  // A game whose math carries a per-cell figure gets the figure here; this
-  // one proves the node mounted, bound and resolvable.
-  expect(await frame.evaluate(([c, r]) => (window as any).__e8.cellText(c, r), orb)).toBe('');
+  // node inside a CELL — and the document's prop is a full EXPRESSION, not
+  // a bare field: `'x{$cell.multiplier}'`.
+  //
+  // `'x'` is what that renders here, and it is the honest answer rather
+  // than a missing one. `first-slot`'s math hands its board over as
+  // `[[int]]`, so a cell's data is `{ symbol }` and nothing else;
+  // `resolveValue` renders a template span whose expression reads
+  // `null`/`undefined` as `''` (`@energy8engine/contracts`' `expression.ts`),
+  // leaving the literal `x` the document wrote around it. So this one
+  // string proves three things at once: the copy mounted for THIS cell, the
+  // prop was run as an expression rather than taken literally (a literal
+  // would read back `'x{$cell.multiplier}'`), and the missing field
+  // resolved instead of failing the schema. A game whose math carries a
+  // per-cell figure reads `x12` off the very same document.
+  expect(await frame.evaluate(([c, r]) => (window as any).__e8.cellText(c, r), orb)).toBe('x');
   // And it came from the document, not from the board's own furniture: a
   // cell of any other symbol has no text node in it at all.
   expect(
     await frame.evaluate(([c, r]) => (window as any).__e8.cellText(c, r), plain),
   ).toBeNull();
+});
+
+test("a row's own art loads: the reel-step plugin requires a path no document names", async ({
+  page,
+}) => {
+  const frame = await readyPreview(page);
+
+  // `assets/coin.png` is in this project, and nothing in it NAMES the file:
+  // `coin.json` carries it as its `meta.image`, which pixi's spritesheet
+  // parser loads through its Loader rather than `Assets.load` — so that
+  // path never reaches the Assets cache, and no scene, symbol or flow
+  // document mentions it at all. The one thing that can put it in the
+  // loader is the `scenes.require(['assets/coin.png'])` the `reel-step`
+  // plugin makes from its own `apply` (`plugins/reel-step/src/index.ts`).
+  //
+  // Polled rather than read once: `#status` reads `ready` as soon as the
+  // flow is armed, which is before — or during — the boot batch this claim
+  // folded itself into.
+  await expect
+    .poll(() => frame.evaluate(() => (window as any).__e8.loaded('assets/coin.png')), {
+      timeout: 20_000,
+    })
+    .toBe(true);
+
+  // The control, so the line above is not a hook that answers `true` to
+  // anything: a path in no document AND in no `require` is not in the
+  // loader. (It costs one `assetLoader` warning in that page's `#log` —
+  // the loader reports a `get` for a path no batch asked for, which is
+  // exactly the diagnostic the `require` above exists to avoid.)
+  expect(
+    await frame.evaluate(() => (window as any).__e8.loaded('assets/nothing-claims-this.png')),
+  ).toBe(false);
 });
 
 test("a mechanic names a symbol's own state, and the plan the game ran carries it", async ({

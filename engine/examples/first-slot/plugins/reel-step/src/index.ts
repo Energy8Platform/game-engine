@@ -46,11 +46,11 @@
  * the round in which the registry was composed by nobody and this plugin
  * had to invent the handshake.)
  *
- * **Reversibility (§5.4).** Both registrations go through `ctx.effect`, so a
- * row that leaves the composition takes its mechanic and its step handler
- * with it. `BoardStepRegistry.register` returns a plain disposer for exactly
- * this — it does no teardown of its own (its own doc says so), which is why
- * the wrapping is here and not there.
+ * **Reversibility (§5.4).** All three registrations go through `ctx.effect`,
+ * so a row that leaves the composition takes its mechanic, its step handler
+ * and its claim on the art with it. `BoardStepRegistry.register` returns a
+ * plain disposer for exactly this — it does no teardown of its own (its own
+ * doc says so), which is why the wrapping is here and not there.
  *
  * **Nothing throws out of `apply`.** A missing service is reported from the
  * step that needed it (see `./step.ts`), not by refusing to compose: the
@@ -138,4 +138,42 @@ export function apply(ctx: Context, config: ReelStepRowConfig = {}): void {
   ctx.inject(['steps'], (stepsCtx) => {
     stepsCtx.effect(() => stepsCtx.steps.register(handler), 'reel-step:step');
   });
+
+  // And the art. A row that draws with a path NO document names has to say
+  // so, or the batch never asks for it and the texture draws as nothing —
+  // the silent failure `scenes.require` exists for (and the one the loader's
+  // own `nothing loaded "…"` warning names when a row forgets).
+  //
+  // `assets/coin.png` is this project's spritesheet image. `assets/coin.json`
+  // names it internally, but the scenes loader never sees that: pixi's
+  // spritesheet parser pulls the image through its Loader rather than
+  // `Assets.load`, so nothing ever puts that path in the Assets cache.
+  // Which makes it exactly the shape of path this call is for — a real
+  // file in the project that no scene, symbol or flow document mentions.
+  // This mechanic scrolls with the symbol art `symbols1` already loads and
+  // has nothing else of its own to claim, so the claim here stands in for
+  // that art; a mechanic that really did blit a coin over a scrolling reel
+  // would write the same line for the same reason.
+  //
+  // Through `ctx.effect`, so the claim dies with the row: the disposer
+  // `require` returns drops the holder, and the next unload sweep lets the
+  // path go. And `reflect.get('scenes', false)`, like every other lenient
+  // read on this page — a composition with no `scenes` row composes this
+  // one unchanged, it simply has nothing to tell.
+  ctx.effect(
+    () =>
+      (ctx.reflect.get('scenes', false) as RequiresAssets | undefined)?.require([
+        'assets/coin.png',
+      ]) ?? (() => {}),
+    'reel-step:assets',
+  );
+}
+
+/**
+ * As much of `@energy8engine/scenes`' `ScenesService` as this row uses —
+ * structural, so this plugin depends on that package no more than
+ * `first-slot`'s own `main.ts` does (which reads `scenes` the same way).
+ */
+interface RequiresAssets {
+  require(paths: string[]): () => void;
 }

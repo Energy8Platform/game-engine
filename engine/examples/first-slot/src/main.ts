@@ -849,11 +849,14 @@ ctx.inject(['flow'], (c) =>
    * cell" from "an image mounted". Unlike `cellArt`, which walks down the
    * first child of each node, this one searches EVERY child: a cell
    * scene's text node is a sibling of its art node, not below it. A text
-   * node inside the cell can — and
-   * when its `text` is bound (`'$cell.<field>'`), what this reads back is
-   * what that binding resolved to against the cell's data: `''` for a
-   * field this game's math does not carry, which is a mounted-and-bound
-   * node, not a missing one.
+   * node inside the cell can — and here does — hold a `$cell` EXPRESSION
+   * rather than a value, and what this reads back is what that expression
+   * resolved to against the cell's data: `orb.scene.yml` says
+   * `'x{$cell.multiplier}'` and this game reads back `'x'`, because its
+   * math carries no `multiplier` and a template span over a missing field
+   * renders `''` (`resolveValue`, `@energy8engine/contracts`). A
+   * mounted-and-bound node, not a missing one — a game whose math carries
+   * the figure reads `x12` off the same document.
    */
   cellText(col: number, row: number): string | null {
     const found = (node: ViewNode): string | null => {
@@ -866,6 +869,25 @@ ctx.inject(['flow'], (c) =>
     };
     const view = liveGrid()?.getCell(col, row)?.view;
     return view ? found(view) : null;
+  },
+  /**
+   * Whether the asset loader HAS `path` — `assetLoader.get(path)`, the same
+   * read every `image` node makes when it fills its sprite in. The one
+   * honest way to see a `scenes.require(...)` from outside: what a row
+   * claims is not in any document, so no document read can prove it, and
+   * a texture that never loaded draws as nothing rather than failing.
+   * `false` with no `scenes` row (nothing provides a loader then either).
+   *
+   * Asks only about paths something is expected to have loaded: the loader
+   * REPORTS a `get` for a path no batch ever asked for (`assetLoader`,
+   * `@energy8engine/scenes`), so a probe for an absent path leaves a
+   * warning in `#log` behind it.
+   */
+  loaded(path: string): boolean {
+    const loader = ctx.reflect.get('assetLoader', false) as
+      | { get(url: string): unknown }
+      | undefined;
+    return loader?.get(path) != null;
   },
   /** Visible top-level scenes, as `scenes.visible()`; `[]` with no scenes row. */
   scenesVisible(): string[] {
