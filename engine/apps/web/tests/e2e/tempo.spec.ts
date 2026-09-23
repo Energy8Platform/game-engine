@@ -40,9 +40,10 @@ import { readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { dump, load } from 'js-yaml';
 import { expect, test, type Page } from '@playwright/test';
+import { IDE_WEB_PORT } from '../../e2e-ports';
 import { projectCopy, startDevHost, type DevHost } from './project-fixture';
 
-const IDE_URL = 'http://127.0.0.1:5680/';
+const IDE_URL = `http://127.0.0.1:${IDE_WEB_PORT}/`;
 
 interface PatchDoc {
   rows: {
@@ -338,7 +339,7 @@ test('a skip mid-tumble-chain collapses the rest of it and lands on the last set
     `${found.plan.filter((s) => s.kind === 'tumble').length} tumble rounds`,
   ).toBeLessThan(700);
 
-  const settled = (found.plan.filter((s) => s.kind === 'tumble').at(-1) as { settled: unknown[][] })
+  const settled = (found.plan.filter((s) => s.kind === 'tumble').at(-1) as unknown as { settled: unknown[][] })
     .settled;
   const symbols = await page.evaluate(() => (window as any).__e8.symbols());
   expect(symbols).toEqual(strings(settled));

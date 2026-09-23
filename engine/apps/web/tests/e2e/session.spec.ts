@@ -32,10 +32,11 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { dump, load } from 'js-yaml';
 import { expect, test, type Frame, type Page } from '@playwright/test';
+import { IDE_WEB_PORT } from '../../e2e-ports';
 import { projectCopy, startDevHost, type DevHost } from './project-fixture';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const IDE_URL = 'http://127.0.0.1:5680/';
+const IDE_URL = `http://127.0.0.1:${IDE_WEB_PORT}/`;
 const PREVIEW = 'iframe[title="game preview"]';
 
 /** `engine/game/session-dev/tests/fixtures/session` — id `session-fixture`. */

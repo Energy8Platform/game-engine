@@ -95,6 +95,7 @@ import { mkdtempSync, readFileSync, rmSync, symlinkSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { expect, test, type Page } from '@playwright/test';
+import { IDE_WEB_PORT } from '../../e2e-ports';
 import { projectCopy, startDevHost, type DevHost } from './project-fixture';
 
 /**
@@ -102,7 +103,7 @@ import { projectCopy, startDevHost, type DevHost } from './project-fixture';
  * to the host on 5679. No `#/code` any more: a file is opened from the
  * Explorer sidebar, which every fresh load shows, into its own tab.
  */
-const IDE_URL = 'http://127.0.0.1:5680/';
+const IDE_URL = `http://127.0.0.1:${IDE_WEB_PORT}/`;
 
 test.beforeEach(async ({ page }) => {
   // See the module doc's first "found by running the draft" item. Applied

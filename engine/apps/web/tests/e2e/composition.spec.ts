@@ -87,6 +87,7 @@ import { createHash } from 'node:crypto';
 import { rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { expect, test, type Page } from '@playwright/test';
+import { IDE_WEB_PORT } from '../../e2e-ports';
 import { projectCopy, startDevHost } from './project-fixture';
 
 /**
@@ -714,7 +715,7 @@ test('the composition screen lists the rows the profile resolved to', async ({ p
   try {
     // Through the IDE on 5680, not the game on the preview origin — the screen under
     // test is the editor's, and it reaches the host through vite's proxy.
-    await page.goto('http://127.0.0.1:5680/');
+    await page.goto(`http://127.0.0.1:${IDE_WEB_PORT}/`);
     for (const id of ['boot1', 'renderer1', 'scenes1', 'reels1']) {
       await expect(
         page.getByTestId(`row-${id}`),

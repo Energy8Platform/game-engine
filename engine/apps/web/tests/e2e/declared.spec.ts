@@ -36,10 +36,11 @@
  */
 import { rmSync } from 'node:fs';
 import { expect, test } from '@playwright/test';
+import { IDE_WEB_PORT } from '../../e2e-ports';
 import { projectCopy, startDevHost } from './project-fixture';
 
 /** The IDE app — vite on 5680, proxying `/api` and `/ide` to the host on 5679. */
-const IDE_URL = 'http://127.0.0.1:5680/';
+const IDE_URL = `http://127.0.0.1:${IDE_WEB_PORT}/`;
 
 /**
  * Promise 1: a row that requires a service nothing provides says so,

@@ -18,10 +18,11 @@
 import { readdirSync, readFileSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { expect, test } from '@playwright/test';
+import { IDE_WEB_PORT } from '../../e2e-ports';
 import { EXAMPLES, projectCopy, startDevHost, startHost, workspaceCopy } from './project-fixture';
 
 /** The IDE app — vite on 5680, proxying to the host on 5679. */
-const IDE_URL = 'http://127.0.0.1:5680/';
+const IDE_URL = `http://127.0.0.1:${IDE_WEB_PORT}/`;
 
 function examplesOnDisk(): string[] {
   return readdirSync(EXAMPLES)

@@ -39,10 +39,11 @@
 import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { expect, test, type Page } from '@playwright/test';
+import { IDE_WEB_PORT } from '../../e2e-ports';
 import { PNG_BYTES, projectCopy, startDevHost, type DevHost } from './project-fixture';
 
 /** The IDE app — vite on 5680, proxying `/api`, `/plugin-client` and `/ide` to the host on 5679. */
-const IDE_URL = 'http://127.0.0.1:5680/';
+const IDE_URL = `http://127.0.0.1:${IDE_WEB_PORT}/`;
 
 /** Every editor test needs Monaco on its textarea input — see `code.spec.ts`'s module doc for the `EditContext` trap this sidesteps. */
 test.beforeEach(async ({ page }) => {

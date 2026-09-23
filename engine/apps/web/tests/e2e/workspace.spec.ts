@@ -10,6 +10,7 @@
  */
 import { rmSync } from 'node:fs';
 import { expect, test, type Page } from '@playwright/test';
+import { IDE_WEB_PORT } from '../../e2e-ports';
 import {
   IDE_HOST_PORT,
   SECOND_NAME,
@@ -20,7 +21,7 @@ import {
 } from './project-fixture';
 
 /** The IDE app — vite on 5680, proxying to the host on `IDE_HOST_PORT` (every case but 6). */
-const IDE_URL = 'http://127.0.0.1:5680/';
+const IDE_URL = `http://127.0.0.1:${IDE_WEB_PORT}/`;
 /** The host itself: `/api/*`, `/ide`, and — with `dist` built — the IDE (case 6). */
 const HOST_URL = `http://127.0.0.1:${IDE_HOST_PORT}/`;
 

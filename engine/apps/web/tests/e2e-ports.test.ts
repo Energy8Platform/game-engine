@@ -21,9 +21,8 @@ describe('resolveHostPort', () => {
   });
 });
 
-it('IDE_HOST_PORT matches resolveHostPort(process.env) — the default, unset in this test run', () => {
+it('IDE_HOST_PORT is resolveHostPort(process.env) — whatever E8_E2E_HOST_PORT this run exports', () => {
   expect(IDE_HOST_PORT).toBe(resolveHostPort(process.env));
-  expect(IDE_HOST_PORT).toBe(5679);
 });
 
 it('IDE_WEB_PORT and IDE_HMR_PORT match the fixed ports vite.config.ts binds', () => {

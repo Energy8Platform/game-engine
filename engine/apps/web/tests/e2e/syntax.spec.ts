@@ -1,5 +1,6 @@
 import { rmSync } from 'node:fs';
 import { expect, test, type Page } from '@playwright/test';
+import { IDE_WEB_PORT } from '../../e2e-ports';
 import { projectCopy, startDevHost, type DevHost } from './project-fixture';
 
 /**
@@ -64,7 +65,7 @@ import { projectCopy, startDevHost, type DevHost } from './project-fixture';
  *     `textContent`, for exactly this reason — the brief's own version
  *     compares the untrimmed string, which never matches a merged span.
  */
-const IDE_URL = 'http://127.0.0.1:5680/';
+const IDE_URL = `http://127.0.0.1:${IDE_WEB_PORT}/`;
 const MAC = process.platform === 'darwin';
 
 /** `Cmd+Down` on a Mac, `Ctrl+End` elsewhere — Monaco's own binding, measured in `code.spec.ts`. */

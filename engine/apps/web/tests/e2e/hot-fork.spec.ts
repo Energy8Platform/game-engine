@@ -30,10 +30,11 @@
 import { readFileSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { expect, test, type Frame, type Page } from '@playwright/test';
+import { IDE_WEB_PORT } from '../../e2e-ports';
 import { projectCopy, startDevHost, type DevHost } from './project-fixture';
 
 /** The IDE app — vite on 5680, proxying `/api` and `/ide` to the host on 5679. */
-const IDE_URL = 'http://127.0.0.1:5680/';
+const IDE_URL = `http://127.0.0.1:${IDE_WEB_PORT}/`;
 
 /** The same settle `shell.spec.ts` gives: the game up once on its own URL, then the IDE. */
 async function openComposition(page: Page, host: DevHost): Promise<void> {

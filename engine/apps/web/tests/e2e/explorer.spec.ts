@@ -1,6 +1,7 @@
 import { existsSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { expect, test, type Page } from '@playwright/test';
+import { IDE_WEB_PORT } from '../../e2e-ports';
 import { PNG_BYTES, projectCopy, startDevHost, type DevHost } from './project-fixture';
 
 /**
@@ -18,7 +19,7 @@ import { PNG_BYTES, projectCopy, startDevHost, type DevHost } from './project-fi
  * only what a browser can see: a rename inside `game/` leaves the engine
  * alive on both sides of the round trip.
  */
-const IDE_URL = 'http://127.0.0.1:5680/';
+const IDE_URL = `http://127.0.0.1:${IDE_WEB_PORT}/`;
 
 let dir: string;
 let host: DevHost;

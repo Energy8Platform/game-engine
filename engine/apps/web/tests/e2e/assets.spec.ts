@@ -108,6 +108,7 @@ import { existsSync, rmSync, writeFileSync } from 'node:fs';
 import { request as httpRequest } from 'node:http';
 import { join } from 'node:path';
 import { expect, test } from '@playwright/test';
+import { IDE_WEB_PORT } from '../../e2e-ports';
 import { PNG_BYTES, projectCopy, startDevHost, type DevHost } from './project-fixture';
 
 /**
@@ -115,7 +116,7 @@ import { PNG_BYTES, projectCopy, startDevHost, type DevHost } from './project-fi
  * to the host on 5679. No `#/assets` any more: the tree is the Explorer
  * sidebar, open on every fresh load, and its rows are `explorer-<path>`.
  */
-const IDE_URL = 'http://127.0.0.1:5680/';
+const IDE_URL = `http://127.0.0.1:${IDE_WEB_PORT}/`;
 
 /**
  * `node:http`'s `path` sent unparsed, straight onto the request line — see

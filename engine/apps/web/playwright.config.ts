@@ -1,4 +1,5 @@
 import { defineConfig } from '@playwright/test';
+import { IDE_WEB_PORT } from './e2e-ports';
 
 export default defineConfig({
   testDir: './tests/e2e',
@@ -6,8 +7,9 @@ export default defineConfig({
   // to raise its own to this and the rest flapped at 30 s (spec §2 A6f).
   timeout: 60_000,
   // Every spec file in this suite boots its own `createIdeHost` on the
-  // SAME fixed port (5679 — the port `vite.config.ts`'s own dev-server
-  // proxy hardcodes as its target, so a host on any other port would leave
+  // SAME port (`IDE_HOST_PORT` from `e2e-ports.ts` — 5679 unless
+  // `E8_E2E_HOST_PORT` moves it — which `vite.config.ts`'s dev-server proxy
+  // reads as its target too, so a host on any other port would leave
   // `/api`, `/plugin-client` and `/ide` unreachable from this app). Two
   // spec files running in parallel workers would race that one port
   // (EADDRINUSE) — Playwright's default is to run different test FILES
@@ -22,10 +24,10 @@ export default defineConfig({
   // `vite build` once, for the one spec that reads `dist` through the host
   // (workspace.spec.ts) — skipped when `dist` is already newer than its inputs.
   globalSetup: './tests/e2e/global-setup.ts',
-  use: { baseURL: 'http://127.0.0.1:5680' },
+  use: { baseURL: `http://127.0.0.1:${IDE_WEB_PORT}` },
   webServer: {
     command: 'npm run dev',
-    url: 'http://127.0.0.1:5680',
+    url: `http://127.0.0.1:${IDE_WEB_PORT}`,
     reuseExistingServer: true,
     timeout: 60_000,
   },
