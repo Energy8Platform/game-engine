@@ -34,14 +34,20 @@
  * ordinary `step "<kind>" failed` diagnostic naming the index it STARTED
  * at — a `warning`, not an `error`: a step the author declared must not
  * hold the plan does not fail the round either (a blocking step's failure
- * stays an `error`). A step that outlives its own plan is not something
- * this vocabulary offers.
+ * stays an `error`, and so does a `wait: false` step that throws
+ * synchronously while being started — it never got as far as running). A
+ * step that outlives its own plan is not something this vocabulary offers
+ * — except past `pendingMs`, where it is abandoned and reported.
  *
  * That end-of-plan await is capped at `limits.pendingMs` (30 s by default,
  * `0` disables): on expiry every step still pending is an `error` —
  * `step "<kind>" did not settle in <N> s`, at the index it started at — and
  * `executePlan` returns. The promises are abandoned, not cancelled; a later
- * rejection is swallowed, because the plan has already reported.
+ * rejection is swallowed, because the plan has already reported. On the
+ * reels board an abandoned step stays counted in `tracked`'s `inFlight`,
+ * which then cannot return to 0 while it runs, so later `repaint()`s stay
+ * deferred for as long as it does — for good, if it never settles; a
+ * broken step's consequence, not something the cap fixes.
  *
  * **The registry.** `BoardApi` is the closed vocabulary the shipped
  * mechanics stand on — one method per known kind, not opened here. Any
@@ -433,7 +439,8 @@ export async function executePlan(
    * The steps that declined to hold the plan (`wait: false`). Started in
    * order with everything else and awaited HERE, at the end, so a plan stays
    * atomic — `present` is one node in the flow, and a beat that outlives its
-   * own plan is not a thing this vocabulary offers. Each one carries its own
+   * own plan is not a thing this vocabulary offers (past `pendingMs` it is
+   * abandoned and reported, not waited for). Each one carries its own
    * `catch`, closed over the index it STARTED at, because by the time it
    * fails the loop is somewhere else entirely — and a `settled` flag, so the
    * `pendingMs` cap below names only the ones still running.
@@ -631,8 +638,13 @@ export async function executePlan(
   const expired = new Promise<true>((resolve) => {
     timer = setTimeout(() => resolve(true), pendingMs);
   });
-  const timedOut = await Promise.race([all.then(() => false), expired]);
-  clearTimeout(timer);
+  let timedOut: boolean;
+  try {
+    timedOut = await Promise.race([all.then(() => false), expired]);
+  } finally {
+    // A `failed()` that throws rejects `all`; the timer must not outlive it.
+    clearTimeout(timer);
+  }
   if (timedOut) {
     abandoned = true;
     for (const entry of pending) {

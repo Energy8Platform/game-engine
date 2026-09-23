@@ -340,7 +340,10 @@ const present: FlowNodeKind<{ turbo: string }> = {
       result,
       plan: fatal ? [] : plan,
     });
-    if (fatal) return { out: 'failed', vars: { plan, error: problems.map((d) => d.message).join('; ') } };
+    // `error` names why the round failed: a mechanics diagnostic, or a
+    // play `error` — never a warning that rode along.
+    const why = diagnostics.length > 0 ? problems : problems.filter((d) => d.severity === 'error');
+    if (fatal) return { out: 'failed', vars: { plan, error: why.map((d) => d.message).join('; ') } };
     return { out: 'next', vars: { plan } };
   },
 };

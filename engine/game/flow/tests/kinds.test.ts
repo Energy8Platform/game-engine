@@ -350,7 +350,8 @@ describe('built-in kinds', () => {
     const { rc: rcBroke } = runCtx({ mechanics, play: broke }, { result });
     expect(await kind('present').run!({}, rcBroke)).toEqual({
       out: 'failed',
-      vars: { plan, error: `${warning.message}; ${error.message}` },
+      // The warning was reported, but it is not why the round failed.
+      vars: { plan, error: error.message },
     });
     expect(broke.record).toHaveBeenCalledWith({ request: {}, result, plan: [] });
   });

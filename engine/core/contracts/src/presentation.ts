@@ -174,7 +174,9 @@ export interface EmitStep {
  * the end, before it returns, so a state does not outlive the plan that
  * played it. A failure is the ordinary `step "<kind>" failed` diagnostic
  * naming the index it started at, as a `warning`: a step that does not hold
- * the plan does not fail the round either. The one bound is `pendingMs`
+ * the plan does not fail the round either. A step that throws synchronously
+ * while it is being started is still an `error` — it never got as far as
+ * running without the plan. The one bound is `pendingMs`
  * (the play-loop row's config, 30 s by default): a step still running then
  * is an `error`, `step "<kind>" did not settle in <N> s`, and the plan
  * returns without it.

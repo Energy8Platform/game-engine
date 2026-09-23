@@ -561,6 +561,25 @@ describe('executePlan: the cap on a non-blocking step, and its severity', () => 
     }
   });
 
+  it('the cap leaves no timer behind: not on the fast path, not when reporting a failure throws', async () => {
+    vi.useFakeTimers();
+    try {
+      const board = fakeBoard();
+      board.playState.mockImplementation(async () => {});
+      const step = { kind: 'playState', cells: [], state: 'death', wait: false } as const;
+      expect(await executePlan([step], board, undefined, undefined, undefined, { pendingMs: 1000 })).toEqual([]);
+      expect(vi.getTimerCount()).toBe(0);
+
+      // A rejection whose message cannot even be read: reporting it throws.
+      const hostile = { toString: () => { throw new Error('no'); } };
+      board.playState.mockImplementation(() => Promise.reject(hostile));
+      await executePlan([step], board, undefined, undefined, undefined, { pendingMs: 1000 }).catch(() => {});
+      expect(vi.getTimerCount()).toBe(0);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('pendingMs: 0 disables the cap — the plan stays held', async () => {
     vi.useFakeTimers();
     try {
