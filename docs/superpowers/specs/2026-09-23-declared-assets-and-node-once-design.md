@@ -73,7 +73,8 @@ hides it on a 1400 ms timer that has to match the strip's own length.
  * Plays every mounted copy of the node once through its type's `once` and
  * settles when the last one ends: `true` when the type has a `once` and at
  * least one copy played, `false` otherwise. A node nothing mounted is
- * `false` with the same diagnostic `setProps` gives it. A copy whose `once`
+ * `false` with an error at `<scene>/<node>` (`setProps`' diagnostic, "nothing
+ * to play"). A copy whose `once`
  * throws is reported at its `where` and the others still play.
  */
 once(ref: SceneRef): Promise<boolean>;
@@ -97,9 +98,12 @@ The migration's knight becomes `setProps(ref, { visible: true })`,
   settles only after it settles, every copy of a nested document plays; a type
   without `once` — `false`; an unknown node — `false` with the diagnostic; a
   throwing copy is reported and the others play.
-- e2e: first-slot boots with no `nothing loaded` warning in the diagnostics
-  while a declared document with art is mounted and not shown (the plan picks
-  the document the example already has, or adds one to the spec's fixture).
+- scenes, through the real row (`runtime.test.ts`, the pixi loader and
+  `replace` wired as the game wires them): after the first batch settled, a
+  hidden document's path is not reported, an undeclared one still is. This
+  stands in for a browser case: the false warning needs a `get` AFTER the
+  first batch settles (a remount, a re-apply), which a browser run cannot
+  schedule without the IDE — the integration test can, deterministically.
 
 ## 4. Not here
 
