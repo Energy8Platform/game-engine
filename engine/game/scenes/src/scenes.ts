@@ -101,10 +101,11 @@ export interface CellMount {
 
 export interface ScenesService {
   /**
-   * `preview`: the IDE looking at a document, not the game showing it — the
-   * shown-time diagnostics (`reportShown`) are skipped, for this show and
-   * for any remount while it stays shown, so a cell scene previewed without
-   * a cell is not called a mistake.
+   * `preview`: the IDE looking at a document, not the game showing it. It
+   * skips exactly one shown-time check — the `$cell` no-cell warning — for
+   * this show and for any remount while it stays shown, so a cell scene
+   * previewed without a cell is not called a mistake. An unregistered node
+   * type is still reported: that is what an author previewing wants to see.
    */
   show(id: string, opts?: { transition?: string; preview?: boolean }): Promise<void>;
   hide(id: string): Promise<void>;
@@ -548,17 +549,19 @@ export function createScenes(options: CreateScenesOptions): ScenesService {
    * "on screen": a `visible: false` node inside a shown document still
    * warns, rightly. Only a show or a remount checks — a portrait flip or a
    * live `setProps` does not re-check. A preview `show` (`opts.preview`,
-   * the IDE looking at a document) skips it. A `mountCell` copy is never
+   * the IDE looking at a document) passes `preview` and skips only the
+   * `$cell` warning; the missing types are always said. A `mountCell` copy is never
    * in `mounted`, so it never comes through here. A repeat on the next
    * `show` is byte-identical, and the diagnostics service collapses it.
    */
-  const reportShown = (m: Mount) => {
+  const reportShown = (m: Mount, preview = false) => {
     for (const { where, type } of m.missing)
       error(
         where,
         `node type "${type}" is not registered — the node is skipped`,
         'register it, or pick a type that is',
       );
+    if (preview) return;
     for (const e of m.all)
       for (const [k, v] of Object.entries(rawOf(e)))
         if (isCellBinding(v))
@@ -579,7 +582,7 @@ export function createScenes(options: CreateScenesOptions): ScenesService {
    */
   let vanished: Map<string, Set<string>> | null = null;
 
-  /** Top-level ids shown with `preview` — `reportShown` stays quiet for them until they are hidden. */
+  /** Top-level ids shown with `preview` — `reportShown` skips their `$cell` warning until they are hidden. */
   const previewed = new Set<string>();
 
   function mountTop(id: string): void {
@@ -604,9 +607,12 @@ export function createScenes(options: CreateScenesOptions): ScenesService {
         );
     mounted.set(id, m);
     showHosts(m);
-    if (!visibleIds.includes(id) || previewed.has(id)) return;
+    if (!visibleIds.includes(id)) return;
     const gap = vanished?.get(id);
-    reportShown(gap ? { ...m, missing: m.missing.filter((x) => !gap.has(x.type)) } : m);
+    reportShown(
+      gap ? { ...m, missing: m.missing.filter((x) => !gap.has(x.type)) } : m,
+      previewed.has(id),
+    );
   }
 
   /** A nested scene `show()`n stays shown across a (re)mount of its host: the common pass put the document's `visible` back. */
@@ -1026,7 +1032,7 @@ export function createScenes(options: CreateScenesOptions): ScenesService {
       return;
     }
     if (opts?.preview) previewed.add(id);
-    else reportShown(mounted.get(id)!);
+    reportShown(mounted.get(id)!, !!opts?.preview);
     const view = mounted.get(id)!.view;
     container.addChildAt(view, container.getChildIndex(highlightBox));
     visibleIds.push(id);

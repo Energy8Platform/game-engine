@@ -469,6 +469,27 @@ describe('mounting', () => {
     await scenes.show('a');
     expect(report).toHaveBeenCalledTimes(1);
   });
+
+  it('a preview still reports an unregistered node type — on the show and on a remount; a plain show reports both', async () => {
+    const doc = {
+      id: 'a',
+      nodes: [
+        { id: 'g', type: 'ghost', props: {} },
+        { id: 't', type: 'text', props: { text: 'x{$cell.mv}' } },
+      ],
+    };
+    const { scenes, nodeTypes, report } = boot([doc]);
+    nodeTypes.register(text);
+    const said = () => report.mock.calls.map(([d]) => [d.severity, d.where]);
+    await scenes.show('a', { preview: true });
+    expect(said()).toEqual([['error', 'a/g']]);
+    scenes.replace([{ ...doc, nodes: [doc.nodes[0], { ...doc.nodes[1], props: { text: 'y{$cell.mv}' } }] }]);
+    expect(said()).toEqual([['error', 'a/g'], ['error', 'a/g']]);
+    await scenes.hide('a');
+    report.mockClear();
+    await scenes.show('a');
+    expect(said()).toEqual([['error', 'a/g'], ['warning', 'a/t']]);
+  });
 });
 
 describe('show / hide', () => {
