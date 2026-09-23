@@ -50,6 +50,10 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { expect, test, type Frame, type Page } from '@playwright/test';
 import { FIXTURE, projectCopy, startDevHost } from './project-fixture';
+// The band rule is imported, not restated: it is demo data the mechanic
+// invents (a `6` gets its row's band), not the math's, so the plugin's own
+// function is the only ground truth there is for it.
+import { banded } from '../../../../examples/first-slot/plugins/reel-step/src/mechanic';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const ENGINE = join(__dirname, '..', '..', '..', '..');
@@ -256,10 +260,15 @@ test("the plan under each binding, step by step, against the spin's own data", a
       d.reel_steps.some((round) => round.shifts.some((n) => n > 0)),
     );
 
-    // Every plan lands the reels on ITS spin's board first.
-    for (const { spin } of [classic, cascade, reelStep]) {
+    // Every plan lands the reels on ITS spin's board first — reel-step's
+    // with each orb (`6`) wrapped in the band its row gives it (`banded`).
+    for (const { spin } of [classic, cascade]) {
       expect(spin.plan[0]).toEqual({ kind: 'spinTo', board: spin.result.data.grid });
     }
+    expect(reelStep.spin.plan[0]).toEqual({
+      kind: 'spinTo',
+      board: banded(reelStep.spin.result.data.grid),
+    });
 
     // classic: the board, then the lines that paid on it. Nothing else
     // happens — it never reads `cascade_history` or `reel_steps`.
@@ -314,7 +323,7 @@ test("the plan under each binding, step by step, against the spin's own data", a
         kind: 'reelStep',
         winning: round.winning,
         shifts: round.shifts,
-        settled: round.settled,
+        settled: banded(round.settled),
         index: i,
       });
     });
