@@ -3,7 +3,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { expect, test, type Frame } from '@playwright/test';
 import { createIdeHost, type IdeHost } from '@energy8engine/ide-host';
-import { LOAD_BUDGET_MS } from './project-fixture';
+import { IDE_HOST_PORT, LOAD_BUDGET_MS } from './project-fixture';
 
 /**
  * The plan's own thesis, proven in a real browser: a knob turned in the
@@ -37,8 +37,8 @@ import { LOAD_BUDGET_MS } from './project-fixture';
  * round, and leaves the LAST round's grid — which is the same
  * `cascade_history` the old content check read, seen from its end.
  *
- * Mirrors `skeleton.spec.ts`'s exact pattern (in-process host, fixed port
- * 5679 — the one `vite.config.ts`'s dev-server proxy targets); the project
+ * Mirrors `skeleton.spec.ts`'s exact pattern (in-process host on the fixed
+ * `IDE_HOST_PORT` — the one `vite.config.ts`'s proxy targets); the project
  * is the root, so it opens at boot and its scope brings `dev-game` up off
  * `game/spec.json`, the way `e8 dev` does.
  */
@@ -51,7 +51,7 @@ let original: string;
 
 test.beforeAll(async () => {
   original = readFileSync(COMPOSITION, 'utf8');
-  host = await createIdeHost({ root: PROJECT, port: 5679, previewPort: 0 });
+  host = await createIdeHost({ root: PROJECT, port: IDE_HOST_PORT, previewPort: 0 });
 });
 
 test.afterAll(async () => {

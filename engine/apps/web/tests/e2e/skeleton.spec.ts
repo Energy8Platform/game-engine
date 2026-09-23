@@ -3,6 +3,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { expect, test } from '@playwright/test';
 import { createIdeHost, type IdeHost } from '@energy8engine/ide-host';
+import { IDE_HOST_PORT } from './project-fixture';
 
 // `package.json` sets `"type": "module"`, so this file runs as ESM (no
 // `__dirname`) — derive the same directory from `import.meta.url` instead.
@@ -14,10 +15,10 @@ let host: IdeHost;
 let original: string;
 
 // The host runs in-process: one less moving part than spawning the CLI, and the
-// browser cannot tell the difference — it only ever sees port 5679.
+// browser cannot tell the difference — it only ever sees `IDE_HOST_PORT`.
 test.beforeAll(async () => {
   original = readFileSync(COMPOSITION, 'utf8');
-  host = await createIdeHost({ root: WORKSPACE, port: 5679 });
+  host = await createIdeHost({ root: WORKSPACE, port: IDE_HOST_PORT });
 });
 
 test.afterAll(async () => {

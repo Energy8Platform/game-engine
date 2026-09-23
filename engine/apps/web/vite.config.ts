@@ -1,7 +1,13 @@
 import react from '@vitejs/plugin-react';
 import { defineConfig } from 'vite';
 
-const HOST = 'http://127.0.0.1:5679';
+// The IDE host this dev server proxies to. `E8_E2E_HOST_PORT` moves it —
+// the same variable `tests/e2e/project-fixture.ts`'s `IDE_HOST_PORT`
+// reads, re-read here because a vite config cannot import a Playwright
+// fixture. Same default either way: unset, this is the fixed 5679 it
+// always was. It exists for the one case the fixed port cannot serve — a
+// developer whose own `e8 dev` already holds 5679 while the suite runs.
+const HOST = `http://127.0.0.1:${process.env.E8_E2E_HOST_PORT ?? 5679}`;
 
 export default defineConfig({
   plugins: [react()],

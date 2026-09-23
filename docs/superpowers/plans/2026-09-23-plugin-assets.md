@@ -139,6 +139,13 @@ describe('a step that does not hold the plan', () => {
 
 reels (`board.test.ts`): `playState` starts every named cell and returns WITHOUT awaiting them (the board no longer branches on `step.wait`); `skip()` still drains them through `showStatic`.
 
+> **Superseded (task review).** The board did NOT lose its `await Promise.all(...)`:
+> `reels`' `playState` still settles when the last cell's state ends. Only the
+> branch on `step.wait` went. `wait` is `executePlan`'s call for every kind at
+> once, and a board that returned early would take the choice away from it —
+> and from `skip()`, which needs a promise to collapse. Do not re-implement the
+> line above.
+
 - [ ] **Step 2: Run** `npm test -w @energy8engine/play-loop -- execute`, `npm test -w @energy8engine/reels -- board` → FAIL.
 
 - [ ] **Step 3: Implement.** In `executePlan`, beside the existing `problems` array:
@@ -254,6 +261,11 @@ The loader warning lives in `runtime.ts`'s `pixiLoader`, which is the object eve
 export const isCellBinding = (value: unknown): value is string =>
   typeof value === 'string' && value.includes('$cell');
 ```
+
+> **Superseded (task review).** The predicate shipped as `/\$cell\b/`, not
+> `includes`: `value.includes('$cell')` makes `'$cellular'` a binding, and the
+> word boundary is what keeps a var that merely starts like it out. See
+> `isCellBinding` in `scenes/src/common-schema.ts`.
 
 `cellProps(type, raw, data?)`: for a bound key, `data === undefined` → `emptyProp(entry)` (unchanged, and no evaluation); otherwise `resolveValue(value, { cell: data }, report)` followed by the existing type coercion. `cellProps` needs a `report` — add an optional fourth parameter `report?: (message: string) => void` and thread the callers' existing `error(where, …)` into it (`resolveCell` in `scenes.ts` has a `where`). `cellField` is deleted here and from `node-types.ts`'s re-exports.
 

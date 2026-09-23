@@ -29,6 +29,21 @@ export const EXAMPLES = join(__dirname, '..', '..', '..', '..', 'examples');
 export const FIXTURE = join(EXAMPLES, 'first-slot');
 
 /**
+ * The port every in-process IDE host in this suite binds, and the one
+ * `vite.config.ts`'s dev-server proxy targets. Fixed, not incidental: a
+ * spec that goes through the IDE on 5680 needs the host exactly there, and
+ * `playwright.config.ts` runs `workers: 1` for the same reason.
+ *
+ * `E8_E2E_HOST_PORT` moves BOTH ends of that pair — `vite.config.ts` reads
+ * the same variable (it cannot import this file, so it re-reads the env
+ * with the same default) — for the one case the default cannot serve: a
+ * developer whose own `e8 dev` already holds 5679, which otherwise makes
+ * the whole suite unrunnable while they work. Unset, everything behaves
+ * exactly as it did when the number was written out in each file.
+ */
+export const IDE_HOST_PORT = Number(process.env.E8_E2E_HOST_PORT ?? 5679);
+
+/**
  * A private, writable copy of `first-slot`. Never the checked-in example
  * itself: this repo's own suite runs against that one, and so does the
  * developer's `e8 dev`.
@@ -244,9 +259,9 @@ export const PNG_BYTES = Buffer.from(
 export const LOAD_BUDGET_MS = Number(process.env.E8_LOAD_BUDGET_MS) || 2500;
 
 export interface DevHost {
-  /** The IDE host's own origin (5679) — `/api/*`, `/ide`, `/plugin-client`. */
+  /** The IDE host's own origin (`IDE_HOST_PORT`) — `/api/*`, `/ide`, `/plugin-client`. */
   url: string;
-  /** Origin of the running GAME — its own server (spec §6), a free port here; never the host's 5679. */
+  /** Origin of the running GAME — its own server (spec §6), a free port here; never the host's own. */
   gameUrl: string;
   stop(): Promise<void>;
 }
@@ -257,15 +272,14 @@ export interface DevHost {
  * holds `e8.yml`, so it is the one project and opens at boot; its scope
  * reads `game/spec.json` and brings `dev-game` up itself.
  *
- * Port 5679 is fixed, not incidental: it is the target `vite.config.ts`'s
- * dev-server proxy hardcodes, so a spec that goes through the IDE on 5680
- * needs the host to be exactly there. `playwright.config.ts` runs this
- * suite with `workers: 1` for the same reason — one fixed-port host at a
- * time — and `stop()` awaits the fiber's disposal, which closes the HTTP
- * server, so the next spec file may bind 5679 the moment it resolves.
+ * `IDE_HOST_PORT` is fixed, not incidental — see its own doc for why, and
+ * for the env var that moves it. `playwright.config.ts` runs this suite
+ * with `workers: 1` for that same reason (one fixed-port host at a time),
+ * and `stop()` awaits the fiber's disposal, which closes the HTTP server,
+ * so the next spec file may bind the port the moment it resolves.
  */
 export async function startDevHost(dir: string): Promise<DevHost> {
-  const host: IdeHost = await createIdeHost({ root: dir, port: 5679, previewPort: 0 });
+  const host: IdeHost = await createIdeHost({ root: dir, port: IDE_HOST_PORT, previewPort: 0 });
   return {
     url: host.url,
     gameUrl: host.ctx.workspace.state().previewUrl!,
@@ -331,7 +345,7 @@ export function workspaceCopy(n: number): string {
 export const SECOND_NAME = 'Second Slot';
 
 export interface WorkspaceHost {
-  /** The IDE host's own origin (5679). */
+  /** The IDE host's own origin (`IDE_HOST_PORT`). */
   url: string;
   /** Where the OPEN project's game is served; `null` while none is. */
   previewUrl(): string | null;
@@ -340,7 +354,7 @@ export interface WorkspaceHost {
 
 /**
  * Boots `e8` over `root` — a folder OF projects, so nothing opens at boot
- * and `previewUrl()` starts `null`. Port 5679 for the reason
+ * and `previewUrl()` starts `null`. `IDE_HOST_PORT` for the reason
  * `startDevHost` gives; `previewPort: 0` so the game lands on a free port
  * and never fights another spec's 5681 — a test that needs the SAME port
  * across a switch (workspace.spec's fixed-port case) passes its own.
@@ -349,7 +363,12 @@ export async function startHost(
   root: string,
   options: Pick<Parameters<typeof createIdeHost>[0], 'ideDist' | 'previewPort'> = {},
 ): Promise<WorkspaceHost> {
-  const host: IdeHost = await createIdeHost({ root, port: 5679, previewPort: 0, ...options });
+  const host: IdeHost = await createIdeHost({
+    root,
+    port: IDE_HOST_PORT,
+    previewPort: 0,
+    ...options,
+  });
   return {
     url: host.url,
     previewUrl: () => host.ctx.workspace.state().previewUrl,

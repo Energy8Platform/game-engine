@@ -41,6 +41,13 @@ require(paths: string[]): () => void;
 - The scenes row folds the required set into `load()`'s batch: a `require`
   before its boot load simply joins it; one after it triggers a load of what
   is new and a `refresh()`/`redraw()` when that lands.
+  **Superseded (whole-branch review).** The merge is gone: a `require` ALWAYS
+  queues its own batch. A composition that never shows a document — a scenes
+  row used only for `mountCell`/symbols — has no `load()` to join, so the
+  merge meant the required paths were never fetched at all. One extra batch
+  at boot is always correct; "sometimes it loads" is no contract. The queue
+  is serial and the batch re-reads what is already loaded, so nothing is
+  fetched twice.
 - The disposer removes this holder's claim. A path no holder names any more is
   NOT unloaded (the loader's `unload` stays for a document leaving the stage);
   it is simply no longer re-loaded on a later batch. Say so in the doc.
@@ -55,8 +62,12 @@ require(paths: string[]): () => void;
 today it is silent. The scenes row's loader reports, ONCE per path, a
 `warning` at `assetLoader`:
 
-> `nothing loaded "<path>" — a document must name it, or a row must
-> `require` it`
+> message: `nothing loaded "<path>" — it draws as nothing`
+> fix: `name it in a scene document, or call scenes.require([...]) from the
+> row that draws with it`
+
+(Amended to what shipped: the house style is a `message` naming the symptom
+and a separate `fix` naming the move, not one run-on line.)
 
 Only for a path no batch ever requested (a path that WAS requested and failed
 already has its own error from `load()`), and only after the first batch has
@@ -99,6 +110,11 @@ rule, not a per-kind one):
 - `PlayStateStep.wait` keeps its current meaning, which is exactly this one —
   the reels board's `Promise.all` becomes redundant and is removed in favour of
   the generic rule. The step's doc says so.
+  **Superseded (task review).** Only the board's branch on `step.wait` went;
+  the `Promise.all` stayed. `executePlan` owns the wait decision for every
+  kind at once, and a board method that returned early would take that
+  decision away from it — and from `skip()`, which needs a promise to
+  collapse.
 
 Not here: a step that outlives its plan (a beat still playing when the next
 spin starts) — the plan awaits its own.
@@ -166,7 +182,13 @@ is `{ scene, node }` and every consumer reads it that way. What changes is the
 diagnostic:
 
 > `node id "bar" is declared twice in "meters" — ids are unique per document,
-> not per parent`, fix: `prefix them, e.g. "rock_bar" and "paper_bar"`
+> not per parent, and the later one is skipped`, fix: `prefix them, e.g.
+> "rock_bar" and "paper_bar"`
+
+(Amended to what shipped: the whole-branch review put "the later one is
+skipped" back — the author needs the rule AND what became of their node —
+and the IDE host's `checkScenes` says it word for word, since the
+diagnostics panel is the surface they actually read.)
 
 and one sentence in the scene document's own schema doc (`SceneDoc.nodes`)
 saying the same.
