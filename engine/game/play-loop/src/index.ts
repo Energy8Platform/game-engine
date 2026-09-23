@@ -20,7 +20,14 @@
  * **`wait: false`.** One rule for every step, known kind or registered
  * handler: a step carrying `wait === false` is STARTED where it sits and
  * not awaited there, so the next step begins over the top of it — a death
- * morph playing through the tumble that follows it. The plan is still
+ * morph playing through the tumble that follows it. That is this runner's
+ * READ of the plan; AUTHORING one is narrower, because `PresentationPlan`
+ * is `KnownPresentationStep[]` and deliberately closed: a shape that wants
+ * `wait: false` declares `wait?: boolean` on itself (today `PlayStateStep`
+ * and `EmitStep` do, and a plugin's own step type declares its own), and
+ * `{ kind: 'spinTo', board, wait: false }` is an excess-property error —
+ * see `UnknownPresentationStep`'s doc in `@energy8engine/contracts` for
+ * why that stays closed. The plan is still
  * atomic: everything started that way is awaited at the END of
  * `executePlan`, before it returns, and a rejection becomes the ordinary
  * `step "<kind>" failed` diagnostic naming the index it STARTED at. A step

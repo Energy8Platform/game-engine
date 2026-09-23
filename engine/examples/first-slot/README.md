@@ -70,9 +70,11 @@ on a win. `6` is the exception and shows the other two things a state can
 be: its `static` is `{ type: scene, props: { scene: orb } }`, so
 `scenes/orb.scene.yml` is mounted as a private copy for every cell that
 lands a `6` — a whole document per cell, whose `text` reads
-`'$cell.multiplier'` off that cell's own data (this math hands its board
-over as plain ids, so the node stands at its empty until a game's math
-carries a per-cell figure). And under `states:` it declares `pop`, a NAMED
+`'x{$cell.multiplier}'` off that cell's own data. A `$cell` prop is a whole
+expression, so a template, a format pipe and arithmetic over the cell are
+all allowed; this math hands its board over as plain ids, so the span
+inside the braces resolves to nothing and the cell reads a bare `x` until a
+game's math carries a per-cell figure. And under `states:` it declares `pop`, a NAMED
 state: not one of the three built-ins, played only because something asks
 for it by name — here the `reel-step` mechanic, which puts
 `{ kind: 'playState', cells, state: 'pop' }` in its plan after every round

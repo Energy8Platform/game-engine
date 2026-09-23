@@ -325,6 +325,12 @@ const present: FlowNodeKind<{ turbo: string }> = {
       ? diagnostics
       : await play.execute(plan, ctx.reflect.get('board', false), undefined, opts);
     // The spin log: what was drawn — `[]` when the presentation failed.
+    // A step that declined to hold the plan (`wait: false`) is awaited at
+    // the END of `executePlan`, so its rejection arrives late and still
+    // lands in `problems` — the round fails and the recorded plan is
+    // zeroed just as an early failure zeroes it. Deliberate, not an
+    // oversight: a step that failed is a step that did not draw, and a log
+    // claiming otherwise is worse than an empty one.
     play.record({
       request: (vars.request as Record<string, unknown>) ?? {},
       result,

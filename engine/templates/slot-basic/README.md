@@ -12,7 +12,9 @@ node puts `base_game` on screen at boot — `base_game`'s board is a `reels`
 node, and `big_win` is a nested scene it can show. `orb` is neither: it is a
 CELL scene, named by symbol `6`'s `static` state in `symbols.yml`, so a
 private copy of it is mounted inside every cell that lands a `6` and its
-`'$cell.multiplier'` text resolves against that cell's own data.
+`'x{$cell.multiplier}'` text resolves against that cell's own data — a
+`$cell` prop is a whole expression, so a template, a format pipe and
+arithmetic over the cell are all allowed.
 `scenes1`'s row (below) sets the design resolution these documents are laid
 out against.
 
@@ -82,7 +84,9 @@ node (`spritesheet`, onto `assets/coin.json`, `loop: false`) that plays once
 on a win. `6` is the exception and shows the other two things a state can
 be: its `static` is `{ type: scene, props: { scene: orb } }` — a whole
 scene document mounted as a private copy inside every cell that lands a
-`6`, whose `text` reads `'$cell.multiplier'` off that cell's own data — and
+`6`, whose `text` reads `'x{$cell.multiplier}'` off that cell's own data (a
+`$cell` prop is a whole expression: a template, a format pipe and
+arithmetic over the cell are all allowed) — and
 under `states:` it declares `pop`, a NAMED state. A named state is not one
 of the three built-ins and nothing plays it on its own: a mechanic asks for
 it by name, with a `{ kind: 'playState', cells, state: 'pop' }` step. The

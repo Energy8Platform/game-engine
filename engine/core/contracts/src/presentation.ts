@@ -160,7 +160,15 @@ export interface EmitStep {
  * — and read there for EVERY step kind, this one and a plugin's alike, off
  * `UnknownPresentationStep`'s index signature when the shape has no field of
  * its own. The rule is one line: `wait === false` starts the step and the
- * plan carries on. The plan still stays atomic — `executePlan` awaits every
+ * plan carries on.
+ *
+ * That is what `executePlan` READS, not what a mechanic can WRITE: a shape
+ * that wants `wait: false` must declare `wait?: boolean` on ITSELF (this
+ * one and `EmitStep` do; nothing else in `KnownPresentationStep` does, and
+ * a plugin's own step type declares its own), because `PresentationPlan`
+ * is `KnownPresentationStep[]` and stays closed on purpose — see
+ * `UnknownPresentationStep`'s own doc for why widening it would cost every
+ * mechanic its typo check. The plan still stays atomic — `executePlan` awaits every
  * such step at the end, before it returns, so a state cannot outlive the
  * plan that played it, and a failure is the ordinary `step "<kind>" failed`
  * diagnostic naming the index it started at.
