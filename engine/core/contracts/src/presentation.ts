@@ -168,9 +168,11 @@ export interface EmitStep {
  * a plugin's own step type declares its own), because `PresentationPlan`
  * is `KnownPresentationStep[]` and stays closed on purpose — see
  * `UnknownPresentationStep`'s own doc for why widening it would cost every
- * mechanic its typo check. The plan still stays atomic — `executePlan` awaits every
- * such step at the end, before it returns, so a state cannot outlive the
- * plan that played it, and a failure is the ordinary `step "<kind>" failed`
+ * mechanic its typo check.
+ *
+ * The plan still stays atomic — `executePlan` awaits every such step at
+ * the end, before it returns, so a state cannot outlive the plan that
+ * played it, and a failure is the ordinary `step "<kind>" failed`
  * diagnostic naming the index it started at.
  */
 export interface PlayStateStep {

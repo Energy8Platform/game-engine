@@ -27,11 +27,13 @@
  * and `EmitStep` do, and a plugin's own step type declares its own), and
  * `{ kind: 'spinTo', board, wait: false }` is an excess-property error —
  * see `UnknownPresentationStep`'s doc in `@energy8engine/contracts` for
- * why that stays closed. The plan is still
- * atomic: everything started that way is awaited at the END of
- * `executePlan`, before it returns, and a rejection becomes the ordinary
- * `step "<kind>" failed` diagnostic naming the index it STARTED at. A step
- * that outlives its own plan is not something this vocabulary offers.
+ * why that stays closed.
+ *
+ * The plan is still atomic: everything started that way is awaited at the
+ * END of `executePlan`, before it returns, and a rejection becomes the
+ * ordinary `step "<kind>" failed` diagnostic naming the index it STARTED
+ * at. A step that outlives its own plan is not something this vocabulary
+ * offers.
  *
  * **The registry.** `BoardApi` is the closed vocabulary the shipped
  * mechanics stand on — one method per known kind, not opened here. Any

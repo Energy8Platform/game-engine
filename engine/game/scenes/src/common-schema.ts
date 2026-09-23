@@ -90,8 +90,8 @@ export const COLOUR = new RegExp(
  * word boundary is what keeps a var that merely STARTS like it
  * (`'$cellular'`) out.
  *
- * Three consequences of taking the whole expression grammar, each of
- * which surprised someone once:
+ * Three consequences of taking the whole expression grammar, none of them
+ * visible in the examples above:
  *   - A cell FIELD has to be an identifier now, because the path is
  *     PARSED. `'$cell.step-win'` is `$cell.step` minus `win`, not a field
  *     called `step-win` — and `win` is missing, so it resolves to `NaN`.
