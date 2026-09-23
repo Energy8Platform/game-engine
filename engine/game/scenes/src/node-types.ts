@@ -11,7 +11,7 @@ import { createRegistry } from '@energy8engine/registry';
 import { COLOUR, COMMON, PINS, type Pin } from './common-schema';
 import type { Fit } from './fit';
 
-export { COLOUR, COMMON, PINS, cellField, cellProps, emptyProp, isCellBinding } from './common-schema';
+export { COLOUR, COMMON, PINS, cellProps, emptyProp, isCellBinding } from './common-schema';
 export type { NodeTypeAccept, Pin };
 
 declare global {

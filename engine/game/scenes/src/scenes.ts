@@ -278,13 +278,18 @@ const offending = (e: unknown, patch: Record<string, unknown>): string => {
  * `$cell` binding, and the RAW dict the common pass reads with those keys
  * resolved in place — `applyCommon` must never see a binding string on a
  * COMMON prop (`alpha: '$cell.hot'` would fail the whole node).
+ *
+ * `report` is the node's own `error(where, …)`, for an expression that
+ * does not parse. A call with no cell passes none: with no data nothing is
+ * evaluated, so there is nothing to report.
  */
 function resolveCell(
   type: NodeType,
   base: Record<string, unknown>,
   cell?: Record<string, unknown>,
+  report?: (message: string) => void,
 ): { props: Record<string, unknown>; bound: string[]; raw: Record<string, unknown> } {
-  const { props, bound } = cellProps(type, base, cell);
+  const { props, bound } = cellProps(type, base, cell, report);
   return {
     props,
     bound,
@@ -439,7 +444,7 @@ export function createScenes(options: CreateScenesOptions): ScenesService {
     let raw = base;
     let masks = false;
     try {
-      ({ props, bound, raw } = resolveCell(type, base, cell));
+      ({ props, bound, raw } = resolveCell(type, base, cell, (m) => error(where, m)));
       view = type.mount(props, mountCtx([...chain, sceneId]));
       // Inside the try: a common prop off its type (`x: 'abc'`) is this
       // node's failure, not the whole set's.
@@ -1095,7 +1100,7 @@ export function createScenes(options: CreateScenesOptions): ScenesService {
           for (const e of entries) {
             if (!e.bound?.length) continue;
             try {
-              const r = resolveCell(e.type, rawOf(e), next);
+              const r = resolveCell(e.type, rawOf(e), next, (m) => error(e.where, m));
               // A copy has no remount path (`setProps`' own is for mounted
               // nodes), so a type with no `update` can never show a new own
               // prop: `scene: '$cell.kind'` would swap in silence. One report

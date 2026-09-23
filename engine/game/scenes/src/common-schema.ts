@@ -2,7 +2,9 @@
  * The props every node has, whatever its type — the runtime applies them
  * (`applyCommon`), a type's own `schema` never lists them. Imported by
  * the IDE client through the package's `./common-schema` export, so this
- * module imports `schemastery` and nothing else — no pixi.
+ * module imports `schemastery` and `@energy8engine/contracts` (types and
+ * the pure expression resolver a bound prop runs through) and nothing
+ * else — no pixi.
  *
  * The ones with no default (`width`, `height`, `tint`, `anchorX`,
  * `anchorY`) are deliberately optional: unset, each leaves what
@@ -10,6 +12,7 @@
  * overwriting it with a "neutral" value.
  */
 import Schema from 'schemastery';
+import { resolveValue } from '@energy8engine/contracts';
 
 /**
  * The CSS colour names pixi's `Color` takes — it parses with
@@ -79,19 +82,23 @@ export const COLOUR = new RegExp(
 );
 
 /**
- * A prop bound to the data of the cell a symbol landed in —
- * `'$cell.multiplier'`. No schema ever validates one (the flow's `$path`
- * strings are not validated either): the symbols runtime resolves it on
- * `bind`, and until then the prop stands at its type's empty, below. Here
- * rather than in `symbols` so the host's static check (`checkNode`) and
- * that runtime agree on the one rule.
+ * A prop that reads the data of the cell a symbol landed in: a bare field
+ * (`'$cell.multiplier'`), an expression over one (`'$cell.layer > 0'`,
+ * `'$cell.mv * 2'`) or a template (`'x{$cell.mv}'`,
+ * `'{$cell.mv | multiplier}'`). The test is only "the string mentions
+ * `$cell`" because the resolver decides the rest — see `cellProps`. The
+ * word boundary is what keeps a var that merely STARTS like it
+ * (`'$cellular'`) out.
+ *
+ * No schema ever validates one (the flow's `$path` strings are not
+ * validated either): the symbols runtime resolves it on `bind`, and until
+ * then the prop stands at its type's empty, below. Here rather than in
+ * `symbols` so the host's static check (`checkNode`) and that runtime
+ * agree on the one rule.
  */
-const CELL = '$cell.';
+const CELL = /\$cell\b/;
 export const isCellBinding = (value: unknown): value is string =>
-  typeof value === 'string' && value.startsWith(CELL);
-
-/** The cell field a binding reads: `'$cell.multiplier'` → `'multiplier'`. */
-export const cellField = (binding: string): string => binding.slice(CELL.length);
+  typeof value === 'string' && CELL.test(value);
 
 /**
  * What an unresolved binding stands in as, so neither a schema nor a
@@ -161,24 +168,41 @@ type PropSchema = { type?: string; list?: { value?: unknown }[] };
 const dictOf = (schema: unknown): Record<string, PropSchema | undefined> =>
   (schema as { dict?: Record<string, PropSchema> }).dict ?? {};
 
-/** A bound prop's value: the cell's field coerced to the prop's schema type — the way a flow's `prop` coerces. */
-function boundValue(field: unknown, entry?: PropSchema): unknown {
+/**
+ * A bound prop's value: what the expression resolved to, coerced to the
+ * prop's schema type — the way a flow's `prop` coerces. A template has
+ * already produced a string; a bare field or arithmetic hands over
+ * whatever the cell held, so the coercion is what a typed prop relies on.
+ */
+function boundValue(value: unknown, entry?: PropSchema): unknown {
   const type = entry?.type;
-  if (field === undefined || field === null) return emptyProp(entry);
+  if (value === undefined || value === null) return emptyProp(entry);
   if (type === 'number') {
-    const n = Number(field);
+    const n = Number(value);
     return Number.isNaN(n) ? 0 : n;
   }
-  if (type === 'boolean') return typeof field === 'string' ? field === 'true' : Boolean(field);
-  return type === 'string' ? String(field) : field;
+  if (type === 'boolean') return typeof value === 'string' ? value === 'true' : Boolean(value);
+  return type === 'string' ? String(value) : value;
 }
 
 /**
- * A node's props with every `$cell.<field>` binding resolved against one
- * cell's data — the one place a binding turns into a value, shared by
+ * A node's props with every `$cell` binding resolved against one cell's
+ * data — the one place a binding turns into a value, shared by
  * `@energy8engine/symbols` (a symbol's own states) and the scenes runtime
  * (a cell scene, and any other mount, where an unresolved binding simply
  * stands at its empty value rather than failing the schema).
+ *
+ * The value is a full expression (`resolveValue`): a template, a format
+ * pipe, a comparison or arithmetic, not just a bare field — so a view
+ * string like `'x{$cell.mv}'` belongs to the document rather than to the
+ * mechanic that pre-computed it. The vars are `{ cell }` and nothing else,
+ * so `| currency` finds no `$session` and falls back to two decimals with
+ * no symbol. A malformed expression is one `report` and the prop stands at
+ * its empty — the string as written is no value for a typed prop.
+ *
+ * With NO data (a mount before the first `bind`) nothing is evaluated at
+ * all: the prop stands at its empty, and even a malformed expression is
+ * silent until there is a cell to resolve it against.
  *
  * The schema never sees a binding: that prop's EMPTY stands in for the
  * validation, which is what makes a binding valid whatever the prop's type
@@ -195,6 +219,7 @@ export const cellProps = (
   type: { schema: Schema },
   raw: Record<string, unknown>,
   data?: Record<string, unknown>,
+  report?: (message: string) => void,
 ): { props: Record<string, unknown>; bound: string[] } => {
   const own = dictOf(type.schema);
   const common = dictOf(COMMON);
@@ -209,7 +234,17 @@ export const cellProps = (
     // The ENTRY, not its type name: a union's empty is its first literal (`text.align` → 'left').
     const entry = own[key] ?? common[key];
     input[key] = emptyProp(entry);
-    resolved[key] = data ? boundValue(data[cellField(value)], entry) : input[key];
+    resolved[key] = input[key];
+    if (data) {
+      // `resolveValue` answers the string AS WRITTEN when it cannot parse
+      // it, which no typed prop wants: the flag turns that into the empty.
+      let bad = false;
+      const out = resolveValue(value, { cell: data }, (message) => {
+        bad = true;
+        report?.(message);
+      });
+      if (!bad) resolved[key] = boundValue(out, entry);
+    }
     bound.push(key);
   }
   return { props: { ...(type.schema(input) as Record<string, unknown>), ...resolved }, bound };

@@ -291,7 +291,54 @@ describe('checkScenes', () => {
     ]);
   });
 
-  it('only the `$cell.` prefix passes — any other string on a number prop is still refused', () => {
+  // Slice 31: a bound prop is an EXPRESSION, so the test is "the string
+  // mentions `$cell`" — a template and arithmetic are bindings too, and the
+  // host refuses them off a cell scene for the same reason a bare one.
+  it('a template mentioning $cell is a binding too: refused on a scene node, fine in a cell scene', () => {
+    const one = () => [doc('a', [{ id: 'n', type: 'text', props: { text: 'x{$cell.mv}' } }])];
+    expect(checkScenes(one(), types, () => true, false, ['a'])).toEqual([]);
+    expect(checkScenes(one(), types, () => true, false)).toEqual([
+      expect.objectContaining({
+        severity: 'error',
+        where: 'a/n',
+        message:
+          'prop "text" binds "$cell." — only a cell scene (one a symbols.yml state names) reads a cell',
+      }),
+    ]);
+  });
+
+  it('an expression over $cell stands at the prop\'s empty for the schema, whatever the prop\'s type', () => {
+    // `size` is a number: the raw string would fail the schema, the empty does not.
+    expect(
+      checkScenes(
+        [doc('a', [{ id: 'n', type: 'text', props: { size: '$cell.mv * 2' } }])],
+        types,
+        () => true,
+        false,
+        ['a'],
+      ),
+    ).toEqual([]);
+  });
+
+  it('an ASSET prop with a $cell template stays refused in a cell scene too', () => {
+    expect(
+      checkScenes(
+        [doc('a', [{ id: 'i', type: 'image', props: { src: '{$cell.symbol}.png' } }])],
+        types,
+        () => true,
+        false,
+        ['a'],
+      ),
+    ).toEqual([
+      expect.objectContaining({
+        severity: 'error',
+        where: 'a/i',
+        message: 'an asset prop cannot be bound to $cell (assets are preloaded from the document)',
+      }),
+    ]);
+  });
+
+  it('a string that merely starts like one (`$cellular`) is no binding: still refused on a number prop', () => {
     const out = checkScenes(
       [doc('a', [{ id: 'n', type: 'text', props: { size: '$cellular' } }])],
       types,

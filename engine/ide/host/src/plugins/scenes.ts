@@ -171,11 +171,13 @@ export function checkNode(
       dict = (ownSchema as unknown as { dict?: Dict }).dict ?? {};
       for (const [k, v] of Object.entries(node.props)) {
         const target = COMMON_PROPS.includes(k) && !(k in dict) ? common : own;
-        // A symbol state's `$cell.<field>` binding stands for a value of whatever
-        // type the prop declares — resolved against the cell's data at run time, so
-        // no schema ever validates it (the flow's `$path` strings are not validated
-        // either). That prop's EMPTY is checked in its place, exactly as the symbols
-        // runtime does before the first `update` (`symbols/src/view.ts`).
+        // A symbol state's `$cell` binding — a bare field, or any expression
+        // over one (`'x{$cell.mv}'`, `'$cell.mv * 2'`) — stands for a value of
+        // whatever type the prop declares, resolved against the cell's data at
+        // run time, so no schema ever validates it (the flow's `$path` strings
+        // are not validated either). That prop's EMPTY is checked in its place,
+        // exactly as the symbols runtime does before the first `update`
+        // (`symbols/src/view.ts`).
         //
         // Only where there IS a cell, though: an ordinary scene node is not
         // mounted per cell, nothing resolves the binding there, and the

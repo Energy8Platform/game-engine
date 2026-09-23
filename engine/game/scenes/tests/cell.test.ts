@@ -50,6 +50,51 @@ describe('cellProps', () => {
     expect(cellProps(kinds, { alpha: '$cell.a' }).props.alpha).toBe(0);
     expect(cellProps(kinds, { alpha: '$cell.a' }, { a: 0.25 }).bound).toEqual(['alpha']);
   });
+
+  it('a bound prop is an expression: a template, a format, a comparison, arithmetic', () => {
+    expect(cellProps(kinds, { label: 'x{$cell.mv}' }, { mv: 64 }).props.label).toBe('x64');
+    expect(cellProps(kinds, { label: '{$cell.mv | multiplier}' }, { mv: 64 }).props.label).toBe(
+      'x64',
+    );
+    expect(cellProps(kinds, { count: '$cell.mv * 2' }, { mv: 64 }).props.count).toBe(128);
+    expect(cellProps(kinds, { on: '$cell.layer > 0' }, { layer: 1 }).props.on).toBe(true);
+    expect(cellProps(kinds, { on: '$cell.layer > 0' }, { layer: 0 }).props.on).toBe(false);
+    // A template already produced a string; a number prop takes it all the same.
+    expect(cellProps(kinds, { count: '{$cell.mv}' }, { mv: 7 }).props.count).toBe(7);
+  });
+
+  it('the vars are the cell alone: `| currency` has no $session and drops the symbol', () => {
+    expect(cellProps(kinds, { label: '{$cell.win | currency}' }, { win: 4.6 }).props.label).toBe(
+      '4.60',
+    );
+  });
+
+  it('a malformed expression is one report and the prop stands at its empty', () => {
+    const report = vi.fn();
+    const { props, bound } = cellProps(
+      kinds,
+      { label: '{$cell.mv +}', count: '$cell.mv' },
+      { mv: 64 },
+      report,
+    );
+    expect(props.label).toBe('');
+    expect(props.count).toBe(64);
+    expect(bound).toEqual(['label', 'count']);
+    expect(report).toHaveBeenCalledTimes(1);
+    expect(report.mock.calls[0][0]).toContain('{$cell.mv +}');
+  });
+
+  it('with no data nothing is evaluated: even a malformed expression is silent at its empty', () => {
+    const report = vi.fn();
+    expect(cellProps(kinds, { label: '{$cell.mv +}' }, undefined, report).props.label).toBe('');
+    expect(report).not.toHaveBeenCalled();
+  });
+
+  it('a string that merely looks like one is no binding: the mention is `$cell` itself', () => {
+    expect(cellProps(kinds, { label: '$cellular' }, { mv: 1 }).bound).toEqual([]);
+    expect(cellProps(kinds, { label: '$cellular' }, { mv: 1 }).props.label).toBe('$cellular');
+    expect(cellProps(kinds, { label: 'a cell' }, { mv: 1 }).bound).toEqual([]);
+  });
 });
 
 const loader: AssetLoader = {
@@ -268,6 +313,24 @@ describe('mountCell', () => {
     expect(txt.destroyed).toBe(true);
     expect(cell.view.children).toHaveLength(0);
     expect(cell.view.destroyed).toBe(true);
+  });
+
+  it('a malformed bound expression is a diagnostic on the node, at mount and at bind', () => {
+    const { scenes, report } = boot([
+      { id: 'bad', nodes: [{ id: 'mv', type: 'text', props: { text: '{$cell.mv +}' } }] },
+    ]);
+    report.mockClear();
+    const cell = scenes.mountCell('bad', { mv: 64 })!;
+    expect(textIn(cell.view).text).toBe('');
+    expect(report).toHaveBeenCalledTimes(1);
+    expect(report.mock.calls[0][0]).toMatchObject({
+      severity: 'error',
+      where: 'bad/mv',
+      message: expect.stringContaining('{$cell.mv +}'),
+    });
+    cell.bind({ mv: 8 });
+    expect(textIn(cell.view).text).toBe('');
+    expect(report).toHaveBeenCalledTimes(2);
   });
 
   it('a document nothing declares is null', () => {

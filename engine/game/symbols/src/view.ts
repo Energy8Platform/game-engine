@@ -31,7 +31,9 @@
  * the current one).
  *
  * A state's props may read the data of the cell the symbol landed in:
- * `'$cell.<field>'` (an orb's `text: '$cell.multiplier'`). `bind(data)` —
+ * `'$cell.<field>'` (an orb's `text: '$cell.multiplier'`), or any
+ * expression over it (`'x{$cell.mv}'`) — `cellProps` decides, and reports
+ * one that does not parse against this symbol's state. `bind(data)` —
  * the reels board calls it on every seated cell — resolves those against
  * that data (`cellProps`) and re-runs the type's `update`, or hands the
  * data to the cell copy — a copy with no `$cell` prop in it is left
@@ -221,7 +223,9 @@ export function createSymbolHandle(
       w.type = type;
       w.raw = node.props;
       try {
-        const resolved = cellProps(type, node.props, cell);
+        const resolved = cellProps(type, node.props, cell, (m) =>
+          deps.report(`symbols/${id}/${state}`, m),
+        );
         w.props = resolved.props;
         w.bound = resolved.bound;
         w.child = type.mount(w.props, deps.ctx);
@@ -365,7 +369,9 @@ export function createSymbolHandle(
             w.cell.bind(data);
           } else if (!w.bound?.length || !w.type || !w.child) continue;
           else {
-            w.props = cellProps(w.type, w.raw!, data).props;
+            w.props = cellProps(w.type, w.raw!, data, (m) =>
+              deps.report(`symbols/${id}/${w.state}`, m),
+            ).props;
             applyCommon(w.child, w.props, w.type);
           }
         } catch (e) {
