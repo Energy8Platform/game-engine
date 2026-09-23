@@ -150,7 +150,7 @@ describe('createFlow', () => {
     expect(f.play.execute).toHaveBeenCalledTimes(1);
     expect(f.play.record).toHaveBeenLastCalledWith({ request: { action: 'spin' }, result: okBody, plan: [] });
 
-    f.play.execute.mockResolvedValueOnce([{ message: 'step blew up' }]);
+    f.play.execute.mockResolvedValueOnce([{ severity: 'error', message: 'step blew up' }]);
     f.flow.stop();
     f.flow.replace(d);
     await settled(f, ['start.next', 'spin.result', 'draw.failed']);

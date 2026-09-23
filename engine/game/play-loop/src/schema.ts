@@ -11,4 +11,7 @@ export const Config = Schema.object({
   skipEvents: Schema.array(String)
     .default(['ui.skip'])
     .description('flow-bus events that collapse the running presentation'),
+  pendingMs: Schema.natural()
+    .default(30000)
+    .description('how long a plan waits at its end on its wait: false steps before reporting them and moving on (ms, 0 = forever)'),
 });

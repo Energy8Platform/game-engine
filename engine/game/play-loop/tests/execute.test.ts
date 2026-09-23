@@ -518,3 +518,155 @@ describe('executePlan: a step that does not hold the plan', () => {
     expect(announced).toEqual(['playState', 'spinTo']);
   });
 });
+
+/**
+ * Slice 32 — the end-of-plan await is capped (`pendingMs`), and a
+ * non-blocking step's failure is a `warning`, not an `error`: the author
+ * declared it must not hold the plan, so it does not fail the round either.
+ * The cap itself stays an `error` — a step that never settled is broken.
+ */
+describe('executePlan: the cap on a non-blocking step, and its severity', () => {
+  const never = () => new Promise<void>(() => {});
+
+  it('a step that never settles releases the plan after pendingMs, an error at the index it started at', async () => {
+    vi.useFakeTimers();
+    try {
+      const board = fakeBoard();
+      board.playState.mockImplementation(never);
+      let settled = false;
+      const running = executePlan(
+        [
+          { kind: 'spinTo', board: [[1]] },
+          { kind: 'playState', cells: [], state: 'death', wait: false },
+        ],
+        board,
+        undefined,
+        undefined,
+        undefined,
+        { pendingMs: 1000 },
+      ).then((problems) => {
+        settled = true;
+        return problems;
+      });
+
+      await vi.advanceTimersByTimeAsync(999);
+      expect(settled).toBe(false);
+      await vi.advanceTimersByTimeAsync(1);
+      expect(settled).toBe(true);
+      expect((await running).map((d) => [d.severity, d.where, d.message])).toEqual([
+        ['error', 'plan[1]', 'step "playState" did not settle in 1 s'],
+      ]);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('pendingMs: 0 disables the cap — the plan stays held', async () => {
+    vi.useFakeTimers();
+    try {
+      const board = fakeBoard();
+      board.playState.mockImplementation(never);
+      let settled = false;
+      void executePlan([{ kind: 'playState', cells: [], state: 'death', wait: false }], board, undefined, undefined, undefined, {
+        pendingMs: 0,
+      }).then(() => (settled = true));
+
+      await vi.advanceTimersByTimeAsync(10 * 60_000);
+      expect(settled).toBe(false);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('the default cap is 30 s', async () => {
+    vi.useFakeTimers();
+    try {
+      const board = fakeBoard();
+      board.playState.mockImplementation(never);
+      let settled = false;
+      const running = executePlan([{ kind: 'playState', cells: [], state: 'death', wait: false }], board).then((p) => {
+        settled = true;
+        return p;
+      });
+      await vi.advanceTimersByTimeAsync(29_999);
+      expect(settled).toBe(false);
+      await vi.advanceTimersByTimeAsync(1);
+      expect((await running).map((d) => d.message)).toEqual(['step "playState" did not settle in 30 s']);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('two pending steps, one settles in time: only the other is reported', async () => {
+    vi.useFakeTimers();
+    try {
+      const board = fakeBoard();
+      board.playState.mockImplementation(() => new Promise<void>((r) => setTimeout(r, 500)));
+      board.remove.mockImplementation(never);
+      const running = executePlan(
+        [
+          { kind: 'playState', cells: [], state: 'death', wait: false },
+          { kind: 'remove', cells: [], wait: false } as never,
+        ],
+        board,
+        undefined,
+        undefined,
+        undefined,
+        { pendingMs: 1000 },
+      );
+      await vi.advanceTimersByTimeAsync(1000);
+      expect((await running).map((d) => [d.where, d.message])).toEqual([
+        ['plan[1]', 'step "remove" did not settle in 1 s'],
+      ]);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('a step that rejects after the cap fired adds nothing, and is no unhandled rejection', async () => {
+    vi.useFakeTimers();
+    try {
+      const board = fakeBoard();
+      let fail!: (error: Error) => void;
+      board.playState.mockImplementation(() => new Promise<void>((_, reject) => (fail = reject)));
+      const problems = executePlan(
+        [{ kind: 'playState', cells: [], state: 'death', wait: false }],
+        board,
+        undefined,
+        undefined,
+        undefined,
+        { pendingMs: 1000 },
+      );
+      await vi.advanceTimersByTimeAsync(1000);
+      const returned = await problems;
+      expect(returned).toHaveLength(1);
+
+      fail(new Error('late'));
+      await vi.advanceTimersByTimeAsync(0);
+      expect(returned.map((d) => d.message)).toEqual(['step "playState" did not settle in 1 s']);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('a non-blocking step that rejects in time is a warning; a blocking one stays an error', async () => {
+    const board = fakeBoard();
+    board.playState.mockImplementation(async () => {
+      throw new Error('nope');
+    });
+    board.spinTo.mockImplementation(async () => {
+      throw new Error('broke');
+    });
+    const problems = await executePlan(
+      [
+        { kind: 'playState', cells: [], state: 'death', wait: false },
+        { kind: 'spinTo', board: [[1]] },
+      ],
+      board,
+    );
+    expect(problems.map((d) => [d.severity, d.where, d.message]).sort()).toEqual([
+      ['error', 'plan[1]', 'step "spinTo" failed: broke'],
+      ['warning', 'plan[0]', 'step "playState" failed: nope'],
+    ]);
+  });
+});

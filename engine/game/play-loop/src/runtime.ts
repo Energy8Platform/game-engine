@@ -72,7 +72,9 @@
  * one is a default argument, not an override. A test, or a game running two
  * boards with different step sets, keeps that option.
  *
- * `config` is `./schema.ts`'s `Config`: `skipEvents` alone.
+ * `config` is `./schema.ts`'s `Config`: `skipEvents`, and `pendingMs` (slice
+ * 32) — the cap on how long a plan's end waits on its `wait: false` steps,
+ * handed to every `executePlan` this row runs (see `ExecuteLimits`).
  *
  * **`e8.runtime.requires: ["board"]`** (this package's own `package.json`).
  * `apply` below never reads `ctx.board` itself — `execute`'s `board`
@@ -186,7 +188,7 @@ interface FlowBus {
   emit(name: string, payload?: unknown): void | Promise<void>;
 }
 
-export function apply(ctx: Context, config: { skipEvents?: string[] } = {}): void {
+export function apply(ctx: Context, config: { skipEvents?: string[]; pendingMs?: number } = {}): void {
   const steps = createBoardStepRegistry();
   const skipEvents = config.skipEvents ?? ['ui.skip'];
 
@@ -305,11 +307,18 @@ export function apply(ctx: Context, config: { skipEvents?: string[] } = {}): voi
     async execute(plan, board, registry = steps, opts) {
       lastBoard = board;
       lastRegistry = registry;
-      const problems = await executePlan(plan, board, registry, opts, {
-        onStepStarted: () => {
-          if (skipped) fanOut();
+      const problems = await executePlan(
+        plan,
+        board,
+        registry,
+        opts,
+        {
+          onStepStarted: () => {
+            if (skipped) fanOut();
+          },
         },
-      }).finally(() => {
+        { pendingMs: config.pendingMs },
+      ).finally(() => {
         // This run is over: a later `skip()` has nothing live to aim at, and
         // the next run starts unlatched. `finally`, not two lines after the
         // await, so a rejection nobody expects (`executePlan` promises not to

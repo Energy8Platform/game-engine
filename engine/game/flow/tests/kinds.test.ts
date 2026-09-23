@@ -334,6 +334,27 @@ describe('built-in kinds', () => {
     expect(play.record).toHaveBeenLastCalledWith({ request: {}, result, plan: [] });
   });
 
+  it('present: warnings alone leave by next and the log keeps the plan; an error leaves by failed with []', async () => {
+    const plan = [{ kind: 'spinTo', board: [[1]] }];
+    const mechanics = { present: vi.fn(() => ({ plan, diagnostics: [] })) };
+    const result = { stage: 'base_game', data: {} };
+    const warning = { severity: 'warning', source: 'play-loop', where: 'plan[0]', message: 'step "playState" failed: nope' };
+    const error = { ...warning, severity: 'error', message: 'step "playState" did not settle in 30 s' };
+
+    const warned = { execute: vi.fn(async () => [warning]), record: vi.fn() };
+    const { rc: rcWarned } = runCtx({ mechanics, play: warned }, { result });
+    expect(await kind('present').run!({}, rcWarned)).toEqual({ out: 'next', vars: { plan } });
+    expect(warned.record).toHaveBeenCalledWith({ request: {}, result, plan });
+
+    const broke = { execute: vi.fn(async () => [warning, error]), record: vi.fn() };
+    const { rc: rcBroke } = runCtx({ mechanics, play: broke }, { result });
+    expect(await kind('present').run!({}, rcBroke)).toEqual({
+      out: 'failed',
+      vars: { plan, error: `${warning.message}; ${error.message}` },
+    });
+    expect(broke.record).toHaveBeenCalledWith({ request: {}, result, plan: [] });
+  });
+
   describe('present: turbo', () => {
     /** Schema-filled props, the way the interpreter always calls `run` — same device `propProps` below uses. */
     const presentProps = (props: Record<string, unknown> = {}) =>

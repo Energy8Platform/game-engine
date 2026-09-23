@@ -32,8 +32,16 @@
  * The plan is still atomic: everything started that way is awaited at the
  * END of `executePlan`, before it returns, and a rejection becomes the
  * ordinary `step "<kind>" failed` diagnostic naming the index it STARTED
- * at. A step that outlives its own plan is not something this vocabulary
- * offers.
+ * at — a `warning`, not an `error`: a step the author declared must not
+ * hold the plan does not fail the round either (a blocking step's failure
+ * stays an `error`). A step that outlives its own plan is not something
+ * this vocabulary offers.
+ *
+ * That end-of-plan await is capped at `limits.pendingMs` (30 s by default,
+ * `0` disables): on expiry every step still pending is an `error` —
+ * `step "<kind>" did not settle in <N> s`, at the index it started at — and
+ * `executePlan` returns. The promises are abandoned, not cancelled; a later
+ * rejection is swallowed, because the plan has already reported.
  *
  * **The registry.** `BoardApi` is the closed vocabulary the shipped
  * mechanics stand on — one method per known kind, not opened here. Any
@@ -321,6 +329,16 @@ export interface ExecuteHooks {
   onStepStarted?(step: PresentationStep): void;
 }
 
+/** What bounds a plan's run. Optional, like the hooks. */
+export interface ExecuteLimits {
+  /**
+   * How long the END of the plan waits on its `wait: false` steps before it
+   * reports the ones still running and returns. Milliseconds; `0` waits
+   * forever. Default 30000.
+   */
+  pendingMs?: number;
+}
+
 /**
  * Plays `plan` against `board`, one step at a time, awaiting each before
  * starting the next — unless the step says `wait: false`, which starts it
@@ -370,6 +388,9 @@ export interface ExecuteHooks {
  * `hooks` is last and optional, so every existing call is unchanged. Its
  * one member, `onStepStarted`, is what lets a caller act ON a step that has
  * just begun — see `ExecuteHooks` for why the timing is what it is.
+ *
+ * `limits` is after it, for the same reason: `pendingMs` caps the
+ * end-of-plan wait on `wait: false` steps (see this file's module doc).
  */
 export async function executePlan(
   plan: PresentationStep[],
@@ -377,6 +398,7 @@ export async function executePlan(
   registry?: BoardStepRegistry,
   opts?: StepOpts,
   hooks?: ExecuteHooks,
+  limits?: ExecuteLimits,
 ): Promise<Diagnostic[]> {
   // A hook is the caller's code, but it runs inside this function's
   // never-throws promise, so it gets the same treatment the board and the
@@ -395,10 +417,12 @@ export async function executePlan(
   // see one: the `catch` around the loop body, and a `wait: false` step whose
   // rejection lands long after the loop moved on — which is why `where` and
   // `kind` are arguments rather than read from the loop's own variables.
-  const failed = (where: string, kind: string, error: unknown): void => {
+  // The latter is a `warning`: a step that declined to hold the plan does
+  // not fail the round.
+  const failed = (where: string, kind: string, error: unknown, severity: 'error' | 'warning' = 'error'): void => {
     problems.push(
       diagnostic(
-        'error',
+        severity,
         'play-loop',
         where,
         `step "${kind}" failed: ${error instanceof Error ? error.message : String(error)}`,
@@ -411,9 +435,30 @@ export async function executePlan(
    * atomic — `present` is one node in the flow, and a beat that outlives its
    * own plan is not a thing this vocabulary offers. Each one carries its own
    * `catch`, closed over the index it STARTED at, because by the time it
-   * fails the loop is somewhere else entirely.
+   * fails the loop is somewhere else entirely — and a `settled` flag, so the
+   * `pendingMs` cap below names only the ones still running.
    */
-  const pending: Promise<void>[] = [];
+  const pending: { where: string; kind: string; settled: boolean; done: Promise<void> }[] = [];
+  // Set once the cap has fired and the plan has reported: a step that
+  // rejects after that is swallowed, not pushed into an array already
+  // handed back to the caller.
+  let abandoned = false;
+  const leave = (where: string, kind: string, running: unknown): void => {
+    const entry = { where, kind, settled: false, done: Promise.resolve() };
+    // `Promise.resolve` because a board method is someone else's code: one
+    // that returns nothing at all is fine to `await`, and must stay fine to
+    // leave running.
+    entry.done = Promise.resolve(running).then(
+      () => {
+        entry.settled = true;
+      },
+      (error: unknown) => {
+        entry.settled = true;
+        if (!abandoned) failed(where, kind, error, 'warning');
+      },
+    );
+    pending.push(entry);
+  };
   // Read before the `!board` early return, on purpose: a collision is a
   // fact about the composition, not about this plan, so it must not be
   // swallowed by a plan that had nothing to run or no board to run it on.
@@ -531,12 +576,7 @@ export async function executePlan(
         const running = method.call(board, step, opts);
         started(step);
         if (nonBlocking) {
-          // `Promise.resolve` because a board method is someone else's code: one
-          // that returns nothing at all is fine to `await`, and must stay fine
-          // to leave running.
-          pending.push(
-            Promise.resolve(running).catch((error: unknown) => failed(where, step.kind, error)),
-          );
+          leave(where, step.kind, running);
           continue;
         }
         await running;
@@ -549,9 +589,7 @@ export async function executePlan(
         const running = handler.run(step, board, opts);
         started(step);
         if (nonBlocking) {
-          pending.push(
-            Promise.resolve(running).catch((error: unknown) => failed(where, step.kind, error)),
-          );
+          leave(where, step.kind, running);
           continue;
         }
         await running;
@@ -580,10 +618,35 @@ export async function executePlan(
     }
   }
 
-  // Every `wait: false` step, awaited before the plan calls itself done. None
-  // of these can reject: each carries its own `catch` above, which turns a
-  // failure into a diagnostic instead.
-  await Promise.all(pending);
+  // Every `wait: false` step, awaited before the plan calls itself done — up
+  // to `pendingMs`. None of these can reject: each carries its own handler
+  // in `leave`, which turns a failure into a diagnostic instead.
+  const all = Promise.all(pending.map((entry) => entry.done));
+  const pendingMs = limits?.pendingMs ?? 30000;
+  if (pending.length === 0 || pendingMs <= 0) {
+    await all;
+    return problems;
+  }
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const expired = new Promise<true>((resolve) => {
+    timer = setTimeout(() => resolve(true), pendingMs);
+  });
+  const timedOut = await Promise.race([all.then(() => false), expired]);
+  clearTimeout(timer);
+  if (timedOut) {
+    abandoned = true;
+    for (const entry of pending) {
+      if (entry.settled) continue;
+      problems.push(
+        diagnostic(
+          'error',
+          'play-loop',
+          entry.where,
+          `step "${entry.kind}" did not settle in ${pendingMs / 1000} s`,
+        ),
+      );
+    }
+  }
 
   return problems;
 }

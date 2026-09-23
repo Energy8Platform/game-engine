@@ -324,19 +324,23 @@ const present: FlowNodeKind<{ turbo: string }> = {
     const problems = diagnostics.length
       ? diagnostics
       : await play.execute(plan, ctx.reflect.get('board', false), undefined, opts);
-    // The spin log: what was drawn — `[]` when the presentation failed.
-    // A step that declined to hold the plan (`wait: false`) is awaited at
-    // the END of `executePlan`, so its rejection arrives late and still
-    // lands in `problems` — the round fails and the recorded plan is
-    // zeroed just as an early failure zeroes it. Deliberate, not an
-    // oversight: a step that failed is a step that did not draw, and a log
-    // claiming otherwise is worse than an empty one.
+    // Fatal is an `error` — or any mechanics diagnostic at all, since then
+    // the plan was never played. A `warning` alone is a `wait: false` step
+    // that failed (slice 32): the author declared it must not hold the plan,
+    // so it does not fail the round either — it is already reported by
+    // `play.execute`, and the round leaves by `next`.
+    const fatal = diagnostics.length > 0 || problems.some((d) => d.severity === 'error');
+    // The spin log: what was drawn — `[]` when the presentation failed. An
+    // `error` zeroes the recorded plan even though other steps drew
+    // (a blocking step that failed, or a `wait: false` one that never
+    // settled within `pendingMs`): a log claiming a broken plan drew is
+    // worse than an empty one.
     play.record({
       request: (vars.request as Record<string, unknown>) ?? {},
       result,
-      plan: problems.length ? [] : plan,
+      plan: fatal ? [] : plan,
     });
-    if (problems.length) return { out: 'failed', vars: { plan, error: problems.map((d) => d.message).join('; ') } };
+    if (fatal) return { out: 'failed', vars: { plan, error: problems.map((d) => d.message).join('; ') } };
     return { out: 'next', vars: { plan } };
   },
 };

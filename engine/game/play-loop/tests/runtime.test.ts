@@ -692,7 +692,7 @@ describe('play-loop runtime half: turbo and skip', () => {
   });
 
   it('the default is `ui.skip` alone — in the schema, and with no config at all', async () => {
-    expect(Config({})).toEqual({ skipEvents: ['ui.skip'] });
+    expect(Config({})).toEqual({ skipEvents: ['ui.skip'], pendingMs: 30000 });
 
     const ctx = new Context();
     const bus = fakeBus();
@@ -799,6 +799,27 @@ describe('play-loop runtime half: the built-in emit step', () => {
     await ctx.plugin(runtime);
     const problems = await ctx.play.execute([{ kind: 'emit', event: 'x' }], fakeBoard() as unknown as BoardApi);
     expect(problems.map((d) => d.message)).toEqual([expect.stringContaining("no 'events' service")]);
+    await ctx.fiber.dispose();
+  });
+});
+
+describe('play-loop runtime half: pendingMs', () => {
+  it('the row caps a non-blocking step that never settles by its own config', async () => {
+    const ctx = new Context();
+    await ctx.plugin(runtime, { pendingMs: 50 });
+    const board = {
+      spinTo: async () => {},
+      playState: () => new Promise<void>(() => {}),
+    } as unknown as BoardApi;
+
+    const problems = await ctx.play.execute(
+      [{ kind: 'playState', cells: [], state: 'death', wait: false }],
+      board,
+    );
+    expect(problems.map((d) => [d.severity, d.where, d.message])).toEqual([
+      ['error', 'plan[0]', 'step "playState" did not settle in 0.05 s'],
+    ]);
+
     await ctx.fiber.dispose();
   });
 });
