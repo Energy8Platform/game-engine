@@ -109,6 +109,24 @@ export interface ScenesService {
   highlight(ref: SceneRef | null): void;
   /** Every asset path the document (and its nested scenes) needs. */
   assetsOf(id: string): string[];
+  /**
+   * Paths a ROW draws with that no document names — a step handler's
+   * textures, a plugin's spritesheets, anything named in TypeScript
+   * instead of in `scenes/*.scene.yml`. Without this a row's sheets
+   * silently resolve to nothing, since the loader only ever fetches what
+   * `assetsOf` found.
+   *
+   * They join the next load: the batch a first `show` is about to make
+   * when nothing has loaded yet, their own batch after that (the views
+   * refresh when it lands). Registered twice, a path is still loaded
+   * once, and it survives a `hide`'s orphan sweep for as long as any
+   * registration lives.
+   *
+   * The disposer drops the claim, nothing more — NOTHING IS UNLOADED when
+   * the last holder goes. The next `hide` whose sweep finds the path
+   * unneeded is what unloads it.
+   */
+  require(paths: string[]): () => void;
   /** Mounts `id`'s tree into a fresh container for a `scene` node; `null` on a cycle or a missing id. Internal to `scene` nodes. */
   mountDoc(id: string, chain: string[]): Container | null;
   /**
@@ -316,6 +334,11 @@ export function createScenes(options: CreateScenesOptions): ScenesService {
   const visibleIds: string[] = [];
   const shownNested = new Set<string>();
   const loaded = new Set<string>();
+  /** One entry per live `require` registration — a path two rows ask for is held until both disposers ran. */
+  const required = new Set<{ paths: string[] }>();
+  const requiredPaths = (): string[] => [...new Set([...required].flatMap((h) => h.paths))];
+  /** Whether any batch has been made yet: until one has, a `require` simply joins it. */
+  let batched = false;
   /** The top-level mount under construction — nested `mountDoc` calls file their entries here. */
   let building: Mount | null = null;
   /** The last `resize`; what a top-level node's `pin` is placed against. */
@@ -812,9 +835,9 @@ export function createScenes(options: CreateScenesOptions): ScenesService {
     highlightBox.rect(tl.x, tl.y, br.x - tl.x, br.y - tl.y).stroke({ width: 2, color: 0x38bdf8 });
   }
 
-  /** Loads what `id` needs and is not loaded yet; a failure is reported per path, never thrown. */
-  async function load(id: string): Promise<void> {
-    const need = assetsOf(id).filter((p) => !loaded.has(p));
+  /** One batch, blamed on `where`; a failure is reported per path, never thrown. */
+  async function loadPaths(where: string, need: string[]): Promise<void> {
+    batched = true;
     if (need.length === 0) return;
     try {
       await loader.load(need);
@@ -823,10 +846,28 @@ export function createScenes(options: CreateScenesOptions): ScenesService {
       // ponytail: the loader fails as one batch, so every path in it is named — per-path precision needs a per-path loader.
       const why = e instanceof Error ? e.message : String(e);
       for (const p of need)
-        error(id, `asset "${p}" failed to load: ${why}`, 'check the path under the project');
+        error(where, `asset "${p}" failed to load: ${why}`, 'check the path under the project');
     }
     refresh();
     redraw();
+  }
+
+  /** Loads what `id` needs — and what any row requires — and is not loaded yet. */
+  async function load(id: string): Promise<void> {
+    const want = new Set([...assetsOf(id), ...requiredPaths()]);
+    await loadPaths(id, [...want].filter((p) => !loaded.has(p)));
+  }
+
+  /** `ScenesService.require` — see its doc for what a holder is worth. */
+  function requireAssets(paths: string[]): () => void {
+    const holder = { paths: [...new Set(paths)] };
+    required.add(holder);
+    // Before the first batch there is one on its way to join; after it,
+    // this registration needs a batch of its own. `need` is re-read inside
+    // the queued task: a load in flight may land these paths first.
+    if (batched)
+      void enqueue(() => loadPaths('require', holder.paths.filter((p) => !loaded.has(p))));
+    return () => void required.delete(holder);
   }
 
   const notDeclared = (id: string) =>
@@ -893,7 +934,8 @@ export function createScenes(options: CreateScenesOptions): ScenesService {
       container.removeChild(view);
       view.alpha = 1;
     }
-    const needed = new Set(visibleIds.flatMap((v) => assetsOf(v)));
+    // What a row still requires is needed too — its holder outlives any one scene.
+    const needed = new Set([...visibleIds.flatMap((v) => assetsOf(v)), ...requiredPaths()]);
     const orphans = [...loaded].filter((p) => !needed.has(p));
     if (orphans.length === 0) return;
     for (const p of orphans) loaded.delete(p);
@@ -953,6 +995,7 @@ export function createScenes(options: CreateScenesOptions): ScenesService {
       redraw();
     },
     assetsOf: (id) => assetsOf(id),
+    require: (paths) => requireAssets(paths),
     mountDoc(id, chain) {
       const doc = docs.get(id);
       if (!doc || chain.includes(id)) return null;

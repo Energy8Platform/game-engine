@@ -279,6 +279,41 @@ describe('scenes row', () => {
     await expect(ctx.get('scenes')!.ready).resolves.toBeUndefined();
     expect(ctx.get('scenes')!.docs().has('x')).toBe(true);
   });
+
+  // `Assets.load` rejects here — pixi has no `document` in this environment
+  // — which is exactly a batch that was asked for and failed, and settles
+  // the first batch either way.
+  it('the loader warns once for a path no batch asked for, only after the first batch settled', async () => {
+    const report = vi.fn();
+    const { ctx, fiber } = boot();
+    ctx.provide('diagnostics', { report });
+    await fiber;
+    const loader = ctx.get('assetLoader')!;
+
+    // Before the first batch a miss is the ordinary "not yet".
+    expect(loader.get('early.png')).toBeUndefined();
+    expect(report).not.toHaveBeenCalled();
+
+    await expect(loader.load(['asked.png'])).rejects.toThrow();
+    // It was asked for: `load()` reported that failure already.
+    expect(loader.get('asked.png')).toBeUndefined();
+    expect(loader.get('early.png')).toBeUndefined();
+    expect(report).toHaveBeenCalledTimes(1);
+    expect(report).toHaveBeenCalledWith(
+      expect.objectContaining({
+        severity: 'warning',
+        plugin: 'scenes',
+        where: 'assetLoader',
+        message: expect.stringContaining('early.png'),
+      }),
+    );
+
+    // Once per path, however often it is drawn.
+    loader.get('early.png');
+    loader.get('early.png');
+    expect(report).toHaveBeenCalledTimes(1);
+    await fiber.dispose();
+  });
 });
 
 describe('ui.tap', () => {

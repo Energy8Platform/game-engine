@@ -56,16 +56,64 @@ export interface ScenesConfig {
 export const name = 'scenes';
 export const inject = ['renderer'];
 
-/** `pixi.js`' `Assets`, project-relative paths served same-origin by the dev server. */
-const pixiLoader: AssetLoader = {
-  load: async (urls) => { await Assets.load(urls.map((u) => `/${u}`)); },
-  unload: async (urls) => { await Assets.unload(urls.map((u) => `/${u}`)); },
-  get: (url) => Assets.get(`/${url}`),
+/**
+ * `pixi.js`' `Assets`, project-relative paths served same-origin by the
+ * dev server — plus the one thing a silent path gets said about it.
+ *
+ * A texture nothing loaded draws as nothing, which is the hardest bug to
+ * see: the row that named the path in TypeScript never told the scenes
+ * service (`scenes.require`), and no document names it either. So a `get`
+ * answering `undefined` for a path NO batch was ever asked for says so,
+ * once per path.
+ *
+ * Only after the first batch settled: a `get` during boot is the ordinary
+ * "not yet" — `image.mount` draws an empty sprite and `update` fills it in
+ * when the load lands. And never for a path a batch DID ask for: that one
+ * has its own error from `load()` already.
+ *
+ * Built per `apply` rather than as a module constant, because those three
+ * bits of state are this composition's: after a hot re-apply (or a second
+ * game on the editor page) a stale `settled` would turn the fresh boot's
+ * ordinary "not yet" into a warning, and a stale `reported` would swallow
+ * one that is due.
+ */
+const createPixiLoader = (report: (d: Diagnostic) => void): AssetLoader => {
+  const asked = new Set<string>();
+  const reported = new Set<string>();
+  let settled = false;
+  return {
+    load: async (urls) => {
+      for (const u of urls) asked.add(u);
+      try {
+        await Assets.load(urls.map((u) => `/${u}`));
+      } finally {
+        settled = true;
+      }
+    },
+    unload: async (urls) => { await Assets.unload(urls.map((u) => `/${u}`)); },
+    get: (url) => {
+      const texture = Assets.get(`/${url}`) as ReturnType<AssetLoader['get']>;
+      if (texture === undefined && settled && !asked.has(url) && !reported.has(url)) {
+        reported.add(url);
+        report(
+          diagnostic(
+            'warning',
+            'scenes',
+            'assetLoader',
+            `nothing loaded "${url}" — it draws as nothing`,
+            'name it in a scene document, or call scenes.require([...]) from the row that draws with it',
+          ),
+        );
+      }
+      return texture;
+    },
+  };
 };
 
 export function apply(ctx: Context, config: ScenesConfig): void {
   const report = (d: Diagnostic) =>
     (ctx.reflect.get('diagnostics', false) as DiagnosticsService | undefined)?.report(d);
+  const pixiLoader = createPixiLoader(report);
   const nodeTypes = createNodeTypes();
   for (const t of [container, image, scene, shape, text]) nodeTypes.register(t);
   ctx.provide('nodeTypes', nodeTypes);
