@@ -209,19 +209,16 @@ export function checkNode(
   // does not know yet (no `NodeTypeInfo` — the game hasn't reported, or
   // the type is unregistered) checks nothing; the unknown-type error
   // above already covers a registered set missing it.
-  for (const prop of info?.assetProps ?? []) {
-    let v = node.props?.[prop];
-    // A type's sibling prop (`spine`'s atlas) defaults to its main
-    // asset's stem with the sibling's extension when left empty —
-    // same rule as `spine.ts`'s `atlasOf`, generalised to any type
-    // that declares `accept.sibling`.
-    if (info?.accept?.sibling === prop && !v && typeof node.props[info.accept.prop] === 'string') {
-      v = (node.props[info.accept.prop] as string).replace(/\.[^./]+$/, `.${prop}`);
-    }
+  //
+  // `checkAsset` is that one value's rule, shared below with
+  // `assetMapProps`'s entries (`image.srcOf`, an asset SET): empty/non-string
+  // is only an error where `required` says so (a plain prop's `.required()`;
+  // a map entry has no such flag, so a key present in the map is always
+  // required — an empty one serves no one), `$cell`-bound and missing from
+  // the project are unconditional either way.
+  const checkAsset = (prop: string, v: unknown, required: boolean): void => {
     if (typeof v !== 'string' || v === '') {
-      if (dict[prop]?.meta?.required === true) {
-        err(`${node.type} has no ${prop}`, 'pick a file under the project');
-      }
+      if (required) err(`${node.type} has no ${prop}`, 'pick a file under the project');
     } else if (isCellBinding(v)) {
       // A state's asset is loaded from the DOCUMENT before any cell is
       // known (the runtime's `assets()` reads the props as written), so
@@ -233,6 +230,34 @@ export function checkNode(
     } else if (!hasFile(v)) {
       err(`${node.type}.${prop} "${v}" is not in the project`, 'pick a file under the project');
     }
+  };
+  for (const prop of info?.assetProps ?? []) {
+    let v = node.props?.[prop];
+    // A type's sibling prop (`spine`'s atlas) defaults to its main
+    // asset's stem with the sibling's extension when left empty —
+    // same rule as `spine.ts`'s `atlasOf`, generalised to any type
+    // that declares `accept.sibling`.
+    if (info?.accept?.sibling === prop && !v && typeof node.props[info.accept.prop] === 'string') {
+      v = (node.props[info.accept.prop] as string).replace(/\.[^./]+$/, `.${prop}`);
+    }
+    checkAsset(prop, v, dict[prop]?.meta?.required === true);
+  }
+  // A prop the type's `assetMapProps` names holds a SET of project-relative
+  // paths (`image.srcOf`, keyed for `srcKey` to pick from) — the runtime
+  // preloads every entry with the document, same as a plain asset prop
+  // (`setAssets`), so each entry goes through `checkAsset` too, named
+  // `<prop>.<key>`. Absent entirely is a fresh node at the schema's own
+  // default (`{}`) and not an error; present but not a map is a typo'd
+  // scalar — the schema never sees raw props here to catch that itself, so
+  // this does.
+  for (const prop of info?.assetMapProps ?? []) {
+    const map = node.props?.[prop];
+    if (map === undefined) continue;
+    if (!isRecord(map)) {
+      err(`${node.type}.${prop} is not a map of paths`, 'use { key: path }');
+      continue;
+    }
+    for (const [key, v] of Object.entries(map)) checkAsset(`${prop}.${key}`, v, true);
   }
   return out;
 }

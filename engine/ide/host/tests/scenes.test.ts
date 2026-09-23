@@ -36,6 +36,7 @@ const types: NodeTypeInfo[] = [
     type: 'image',
     schema: json(Schema.object({ src: Schema.string().required() })),
     assetProps: ['src'],
+    assetMapProps: ['srcOf'],
   },
   { type: 'scene', schema: json(Schema.object({ scene: Schema.string().required() })) },
   { type: 'reels', schema: json(Schema.object({ row: Schema.string().default('reels1') })) },
@@ -488,6 +489,113 @@ describe('checkScenes', () => {
     );
     expect(out).toEqual([]);
   });
+  // Slice 32: `image.srcOf` is a MAP of asset paths (`assetMapProps`) —
+  // every entry is checked the same way a plain asset prop is, naming the
+  // entry `srcOf.<key>`.
+  it('a clean srcOf set is silent', () => {
+    const out = checkScenes(
+      [
+        doc('a', [
+          { id: 'i', type: 'image', props: { src: 'assets/a.png', srcOf: { g: 'assets/g.png' } } },
+        ]),
+      ],
+      types,
+      (p) => p === 'assets/a.png' || p === 'assets/g.png',
+      false,
+    );
+    expect(out).toEqual([]);
+  });
+  it('a srcOf entry naming a file not in the project is reported, naming srcOf.<key>', () => {
+    const out = checkScenes(
+      [
+        doc('a', [
+          { id: 'i', type: 'image', props: { src: 'assets/a.png', srcOf: { g: 'assets/none.png' } } },
+        ]),
+      ],
+      types,
+      (p) => p === 'assets/a.png',
+      false,
+    );
+    expect(out).toEqual([
+      expect.objectContaining({
+        severity: 'error',
+        where: 'a/i',
+        message: 'image.srcOf.g "assets/none.png" is not in the project',
+      }),
+    ]);
+  });
+  it('a srcOf entry bound to $cell is the same asset-prop refusal as a plain asset prop', () => {
+    const out = checkScenes(
+      [
+        doc('a', [
+          { id: 'i', type: 'image', props: { src: 'assets/a.png', srcOf: { g: '$cell.symbol' } } },
+        ]),
+      ],
+      types,
+      (p) => p === 'assets/a.png',
+      false,
+    );
+    expect(out).toEqual([
+      expect.objectContaining({
+        severity: 'error',
+        where: 'a/i',
+        message: 'an asset prop cannot be bound to $cell (assets are preloaded from the document)',
+      }),
+    ]);
+  });
+  it('a non-string srcOf entry is refused', () => {
+    const out = checkScenes(
+      [doc('a', [{ id: 'i', type: 'image', props: { src: 'assets/a.png', srcOf: { g: 42 } } }])],
+      types,
+      (p) => p === 'assets/a.png',
+      false,
+    );
+    expect(out).toEqual([
+      expect.objectContaining({ severity: 'error', where: 'a/i', message: expect.stringContaining('srcOf.g') }),
+    ]);
+  });
+  it('a srcOf that is not a plain object (a map, not a scalar) is refused, not silently skipped', () => {
+    const out = checkScenes(
+      [doc('a', [{ id: 'i', type: 'image', props: { src: 'assets/a.png', srcOf: 'nope' } }])],
+      types,
+      (p) => p === 'assets/a.png',
+      false,
+    );
+    expect(out).toEqual([
+      expect.objectContaining({
+        severity: 'error',
+        where: 'a/i',
+        message: 'image.srcOf is not a map of paths',
+      }),
+    ]);
+  });
+  it('no srcOf at all is not an error — a fresh node defaults to the empty set', () => {
+    const out = checkScenes(
+      [doc('a', [{ id: 'i', type: 'image', props: { src: 'assets/a.png' } }])],
+      types,
+      (p) => p === 'assets/a.png',
+      false,
+    );
+    expect(out).toEqual([]);
+  });
+  // `srcKey` is an ORDINARY string prop (no new code): a `$cell` expression
+  // is legal only where a cell scene has a cell to read it from — the same
+  // rule every other bound prop follows.
+  it('srcKey may bind $cell in a cell scene; an ordinary scene refuses it like any other bound prop', () => {
+    const one = () => [
+      doc('a', [{ id: 'i', type: 'image', props: { src: 'assets/a.png', srcKey: '$cell.band' } }]),
+    ];
+    expect(checkScenes(one(), types, (p) => p === 'assets/a.png', false, ['a'])).toEqual([]);
+    expect(checkScenes(one(), types, (p) => p === 'assets/a.png', false)).toEqual([
+      expect.objectContaining({
+        severity: 'error',
+        where: 'a/i',
+        message:
+          'prop "srcKey" reads "$cell" — only a cell scene (one a symbols.yml state names) has a cell to read',
+      }),
+    ]);
+  });
+
   it('more than one reels node across the documents is a warning: the board can be on screen once', () => {
     const out = checkScenes(
       [
