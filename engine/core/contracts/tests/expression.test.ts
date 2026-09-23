@@ -1,5 +1,5 @@
-import { describe, expect, it } from 'vitest';
-import { evaluate, evaluateValue, formatValue, readPath } from '../src/expr';
+import { describe, expect, it, vi } from 'vitest';
+import { evaluate, evaluateValue, formatValue, readPath, resolveValue } from '../src/expression';
 
 const vars = { result: { stage: 'free_spins', win: 12.5 }, ready: true, n: 0, s: 'x' };
 
@@ -119,4 +119,31 @@ describe('formatValue', () => {
 
   it('the pipe still appends the position the parser knows', () =>
     expect(() => evaluateValue('1 | bogus', {})).toThrow(/unknown format 'bogus' at position 4/));
+});
+
+const resolveVars = { result: { win: 12.5, winAmount: 4.6, data: { mult_running: 48, fs_total: 10, fs_remaining: 4 } }, session: { currency: { symbol: '$', decimals: 2, position: 'left' } } };
+
+describe('resolveValue', () => {
+  it('a bare $path is the typed value, as before', () => expect(resolveValue('$result.win', resolveVars)).toBe(12.5));
+  it('a $expression computes', () => expect(resolveValue('$result.data.fs_total - $result.data.fs_remaining', resolveVars)).toBe(6));
+  it('a template joins literal text and {expr}s into a string', () => {
+    expect(resolveValue('x{$result.data.mult_running}', resolveVars)).toBe('x48');
+    expect(resolveValue('{$result.data.fs_total - $result.data.fs_remaining}/{$result.data.fs_total}', resolveVars)).toBe('6/10');
+    expect(resolveValue('{$result.winAmount | currency} won', resolveVars)).toBe('$4.60 won');
+  });
+  it('a literal (no $, no braces) and a non-string pass through', () => {
+    expect(resolveValue('tapped', resolveVars)).toBe('tapped');
+    expect(resolveValue(3, resolveVars)).toBe(3);
+    expect(resolveValue({ a: 1 }, resolveVars)).toEqual({ a: 1 });
+  });
+  it('a syntax error or an unknown format reports and leaves the string as written', () => {
+    const report = vi.fn();
+    expect(resolveValue('{$result.win +}', resolveVars, report)).toBe('{$result.win +}');
+    expect(resolveValue('$result.win | bogus', resolveVars, report)).toBe('$result.win | bogus');
+    expect(resolveValue('{', resolveVars, report)).toBe('{');
+    expect(report).toHaveBeenCalledTimes(2);
+    expect(report.mock.calls[1][0]).toMatch(/unknown format 'bogus'/);
+  });
+  it('a missing var in a template reads as an empty string, not "null"', () =>
+    expect(resolveValue('[{$nothing}]', resolveVars)).toBe('[]'));
 });

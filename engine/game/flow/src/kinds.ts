@@ -10,20 +10,20 @@
  */
 import type { Context } from 'cordis';
 import Schema from 'schemastery';
-import type {
-  Diagnostic,
-  PlayRequest,
-  PresentationStep,
-  SessionService,
-  Severity,
-  SpinResult,
+import {
+  evaluate,
+  resolveValue,
+  type Diagnostic,
+  type PlayRequest,
+  type PresentationStep,
+  type SessionService,
+  type Severity,
+  type SpinResult,
 } from '@energy8engine/contracts';
 import type { PlayService } from '@energy8engine/play-loop/runtime';
 import type { SceneRef, ScenesService } from '@energy8engine/scenes';
 import { createRegistry } from '@energy8engine/registry';
 import type { EventsService } from './events';
-import { evaluate } from './expr';
-import { resolveValue } from './value';
 
 declare global {
   namespace Schemastery {

@@ -54,6 +54,11 @@
  * put a quote character inside a string, write the literal with the
  * OTHER quote style (`"it's"` rather than `'it\'s'`, which would just end
  * the string at the unescaped `'`).
+ *
+ * Lives in `@energy8engine/contracts` rather than `@energy8engine/flow`
+ * (where it started) because `@energy8engine/scenes` needs this same
+ * resolver for `$cell` props, and `flow` depends on `scenes` — so the
+ * resolver moved down to the one package both already depend on.
  */
 
 type Tok =
@@ -372,4 +377,35 @@ export function evaluateValue(expr: string, vars: Record<string, unknown>): unkn
  */
 export function evaluate(expr: string, vars: Record<string, unknown>): boolean {
   return Boolean(evaluateValue(expr, vars));
+}
+
+const TEMPLATE = /\{([^{}]*)\}/g;
+
+/**
+ * A prop value: a string with `{…}` spans is a template (each span an
+ * expression, `String()`ed — a missing var reads as `''`, not `null`),
+ * a string starting with `$` is an expression, anything else the literal.
+ * A `SyntaxError` (an unknown format included) calls `report` and answers
+ * the string AS WRITTEN — the kind's own type check then names the prop.
+ */
+export function resolveValue(
+  value: unknown,
+  vars: Record<string, unknown>,
+  report?: (message: string) => void,
+): unknown {
+  if (typeof value !== 'string') return value;
+  try {
+    if (/\{[^{}]*\}/.test(value)) {
+      return value.replace(TEMPLATE, (_m, expr: string) => {
+        const v = evaluateValue(expr, vars);
+        return v === null || v === undefined ? '' : String(v);
+      });
+    }
+    if (value.startsWith('$')) return evaluateValue(value, vars);
+    return value;
+  } catch (e) {
+    if (!(e instanceof SyntaxError)) throw e;
+    report?.(`bad value '${value}': ${e.message}`);
+    return value;
+  }
 }

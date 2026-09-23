@@ -1,4 +1,5 @@
 export * from './diagnostic';
+export * from './expression';
 export * from './files';
 export * from './manifest';
 export * from './mechanic';
