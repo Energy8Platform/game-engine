@@ -127,6 +127,61 @@ describe('strip', () => {
     view.destroy();
   });
 
+  describe('an asset set (`srcOf` keyed by `srcKey`)', () => {
+    const tex: Record<string, Texture> = {
+      'assets/coin.png': textureSized(32, 16),
+      'assets/g.png': textureSized(64, 16),
+      'assets/b.png': textureSized(96, 16),
+    };
+    const ctx = ctxWith((p) => tex[p]);
+    const set = (over: Record<string, unknown> = {}) =>
+      props({ cols: 2, srcOf: { g: 'assets/g.png', b: 'assets/b.png' }, ...over });
+
+    it('declares `srcOf` as an asset map, defaulted, its values carrying the `asset` meta', () => {
+      expect(strip.assetMapProps).toEqual(['srcOf']);
+      expect((strip.schema.dict!.srcOf.inner!.meta as { asset?: string[] }).asset).toEqual([
+        'png',
+        'jpg',
+        'jpeg',
+        'webp',
+        'avif',
+      ]);
+      expect(props()).toMatchObject({ srcOf: {}, srcKey: '' });
+    });
+
+    it('assets(): `src` first, then the set in insertion order — no duplicates, no empty `src`', () => {
+      expect(strip.assets!(set())).toEqual(['assets/coin.png', 'assets/g.png', 'assets/b.png']);
+      expect(strip.assets!(set({ srcOf: { x: 'assets/coin.png' } }))).toEqual(['assets/coin.png']);
+      expect(strip.assets!(set({ src: '' }))).toEqual(['assets/g.png', 'assets/b.png']);
+    });
+
+    it('mount slices the keyed entry; an unknown key, an empty key or no set slices `src`', () => {
+      const w = (v: Container) => ((v as AnimatedSprite).textures[0] as Texture).source.width;
+      const views = [
+        strip.mount(set({ srcKey: 'b' }), ctx),
+        strip.mount(set({ srcKey: 'zz' }), ctx),
+        strip.mount(set({ srcKey: '' }), ctx),
+        strip.mount(props({ cols: 2 }), ctx),
+      ];
+      expect(views.map(w)).toEqual([96, 32, 32, 32]);
+      for (const v of views) v.destroy();
+    });
+
+    it('update with a new key re-slices on the same view, frees the old frames and plays from 0', () => {
+      const view = strip.mount(set({ srcKey: 'g' }), ctx) as AnimatedSprite;
+      const before = view.textures as Texture[];
+      expect(before[0].source).toBe(tex['assets/g.png'].source);
+      view.gotoAndPlay(1);
+      strip.update!(view, set({ srcKey: 'b' }), ctx);
+      expect((view.textures[0] as Texture).source).toBe(tex['assets/b.png'].source);
+      expect((view.textures as Texture[]).map((t) => t.frame.x)).toEqual([0, 48]);
+      expect(view.currentFrame).toBe(0);
+      expect(view.playing).toBe(true);
+      for (const t of before) expect(t.destroyed).toBe(true);
+      view.destroy();
+    });
+  });
+
   it('unmount destroys the view and frees its sliced textures, not the shared source', () => {
     const base = textureSized(32, 16);
     const view = strip.mount(props({ cols: 2 }), ctxWith(() => base)) as AnimatedSprite;

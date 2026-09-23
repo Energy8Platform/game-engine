@@ -32,27 +32,60 @@ const textureOf = (ctx: Context, src: string): Texture | undefined =>
 
 const IMAGE_EXTENSIONS = ['png', 'jpg', 'jpeg', 'webp', 'avif'];
 
-export const image: NodeType<{ src: string }> = {
+/**
+ * The path an asset-set node shows: the set's entry for the key, or the
+ * plain prop. `srcKey` is an ordinary string prop — a `$cell` expression in a
+ * symbol's state resolves before this runs — so an unknown key, an empty one
+ * or no set at all falls back to what every document before the set had.
+ */
+export const pickFromSet = (
+  src: string,
+  srcOf: Record<string, string> | undefined,
+  key: string | undefined,
+): string => (key && srcOf && Object.hasOwn(srcOf, key) ? srcOf[key] : '') || src;
+
+/** `src` and every entry of the set, once each, `src` first — the set preloads with the document, so a key change swaps a texture already there. */
+export const setAssets = (src: string, srcOf: Record<string, string> | undefined): string[] =>
+  // A fresh node has `src: ''` — nothing to request (`''` would resolve to `/`).
+  [...new Set([src, ...Object.values(srcOf ?? {})].filter(Boolean))];
+
+export interface ImageProps {
+  src: string;
+  /** Alternative images by key; `srcKey` picks one. */
+  srcOf: Record<string, string>;
+  srcKey: string;
+}
+
+export const image: NodeType<ImageProps> = {
   type: 'image',
   schema: Schema.object({
     src: Schema.string()
       .required()
       .extra('asset', IMAGE_EXTENSIONS)
       .description('image path, project-relative'),
-  }),
+    srcOf: Schema.dict(Schema.string().extra('asset', IMAGE_EXTENSIONS))
+      .default({})
+      .description('alternative images by key — every one preloaded with the document'),
+    srcKey: Schema.string()
+      .default('')
+      .description(
+        'which `srcOf` entry to show: a literal, or a `$cell` expression; unknown or empty → `src`',
+      ),
+  }) as Schema<ImageProps>,
   accept: { extensions: IMAGE_EXTENSIONS, prop: 'src' },
   assetProps: ['src'],
+  assetMapProps: ['srcOf'],
   mount(props, ctx) {
-    const texture = textureOf(ctx, props.src);
+    const texture = textureOf(ctx, pickFromSet(props.src, props.srcOf, props.srcKey));
     // No texture yet (not loaded, or failed): an empty sprite keeps the
     // node's slot; `show` loads, reports a failure itself, then `update`s.
     return texture ? new Sprite(texture) : new Sprite();
   },
   update(view, props, ctx) {
-    (view as Sprite).texture = textureOf(ctx, props.src) ?? Texture.EMPTY;
+    (view as Sprite).texture =
+      textureOf(ctx, pickFromSet(props.src, props.srcOf, props.srcKey)) ?? Texture.EMPTY;
   },
-  // A fresh image has `src: ''` — nothing to request (`''` would resolve to `/`).
-  assets: (props) => (props.src ? [props.src] : []),
+  assets: (props) => setAssets(props.src, props.srcOf),
 };
 
 /** The referenced document, mounted as a child. `mountDoc` is the runtime's; the cycle guard is its chain of ids. */

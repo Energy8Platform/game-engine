@@ -329,6 +329,8 @@ export interface NodeTypeInfo {
   accept?: NodeTypeAccept;
   /** Every prop (may be more than `accept.prop`) that holds a project-relative asset path. */
   assetProps?: string[];
+  /** Props holding a MAP of project-relative asset paths (`{ key: path }`) — checked like `assetProps`, per value. */
+  assetMapProps?: string[];
 }
 
 /** The whole document set, replaced whole — host to every `/ide` socket on any change. */

@@ -14,10 +14,13 @@
 import type { Context } from 'cordis';
 import { AnimatedSprite, Rectangle, Texture, type TextureSource } from 'pixi.js';
 import Schema from 'schemastery';
-import type { AssetLoader, NodeType } from '@energy8engine/scenes';
+import { pickFromSet, setAssets, type AssetLoader, type NodeType } from '@energy8engine/scenes';
 
 export interface StripProps {
   src: string;
+  /** Alternative strips by key; `srcKey` picks one (same cols/rows/frames for all). */
+  srcOf: Record<string, string>;
+  srcKey: string;
   cols: number;
   rows: number;
   frames: number;
@@ -54,7 +57,9 @@ const destroySliced = (view: AnimatedSprite) => {
 
 /** Slices the base texture into `cols`×`rows` cells, the first `frames` in row-major order. */
 function framesOf(view: AnimatedSprite, ctx: Context, props: StripProps): Texture[] {
-  const base = (ctx.reflect.get('assetLoader', false) as AssetLoader | undefined)?.get(props.src);
+  const base = (ctx.reflect.get('assetLoader', false) as AssetLoader | undefined)?.get(
+    pickFromSet(props.src, props.srcOf, props.srcKey),
+  );
   if (!base || base === Texture.EMPTY) {
     destroySliced(view);
     return EMPTY;
@@ -93,6 +98,14 @@ export const strip: NodeType<StripProps> = {
       .required()
       .extra('asset', STRIP_EXTENSIONS)
       .description('grid-strip image, project-relative'),
+    srcOf: Schema.dict(Schema.string().extra('asset', STRIP_EXTENSIONS))
+      .default({})
+      .description('alternative strips by key — every one preloaded with the document'),
+    srcKey: Schema.string()
+      .default('')
+      .description(
+        'which `srcOf` entry to show: a literal, or a `$cell` expression; unknown or empty → `src`',
+      ),
     cols: Schema.natural().default(1).description('columns in the grid'),
     rows: Schema.natural().default(1).description('rows in the grid'),
     frames: Schema.number().default(0).description('frames to use, row-major (0: every cell)'),
@@ -101,7 +114,8 @@ export const strip: NodeType<StripProps> = {
     playing: Schema.boolean().default(true),
   }) as Schema<StripProps>,
   assetProps: ['src'],
-  assets: (p) => (p.src ? [p.src] : []),
+  assetMapProps: ['srcOf'],
+  assets: (p) => setAssets(p.src, p.srcOf),
   mount(props, ctx) {
     const view = new AnimatedSprite(EMPTY);
     strip.update!(view, props, ctx);
@@ -114,8 +128,9 @@ export const strip: NodeType<StripProps> = {
     if (swapped) s.textures = frames;
     s.animationSpeed = props.fps / 60;
     s.loop = props.loop;
-    // Props are fixed per view (an edit remounts), so only a frame swap starts playback —
-    // a finished one-shot (`loop: false`) must stay on its last frame across later refreshes.
+    // Only a frame swap starts playback (an edit remounts; a `bind` that moves `srcKey` re-slices
+    // here and plays from 0) — a finished one-shot (`loop: false`) must stay on its last frame
+    // across later refreshes that change nothing.
     const play = props.playing && frames !== EMPTY;
     if (play && swapped) s.gotoAndPlay(0);
     else if (!play && s.playing) s.stop();

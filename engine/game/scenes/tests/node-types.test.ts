@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
-import { Color, Container, Graphics, Sprite } from 'pixi.js';
+import { Color, Container, Graphics, Sprite, Texture } from 'pixi.js';
+import type { Context } from 'cordis';
 import Schema from 'schemastery';
 import { COLOUR, COMMON, applyCommon, createNodeTypes, emptyProp, type NodeType } from '../src/node-types';
 import { container, image, shape } from '../src/builtin';
@@ -41,6 +42,58 @@ describe('image', () => {
       'webp',
       'avif',
     ]);
+  });
+});
+
+describe('image: an asset set (`srcOf` keyed by `srcKey`)', () => {
+  const tex: Record<string, Texture> = {
+    'a.png': new Texture(),
+    'g.png': new Texture(),
+    'b.png': new Texture(),
+  };
+  const ctx = {
+    reflect: { get: () => ({ get: (url: string) => tex[url] }) },
+  } as unknown as Context;
+  const props = (over: Record<string, unknown> = {}) =>
+    image.schema({ src: 'a.png', srcOf: { g: 'g.png', b: 'b.png' }, ...over } as never);
+
+  it('declares `srcOf` as an asset map, its values carrying the same `asset` meta as `src`', () => {
+    expect(image.assetMapProps).toEqual(['srcOf']);
+    const srcOf = image.schema.dict!.srcOf;
+    expect((srcOf.inner!.meta as { asset?: string[] }).asset).toEqual([
+      'png',
+      'jpg',
+      'jpeg',
+      'webp',
+      'avif',
+    ]);
+    expect(image.schema({ src: 'a.png' } as never)).toMatchObject({ srcOf: {}, srcKey: '' });
+  });
+
+  it('assets(): `src` first, then the set in insertion order — no duplicates, no empty `src`', () => {
+    expect(image.assets!(props({ srcKey: '' }))).toEqual(['a.png', 'g.png', 'b.png']);
+    expect(image.assets!(props({ srcOf: { g: 'g.png', same: 'a.png' } }))).toEqual([
+      'a.png',
+      'g.png',
+    ]);
+    expect(image.assets!(props({ src: '' }))).toEqual(['g.png', 'b.png']);
+    expect(image.assets!({ src: 'a.png' } as never)).toEqual(['a.png']);
+  });
+
+  it('mount shows the keyed entry; an unknown key, an empty key or no set shows `src`', () => {
+    expect((image.mount(props({ srcKey: 'b' }), ctx) as Sprite).texture).toBe(tex['b.png']);
+    expect((image.mount(props({ srcKey: 'zz' }), ctx) as Sprite).texture).toBe(tex['a.png']);
+    expect((image.mount(props({ srcKey: '' }), ctx) as Sprite).texture).toBe(tex['a.png']);
+    expect((image.mount({ src: 'a.png' } as never, ctx) as Sprite).texture).toBe(tex['a.png']);
+  });
+
+  it('update with a new key swaps the texture on the same view', () => {
+    const view = image.mount(props({ srcKey: 'g' }), ctx) as Sprite;
+    expect(view.texture).toBe(tex['g.png']);
+    image.update!(view, props({ srcKey: 'b' }), ctx);
+    expect(view.texture).toBe(tex['b.png']);
+    image.update!(view, props({ srcKey: '' }), ctx);
+    expect(view.texture).toBe(tex['a.png']);
   });
 });
 

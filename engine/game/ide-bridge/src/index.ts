@@ -984,7 +984,13 @@ export function apply(ctx: Context, config: IdeBridgeConfig): void {
   ctx.effect(
     () =>
       forwardRegistry<{
-        list(): { type: string; schema: unknown; accept?: NodeTypeAccept; assetProps?: string[] }[];
+        list(): {
+          type: string;
+          schema: unknown;
+          accept?: NodeTypeAccept;
+          assetProps?: string[];
+          assetMapProps?: string[];
+        }[];
         subscribe(listener: () => void): () => void;
       }>(ctx, 'nodeTypes', socket, (nodeTypes) => ({
         type: 'node-types',
@@ -993,6 +999,7 @@ export function apply(ctx: Context, config: IdeBridgeConfig): void {
           schema: JSON.parse(JSON.stringify(t.schema)),
           ...(t.accept ? { accept: t.accept } : {}),
           ...(t.assetProps ? { assetProps: t.assetProps } : {}),
+          ...(t.assetMapProps ? { assetMapProps: t.assetMapProps } : {}),
         })),
       })),
     'ide-bridge-node-types-forwarding',

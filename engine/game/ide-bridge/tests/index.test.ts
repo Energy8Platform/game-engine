@@ -1753,7 +1753,7 @@ describe('ide-bridge — forwards node-types', () => {
     });
   });
 
-  it('forwards a type with an asset contract with its `accept`/`assetProps`, and omits both from a type with neither', () => {
+  it('forwards a type with an asset contract with its `accept`/`assetProps`/`assetMapProps`, and omits them all from a type with none', () => {
     ctx = new Context();
     const { bind, forStage, bindings } = fakeMechanics();
     ctx.provide('mechanics' as never, { bind, forStage, bindings } as never);
@@ -1761,7 +1761,13 @@ describe('ide-bridge — forwards node-types', () => {
     const listeners = new Set<() => void>();
     const types = [
       { type: 'container', schema: {} },
-      { type: 'image', schema: { src: 'string' }, accept, assetProps: ['src'] },
+      {
+        type: 'image',
+        schema: { src: 'string' },
+        accept,
+        assetProps: ['src'],
+        assetMapProps: ['srcOf'],
+      },
     ];
     ctx.provide(
       'nodeTypes' as never,
@@ -1783,7 +1789,13 @@ describe('ide-bridge — forwards node-types', () => {
         type: 'node-types',
         types: [
           { type: 'container', schema: {} },
-          { type: 'image', schema: { src: 'string' }, accept, assetProps: ['src'] },
+          {
+            type: 'image',
+            schema: { src: 'string' },
+            accept,
+            assetProps: ['src'],
+            assetMapProps: ['srcOf'],
+          },
         ],
       },
     ]);

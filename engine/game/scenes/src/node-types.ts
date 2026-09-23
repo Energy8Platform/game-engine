@@ -42,6 +42,8 @@ export interface NodeType<P = Record<string, unknown>> {
   accept?: NodeTypeAccept;
   /** Every prop (may be more than `accept.prop`) that holds a project-relative asset path. */
   assetProps?: string[];
+  /** Props holding a MAP of project-relative asset paths (`{ key: path }`) — checked and preloaded like `assetProps`, per value. */
+  assetMapProps?: string[];
 }
 
 export interface NodeTypesService {
