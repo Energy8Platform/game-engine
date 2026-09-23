@@ -334,7 +334,7 @@ describe('executePlan: playState', () => {
  * returned.
  */
 describe('executePlan: a step that does not hold the plan', () => {
-  it('wait: false starts the step and moves on; the plan still awaits it before returning', async () => {
+  it('wait: false starts the step and the next one begins over the top of it', async () => {
     const board = fakeBoard();
     let release!: () => void;
     const held = new Promise<void>((r) => (release = r));
@@ -352,8 +352,9 @@ describe('executePlan: a step that does not hold the plan', () => {
       board,
     );
 
-    await Promise.resolve();
-    await Promise.resolve();
+    // Still held, and `spinTo` has already run: the morph is playing over the
+    // step that follows it, which is the whole point of the field.
+    await Promise.race([running, new Promise((r) => setTimeout(r, 20))]);
     expect(board.calls).toEqual(['playState:start', 'spinTo']);
 
     release();
@@ -361,24 +362,77 @@ describe('executePlan: a step that does not hold the plan', () => {
     expect(board.calls).toEqual(['playState:start', 'spinTo', 'playState:end']);
   });
 
-  it('a non-blocking step that rejects is a diagnostic naming the index it started at', async () => {
+  /**
+   * The atomicity half, and it has to be measured with the plan HELD — a
+   * released gate queues its own continuation ahead of the returned promise's
+   * reaction, so an `executePlan` that abandoned the step entirely would still
+   * look right by the time the test read it. The non-blocking step is LAST
+   * here for the same reason: with nothing after it, nothing else can be what
+   * holds the plan open, and a plan that settles has genuinely walked away
+   * from it. Remove `await Promise.all(pending)` from `executePlan` and this
+   * is the case that fails.
+   */
+  it('the plan does not return until a non-blocking step has ended — even one started last', async () => {
     const board = fakeBoard();
+    let release!: () => void;
+    const held = new Promise<void>((r) => (release = r));
     board.playState.mockImplementation(async () => {
-      throw new Error('nope');
+      board.calls.push('playState:start');
+      await held;
+      board.calls.push('playState:end');
     });
 
-    const problems = await executePlan(
+    let settled = false;
+    const running = executePlan(
+      [
+        { kind: 'spinTo', board: [[1]] },
+        { kind: 'playState', cells: [{ col: 0, row: 0 }], state: 'death', wait: false },
+      ],
+      board,
+    ).then((problems) => {
+      settled = true;
+      return problems;
+    });
+
+    await Promise.race([running, new Promise((r) => setTimeout(r, 20))]);
+    expect(board.calls).toEqual(['spinTo', 'playState:start']);
+    expect(settled).toBe(false);
+
+    release();
+    expect(await running).toEqual([]);
+    expect(settled).toBe(true);
+    expect(board.calls).toEqual(['spinTo', 'playState:start', 'playState:end']);
+  });
+
+  it('a non-blocking step that rejects is a diagnostic naming the index it started at', async () => {
+    const board = fakeBoard();
+    let fail!: (error: Error) => void;
+    // Rejected only once the loop is long past index 0 — which is what makes
+    // the index in the diagnostic worth asserting, and what makes the
+    // diagnostic itself reachable only through the end-of-plan await.
+    const held = new Promise<void>((_, reject) => (fail = reject));
+    board.playState.mockImplementation(() => held);
+
+    let settled = false;
+    const running = executePlan(
       [
         { kind: 'playState', cells: [], state: 'death', wait: false },
         { kind: 'spinTo', board: [[1]] },
       ],
       board,
-    );
+    ).then((problems) => {
+      settled = true;
+      return problems;
+    });
 
-    expect(problems.map((d) => [d.where, d.message])).toEqual([
+    await Promise.race([running, new Promise((r) => setTimeout(r, 20))]);
+    expect(board.calls).toEqual(['spinTo']);
+    expect(settled).toBe(false);
+
+    fail(new Error('nope'));
+    expect((await running).map((d) => [d.where, d.message])).toEqual([
       ['plan[0]', 'step "playState" failed: nope'],
     ]);
-    expect(board.calls).toEqual(['spinTo']);
   });
 
   it('a registered kind takes the same rule', async () => {

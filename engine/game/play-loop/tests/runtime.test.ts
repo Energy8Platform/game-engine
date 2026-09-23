@@ -498,6 +498,54 @@ describe('play-loop runtime half: turbo and skip', () => {
     await ctx.fiber.dispose();
   });
 
+  /**
+   * Slice 31 — the one interaction `wait: false` can wedge. A step that does
+   * not hold the plan still holds `execute` open to the END of the plan (the
+   * atomicity rule in `executePlan`), so a state that never ends on its own
+   * would keep the row's promise — and whatever the flow is waiting on —
+   * pending forever. `skip()` is the way out, and it reaches the board while
+   * the run is still live because the run has not resolved yet. The real
+   * board collapses a state in flight through `showStatic()`
+   * (`@energy8engine/reels`); the fake here does the same thing by resolving
+   * what its `playState` handed back.
+   */
+  it('skip() collapses a wait: false step that never ends, and the run it holds open settles', async () => {
+    const ctx = new Context();
+    await ctx.plugin(runtime);
+
+    let collapse!: () => void;
+    const playing = new Promise<void>((resolve) => (collapse = resolve));
+    const board = {
+      spinTo: async () => {},
+      playState: () => playing,
+      skip: () => collapse(),
+    } as unknown as BoardApi;
+
+    let settled = false;
+    const running = ctx.play
+      .execute(
+        [
+          { kind: 'spinTo', board: [[1]] },
+          { kind: 'playState', cells: [{ col: 0, row: 0 }], state: 'death', wait: false },
+        ],
+        board,
+      )
+      .then((problems) => {
+        settled = true;
+        return problems;
+      });
+
+    // The plan is through its last step and still open, held by the state.
+    await Promise.race([running, new Promise((r) => setTimeout(r, 20))]);
+    expect(settled).toBe(false);
+
+    ctx.play.skip();
+    expect(await running).toEqual([]);
+    expect(settled).toBe(true);
+
+    await ctx.fiber.dispose();
+  });
+
   it('the latch is cleared when the run resolves: a skip after it is a no-op', async () => {
     const ctx = new Context();
     await ctx.plugin(runtime);
