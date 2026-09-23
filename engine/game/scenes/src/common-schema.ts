@@ -90,6 +90,20 @@ export const COLOUR = new RegExp(
  * word boundary is what keeps a var that merely STARTS like it
  * (`'$cellular'`) out.
  *
+ * Three consequences of taking the whole expression grammar, each of
+ * which surprised someone once:
+ *   - A cell FIELD has to be an identifier now, because the path is
+ *     PARSED. `'$cell.step-win'` is `$cell.step` minus `win`, not a field
+ *     called `step-win` — and `win` is missing, so it resolves to `NaN`.
+ *     Name the field `step_win`.
+ *   - A string that mentions `$cell` with neither `{…}` nor a leading `$`
+ *     (`'Win $cell.mv'`) is still a binding by this test, but the resolver
+ *     sees neither a template nor an expression and answers the string AS
+ *     WRITTEN: it resolves to itself, silently. Wrap the span:
+ *     `'Win {$cell.mv}'`.
+ *   - `'$cell'` alone resolves to the cell OBJECT, which a string prop
+ *     renders as `[object Object]`. Name a field.
+ *
  * No schema ever validates one (the flow's `$path` strings are not
  * validated either): the symbols runtime resolves it on `bind`, and until
  * then the prop stands at its type's empty, below. Here rather than in

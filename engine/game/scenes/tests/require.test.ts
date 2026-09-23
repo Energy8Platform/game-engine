@@ -61,13 +61,29 @@ const docProbe: SceneDoc = {
 };
 
 describe('require', () => {
-  it('a require before the first load joins that batch', async () => {
+  it("a require before the first load takes its own batch, ahead of the document's", async () => {
     const loader = spyLoader();
     const { scenes } = boot([docA], loader);
     scenes.require(['x.png']);
     await scenes.show('a');
-    expect(loader.calls).toHaveLength(1);
-    expect(loader.calls[0]!.sort()).toEqual(['bg.png', 'x.png']);
+    expect(loader.calls).toEqual([['x.png'], ['bg.png']]);
+  });
+
+  it('a require with no show ever still loads — a row that draws no document is the point', async () => {
+    const loader = spyLoader();
+    const { scenes } = boot([docA], loader);
+    scenes.require(['x.png']);
+    await tick();
+    expect(loader.calls).toEqual([['x.png']]);
+  });
+
+  it('two requires racing on one path load it once — the second batch re-reads what landed', async () => {
+    const loader = spyLoader();
+    const { scenes } = boot([docA], loader);
+    scenes.require(['x.png']);
+    scenes.require(['x.png', 'y.png']);
+    await tick();
+    expect(loader.calls).toEqual([['x.png'], ['y.png']]);
   });
 
   it('a require after it loads only what is new, and the views refresh', async () => {
@@ -89,8 +105,7 @@ describe('require', () => {
     const first = scenes.require(['x.png']);
     const second = scenes.require(['x.png']);
     await scenes.show('a');
-    expect(loader.calls).toHaveLength(1);
-    expect(loader.calls[0]!.sort()).toEqual(['bg.png', 'x.png']);
+    expect(loader.calls).toEqual([['x.png'], ['bg.png']]);
     first();
     await scenes.hide('a');
     // `second` still holds it: the orphan sweep takes the document's path only.
@@ -100,6 +115,22 @@ describe('require', () => {
     await scenes.show('a');
     await scenes.hide('a');
     expect(loader.unload).toHaveBeenLastCalledWith(expect.arrayContaining(['x.png']));
+  });
+
+  it('a path the hiding document names too survives the sweep while a holder lives', async () => {
+    const loader = spyLoader();
+    const { scenes } = boot([docA], loader);
+    const off = scenes.require(['bg.png']);
+    await scenes.show('a');
+    // One batch's worth: the document's own path was already required.
+    expect(loader.calls).toEqual([['bg.png']]);
+    await scenes.hide('a');
+    expect(loader.unload).not.toHaveBeenCalled();
+    // And the next sweep after the holder goes is free to take it.
+    off();
+    await scenes.show('a');
+    await scenes.hide('a');
+    expect(loader.unload).toHaveBeenCalledWith(['bg.png']);
   });
 
   it('the last disposer drops the claim, and nothing is unloaded for it', async () => {

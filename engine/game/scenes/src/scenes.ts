@@ -116,15 +116,30 @@ export interface ScenesService {
    * silently resolve to nothing, since the loader only ever fetches what
    * `assetsOf` found.
    *
-   * They join the next load: the batch a first `show` is about to make
-   * when nothing has loaded yet, their own batch after that (the views
-   * refresh when it lands). Registered twice, a path is still loaded
-   * once, and it survives a `hide`'s orphan sweep for as long as any
-   * registration lives.
+   * Every call takes a batch of its own, always — it never waits to join
+   * a `show`'s. A composition that shows no document at all (a row used
+   * only for `mountCell`, or for symbols) has no batch to join, and a
+   * `require` that loaded only sometimes is no contract anyone can hold.
+   * The batches run in order on the runtime's own queue, so a path an
+   * earlier one already took is skipped rather than fetched twice:
+   * registered twice, a path is still loaded once. It survives a `hide`'s
+   * orphan sweep for as long as any registration lives.
+   *
+   * A path must live where the BUILD ships it, not merely where dev
+   * serves it: `e8 build` copies the project's `assets/` wholesale and
+   * nothing else, so art kept beside a plugin resolves in dev and 404s in
+   * `dist`.
+   *
+   * This returns a disposer, not a promise — there is no awaiting the
+   * batch. The requiring row must tolerate `loader.get(path) === undefined`
+   * until it lands and draw itself again when it has; the `refresh()` the
+   * batch ends with helps no view here, since by definition no document
+   * names a required path.
    *
    * The disposer drops the claim, nothing more — NOTHING IS UNLOADED when
    * the last holder goes. The next `hide` whose sweep finds the path
-   * unneeded is what unloads it.
+   * unneeded is what unloads it. A disposer that runs before its own
+   * batch does cancels it: nothing is fetched for a claim already gone.
    */
   require(paths: string[]): () => void;
   /**
@@ -356,8 +371,6 @@ export function createScenes(options: CreateScenesOptions): ScenesService {
   /** One entry per live `require` registration — a path two rows ask for is held until both disposers ran. */
   const required = new Set<{ paths: string[] }>();
   const requiredPaths = (): string[] => [...new Set([...required].flatMap((h) => h.paths))];
-  /** Whether any batch has been made yet: until one has, a `require` simply joins it. */
-  let batched = false;
   /** The top-level mount under construction — nested `mountDoc` calls file their entries here. */
   let building: Mount | null = null;
   /** The last `resize`; what a top-level node's `pin` is placed against. */
@@ -401,7 +414,7 @@ export function createScenes(options: CreateScenesOptions): ScenesService {
     if (seen.has(node.id)) {
       error(
         where,
-        `node id "${node.id}" is declared twice in "${sceneId}" — ids are unique per document, not per parent`,
+        `node id "${node.id}" is declared twice in "${sceneId}" — ids are unique per document, not per parent, and the later one is skipped`,
         'prefix them, e.g. "rock_bar" and "paper_bar"',
       );
       return;
@@ -856,7 +869,6 @@ export function createScenes(options: CreateScenesOptions): ScenesService {
 
   /** One batch, blamed on `where`; a failure is reported per path, never thrown. */
   async function loadPaths(where: string, need: string[]): Promise<void> {
-    batched = true;
     if (need.length === 0) return;
     try {
       await loader.load(need);
@@ -908,11 +920,18 @@ export function createScenes(options: CreateScenesOptions): ScenesService {
   function requireAssets(paths: string[]): () => void {
     const holder = { paths: [...new Set(paths)] };
     required.add(holder);
-    // Before the first batch there is one on its way to join; after it,
-    // this registration needs a batch of its own. `need` is re-read inside
-    // the queued task: a load in flight may land these paths first.
-    if (batched)
-      void enqueue(() => loadPaths('require', holder.paths.filter((p) => !loaded.has(p))));
+    // ALWAYS its own batch, never a merge into a `load()` on its way: a
+    // composition that never shows a document (a row used only for
+    // `mountCell`) has no `load()` to join, and "sometimes it loads" is no
+    // contract. `need` is re-read inside the queued task — the queue is
+    // serial, so a path an earlier batch already took is skipped rather
+    // than fetched twice — and a holder whose disposer ran first is not
+    // loaded for at all.
+    void enqueue(() =>
+      required.has(holder)
+        ? loadPaths('require', holder.paths.filter((p) => !loaded.has(p)))
+        : Promise.resolve(),
+    );
     return () => void required.delete(holder);
   }
 

@@ -293,7 +293,8 @@ describe('mounting', () => {
     expect(report).toHaveBeenCalledWith(
       expect.objectContaining({
         where: 'a/n',
-        message: 'node id "n" is declared twice in "a" — ids are unique per document, not per parent',
+        message:
+          'node id "n" is declared twice in "a" — ids are unique per document, not per parent, and the later one is skipped',
         fix: 'prefix them, e.g. "rock_bar" and "paper_bar"',
       }),
     );

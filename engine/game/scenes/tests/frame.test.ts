@@ -94,6 +94,31 @@ describe('onFrame', () => {
     expect(ticker.hooked).toBe(0);
   });
 
+  it('a registration after the last one went re-hooks the ticker', () => {
+    const ticker = fakeTicker();
+    const { scenes } = boot(ticker);
+    scenes.onFrame(vi.fn())();
+    expect(ticker.hooked).toBe(0);
+    const fn = vi.fn();
+    scenes.onFrame(fn);
+    expect(ticker.hooked).toBe(1);
+    ticker.tick(16);
+    expect(fn).toHaveBeenCalledWith(16);
+  });
+
+  it('a disposer called twice is a no-op — it cannot unhook a sibling registration', () => {
+    const ticker = fakeTicker();
+    const { scenes } = boot(ticker);
+    const off = scenes.onFrame(vi.fn());
+    const other = vi.fn();
+    scenes.onFrame(other);
+    off();
+    off();
+    expect(ticker.hooked).toBe(1);
+    ticker.tick(16);
+    expect(other).toHaveBeenCalledWith(16);
+  });
+
   it('a throwing fn is unhooked and reported once (scenes, onFrame); its siblings keep firing', () => {
     const ticker = fakeTicker();
     const { scenes, report } = boot(ticker);
