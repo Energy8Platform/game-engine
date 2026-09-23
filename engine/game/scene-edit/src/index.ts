@@ -507,6 +507,6 @@ export function apply(ctx: Context, config: SceneEditConfig): void {
     w.__e8edit = api;
     ctx.effect(() => () => { if (w.__e8edit === api) delete w.__e8edit; }, 'scene-edit:hook');
 
-    void scenes.show(scene).then(() => { if (alive) emit('ready', { scene, orientation: scenes.orientation() }); });
+    void scenes.show(scene, { preview: true }).then(() => { if (alive) emit('ready', { scene, orientation: scenes.orientation() }); });
   }
 }

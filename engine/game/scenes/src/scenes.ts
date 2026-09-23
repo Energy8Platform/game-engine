@@ -100,7 +100,13 @@ export interface CellMount {
 }
 
 export interface ScenesService {
-  show(id: string, opts?: { transition?: string }): Promise<void>;
+  /**
+   * `preview`: the IDE looking at a document, not the game showing it — the
+   * shown-time diagnostics (`reportShown`) are skipped, for this show and
+   * for any remount while it stays shown, so a cell scene previewed without
+   * a cell is not called a mistake.
+   */
+  show(id: string, opts?: { transition?: string; preview?: boolean }): Promise<void>;
   hide(id: string): Promise<void>;
   /** Top-level scenes shown, in show order; a nested show is not listed. */
   visible(): string[];
@@ -532,14 +538,18 @@ export function createScenes(options: CreateScenesOptions): ScenesService {
   }
 
   /**
-   * What a mount on screen has to say, now that a person can see it: each
+   * What a shown mount has to say, now that the game has shown it: each
    * skipped node an error, and each `$cell` binding still in the node's
    * layered props (`rawOf` — a `setProps` literal over it silences it) a
    * warning: a `mounted` document has no cell, so the prop stands at its
    * empty (a built dist may never have run the host's static check). Every
    * document is mounted hidden at `replace`, cell scenes included, which is
-   * why this waits for the screen. A `mountCell` copy is never in
-   * `mounted`, so it never comes through here. A repeat on the next
+   * why this waits for a `show` (or a remount of a shown one). "Shown", not
+   * "on screen": a `visible: false` node inside a shown document still
+   * warns, rightly. Only a show or a remount checks — a portrait flip or a
+   * live `setProps` does not re-check. A preview `show` (`opts.preview`,
+   * the IDE looking at a document) skips it. A `mountCell` copy is never
+   * in `mounted`, so it never comes through here. A repeat on the next
    * `show` is byte-identical, and the diagnostics service collapses it.
    */
   const reportShown = (m: Mount) => {
@@ -569,6 +579,9 @@ export function createScenes(options: CreateScenesOptions): ScenesService {
    */
   let vanished: Map<string, Set<string>> | null = null;
 
+  /** Top-level ids shown with `preview` — `reportShown` stays quiet for them until they are hidden. */
+  const previewed = new Set<string>();
+
   function mountTop(id: string): void {
     const view = new Container();
     view.label = id;
@@ -591,7 +604,7 @@ export function createScenes(options: CreateScenesOptions): ScenesService {
         );
     mounted.set(id, m);
     showHosts(m);
-    if (!visibleIds.includes(id)) return;
+    if (!visibleIds.includes(id) || previewed.has(id)) return;
     const gap = vanished?.get(id);
     reportShown(gap ? { ...m, missing: m.missing.filter((x) => !gap.has(x.type)) } : m);
   }
@@ -721,6 +734,7 @@ export function createScenes(options: CreateScenesOptions): ScenesService {
       unmountTop(id);
       if (!docs.has(id)) {
         if (wasAt >= 0) visibleIds.splice(visibleIds.indexOf(id), 1);
+        previewed.delete(id);
         shownNested.delete(id);
         continue;
       }
@@ -947,12 +961,14 @@ export function createScenes(options: CreateScenesOptions): ScenesService {
     // `e8 build` copies `assets/` and nothing else, and cannot see a path
     // that lives in TypeScript — so the runtime says it, and still asks for
     // it (dev serves it fine). A repeat is collapsed by the diagnostics service.
+    // A document naming the path would not ship it either. `./assets/x`
+    // ships; `/assets/x` is root-relative, not the project folder.
     for (const p of holder.paths)
-      if (!p.startsWith('assets/'))
+      if (!p.replace(/^\.\//, '').startsWith('assets/'))
         warn(
           'assetLoader',
           `"${p}" is outside assets/ — a built dist will not carry it`,
-          'move it under assets/, or name it in a document',
+          'move it under assets/',
         );
     // ALWAYS its own batch, never a merge into a `load()` on its way: a
     // composition that never shows a document (a row used only for
@@ -994,7 +1010,7 @@ export function createScenes(options: CreateScenesOptions): ScenesService {
       }
   }
 
-  async function show(id: string, opts?: { transition?: string }): Promise<void> {
+  async function show(id: string, opts?: { transition?: string; preview?: boolean }): Promise<void> {
     if (!docs.has(id)) return notDeclared(id);
     if (visibleIds.includes(id) || shownNested.has(id)) return;
     await load(id);
@@ -1009,7 +1025,8 @@ export function createScenes(options: CreateScenesOptions): ScenesService {
       if (shownNested.has(id)) settleHosts(nestingEntries(id), true);
       return;
     }
-    reportShown(mounted.get(id)!);
+    if (opts?.preview) previewed.add(id);
+    else reportShown(mounted.get(id)!);
     const view = mounted.get(id)!.view;
     container.addChildAt(view, container.getChildIndex(highlightBox));
     visibleIds.push(id);
@@ -1029,6 +1046,7 @@ export function createScenes(options: CreateScenesOptions): ScenesService {
       shownNested.delete(id);
     } else if (visibleIds.includes(id)) {
       visibleIds.splice(visibleIds.indexOf(id), 1);
+      previewed.delete(id);
       const view = mounted.get(id)!.view;
       container.removeChild(view);
       view.alpha = 1;
@@ -1135,8 +1153,8 @@ export function createScenes(options: CreateScenesOptions): ScenesService {
       } finally {
         building = prev;
       }
-      // A copy is never shown, so `reportShown`'s "wait until it is on
-      // screen" rule has nothing to wait for: an unregistered type is a hole
+      // A copy is never shown, so `reportShown`'s "wait until it is
+      // shown" rule has nothing to wait for: an unregistered type is a hole
       // in what the cell draws, now. One diagnostic per type per call — a
       // grid of 30 cells asks for this document 30 times.
       for (const type of new Set(m.missing.map((x) => x.type)))

@@ -1585,7 +1585,8 @@ describe('ide-bridge — scenes frames from the host', () => {
     socket.emit({ type: 'scene-preview', scene: 'a' });
     await Promise.resolve(); // `show`'s own promise is not awaited by this module — let it settle
 
-    expect(scenes.show).toHaveBeenCalledWith('a');
+    // A preview: the shown-time diagnostics stay quiet for it.
+    expect(scenes.show).toHaveBeenCalledWith('a', { preview: true });
   });
 
   it('without scenes composed, scenes/scene-select/scene-preview frames are ignored', () => {

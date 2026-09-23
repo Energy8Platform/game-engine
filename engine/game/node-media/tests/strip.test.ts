@@ -167,6 +167,19 @@ describe('strip', () => {
       for (const v of views) v.destroy();
     });
 
+    it("a prototype name as the key ('toString', 'constructor') slices `src`; a `srcOf` value of '' is left out of assets()", () => {
+      const w = (v: Container) => ((v as AnimatedSprite).textures[0] as Texture).source.width;
+      for (const srcKey of ['toString', 'constructor', '__proto__']) {
+        const view = strip.mount(set({ srcKey }), ctx);
+        expect(w(view)).toBe(32);
+        view.destroy();
+      }
+      expect(strip.assets!(set({ srcOf: { g: 'assets/g.png', none: '' } }))).toEqual([
+        'assets/coin.png',
+        'assets/g.png',
+      ]);
+    });
+
     it('update with a new key re-slices on the same view, frees the old frames and plays from 0', () => {
       const view = strip.mount(set({ srcKey: 'g' }), ctx) as AnimatedSprite;
       const before = view.textures as Texture[];

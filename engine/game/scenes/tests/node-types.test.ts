@@ -87,6 +87,15 @@ describe('image: an asset set (`srcOf` keyed by `srcKey`)', () => {
     expect((image.mount({ src: 'a.png' } as never, ctx) as Sprite).texture).toBe(tex['a.png']);
   });
 
+  it("a prototype name as the key ('toString', 'constructor') shows `src`, not Object's own member", () => {
+    for (const srcKey of ['toString', 'constructor', '__proto__'])
+      expect((image.mount(props({ srcKey }), ctx) as Sprite).texture).toBe(tex['a.png']);
+  });
+
+  it("assets(): a `srcOf` value of '' is left out", () => {
+    expect(image.assets!(props({ srcOf: { g: 'g.png', none: '' } }))).toEqual(['a.png', 'g.png']);
+  });
+
   it('update with a new key swaps the texture on the same view', () => {
     const view = image.mount(props({ srcKey: 'g' }), ctx) as Sprite;
     expect(view.texture).toBe(tex['g.png']);

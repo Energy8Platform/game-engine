@@ -266,6 +266,13 @@ describe('scene-edit plugin', () => {
     expect(res.result).toEqual({ scene: 'a', selected: null, bounds: { lo: { x: 100, y: 100, w: 40, h: 40 }, hi: { x: 120, y: 120, w: 40, h: 40 } } });
   });
 
+  it('shows its scene as a preview — the IDE looking at a document, not the game showing it', async () => {
+    const { scenes, ready } = boot();
+    const show = vi.spyOn(scenes, 'show');
+    await ready();
+    expect(show).toHaveBeenCalledWith('a', { preview: true });
+  });
+
   it('a pointerdown over a node selects it (event selected) and the gizmo attaches; over nothing clears', async () => {
     const { edit, events, ready, gizmoShown, app } = boot();
     await ready();

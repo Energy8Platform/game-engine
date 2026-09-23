@@ -911,12 +911,13 @@ export function apply(ctx: Context, config: IdeBridgeConfig): void {
     const scenes = ctx.reflect.get('scenes', false) as
       | {
           replace?(docs: unknown[]): void;
-          show?(id: string): Promise<void>;
+          show?(id: string, opts?: { preview?: boolean }): Promise<void>;
           highlight?(ref: { scene: string; node: string } | null): void;
         }
       | undefined;
     if (message.type === 'scene-preview') {
-      if (scenes?.show) void scenes.show(message.scene);
+      // A preview: the IDE looking at a document, not the game showing it.
+      if (scenes?.show) void scenes.show(message.scene, { preview: true });
       return;
     }
     if (message.type === 'scenes') {

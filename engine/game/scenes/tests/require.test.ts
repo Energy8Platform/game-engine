@@ -185,15 +185,24 @@ describe('require', () => {
         severity: 'warning',
         where: 'assetLoader',
         message: '"plugins/x/art.png" is outside assets/ — a built dist will not carry it',
-        fix: 'move it under assets/, or name it in a document',
+        fix: 'move it under assets/',
       }),
     ]);
   });
 
-  it('a path under assets/ is silent', async () => {
+  it('a path under assets/ is silent, a leading ./ included', async () => {
     const { scenes, report } = boot([docA], spyLoader());
-    scenes.require(['assets/ok.png']);
+    scenes.require(['assets/ok.png', './assets/also.png']);
     await tick();
     expect(report).not.toHaveBeenCalled();
+  });
+
+  it('a root-relative /assets/ path still warns — it is not the project folder', async () => {
+    const { scenes, report } = boot([docA], spyLoader());
+    scenes.require(['/assets/x.png']);
+    await tick();
+    expect(report).toHaveBeenCalledWith(
+      expect.objectContaining({ severity: 'warning', where: 'assetLoader', fix: 'move it under assets/' }),
+    );
   });
 });

@@ -457,6 +457,18 @@ describe('mounting', () => {
       }),
     );
   });
+  it('a preview `show` of a bound document reports nothing — not even when an edit remounts it; a plain `show` still does', async () => {
+    // The IDE looking at a cell scene is not the game showing one.
+    const doc = { id: 'a', nodes: [{ id: 't', type: 'text', props: { text: 'x{$cell.mv}' } }] };
+    const { scenes, nodeTypes, report } = boot([doc]);
+    nodeTypes.register(text);
+    await scenes.show('a', { preview: true });
+    scenes.replace([{ ...doc, nodes: [{ ...doc.nodes[0], props: { text: 'y{$cell.mv}' } }] }]);
+    expect(report).not.toHaveBeenCalled();
+    await scenes.hide('a');
+    await scenes.show('a');
+    expect(report).toHaveBeenCalledTimes(1);
+  });
 });
 
 describe('show / hide', () => {
