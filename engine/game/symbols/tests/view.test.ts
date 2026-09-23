@@ -456,6 +456,21 @@ describe('$cell bindings', () => {
     expect(textOf(h).text).toBe('');
   });
 
+  it('a malformed $cell expression reports at symbols/<id>/<state> and leaves the prop at its empty', () => {
+    const { deps, report } = setup();
+    const h = createSymbolHandle('orb', deps);
+    // `bogus` is no pipe format: the resolver throws, `cellProps` reports
+    // through the callback this handle threads, and the prop takes the empty
+    // rather than the string as written.
+    h.apply({ id: 'orb', static: { type: 'text', props: { text: '{$cell.mv | bogus}' } } });
+    h.resize(SIZE);
+    // Nothing is evaluated before there is a cell: the mount is silent.
+    expect(report).not.toHaveBeenCalled();
+    h.view.bind({ symbol: 'orb', mv: 3 });
+    expect(report).toHaveBeenCalledWith('symbols/orb/static', expect.stringContaining('bad value'));
+    expect(textOf(h).text).toBe('');
+  });
+
   it('a state with no binding is left alone — no re-update per bound cell', () => {
     const { deps, nodeTypes } = setup();
     const update = vi.fn(text.update!);
