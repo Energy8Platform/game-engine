@@ -467,7 +467,7 @@ describe('$cell bindings', () => {
     // Nothing is evaluated before there is a cell: the mount is silent.
     expect(report).not.toHaveBeenCalled();
     h.view.bind({ symbol: 'orb', mv: 3 });
-    expect(report).toHaveBeenCalledWith('symbols/orb/static', expect.stringContaining('bad value'));
+    expect(report).toHaveBeenCalledWith('symbols/orb/static', expect.stringContaining('bad value'), undefined, undefined);
     expect(textOf(h).text).toBe('');
   });
 
@@ -762,7 +762,7 @@ describe('playState', () => {
     await h.view.playState!('death');
     await h.view.playState!('death');
     expect(report).toHaveBeenCalledTimes(1);
-    expect(report).toHaveBeenCalledWith('symbols/1', 'no state "death"', 'info');
+    expect(report).toHaveBeenCalledWith('symbols/1', 'no state "death"', undefined, 'info');
     await h.view.playState!('nope');
     expect(report).toHaveBeenCalledTimes(2);
     expect(h.view.children).toEqual([wrapperOf(h.view, 'static')]);

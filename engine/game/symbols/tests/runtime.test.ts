@@ -375,6 +375,39 @@ describe('named and scene states', () => {
     );
   });
 
+  it("a number prop bound to a field the cell has not got arrives as a warning, fix and all", async () => {
+    const bad: SymbolsDoc = {
+      version: 1,
+      symbols: [
+        {
+          id: '1',
+          static: { type: 'image', props: { src: 'assets/symbols/1.png' } },
+          states: {
+            glow: { type: 'image', props: { src: 'assets/symbols/1.png', alpha: '$cell.step-win' } },
+          },
+        },
+      ],
+    };
+    const { symbols, resolve, report } = await boot(fetchOk({ doc: bad, known: [], diagnostics: [] }));
+    await symbols.ready;
+    await settle();
+    const view = resolve('1') as Container & {
+      bind(data: Record<string, unknown>): void;
+      playState(state: string): Promise<void>;
+    };
+    view.bind({ mv: 1 });
+    await view.playState('glow');
+    expect(report).toHaveBeenCalledWith(
+      expect.objectContaining({
+        severity: 'warning',
+        plugin: 'symbols',
+        where: 'symbols/1/glow',
+        message: '"alpha" resolved to NaN',
+        fix: expect.stringContaining('name it step_win'),
+      }),
+    );
+  });
+
   it('preview pins a named state', async () => {
     const { symbols } = await boot();
     await symbols.ready;

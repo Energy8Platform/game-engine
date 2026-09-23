@@ -68,8 +68,8 @@ export interface ViewDeps {
   ctx: Context;
   /** Looked up per mount, not once: the registry may not exist yet when the row applies. */
   nodeTypes(): NodeTypesService | undefined;
-  /** `'error'` when absent; a state the def simply has not got is an `'info'`. */
-  report(where: string, message: string, severity?: Severity): void;
+  /** `'error'` when absent; a state the def simply has not got is an `'info'`, and `cellProps` names its own (a `warning`, with a fix). */
+  report(where: string, message: string, fix?: string, severity?: Severity): void;
 }
 
 /** The legacy view plus `bind` and `playState`: what the reels board calls on every cell it has just seated. */
@@ -223,8 +223,8 @@ export function createSymbolHandle(
       w.type = type;
       w.raw = node.props;
       try {
-        const resolved = cellProps(type, node.props, cell, (m) =>
-          deps.report(`symbols/${id}/${state}`, m),
+        const resolved = cellProps(type, node.props, cell, (m, fix, sev) =>
+          deps.report(`symbols/${id}/${state}`, m, fix, sev),
         );
         w.props = resolved.props;
         w.bound = resolved.bound;
@@ -266,7 +266,7 @@ export function createSymbolHandle(
       if (!noState.has(state)) {
         noState.add(state);
         // An `info`, not an error: a mechanic names `death` for every loser and not every symbol dies.
-        deps.report(`symbols/${id}`, `no state "${state}"`, 'info');
+        deps.report(`symbols/${id}`, `no state "${state}"`, undefined, 'info');
       }
       return;
     }
@@ -369,8 +369,8 @@ export function createSymbolHandle(
             w.cell.bind(data);
           } else if (!w.bound?.length || !w.type || !w.child) continue;
           else {
-            w.props = cellProps(w.type, w.raw!, data, (m) =>
-              deps.report(`symbols/${id}/${w.state}`, m),
+            w.props = cellProps(w.type, w.raw!, data, (m, fix, sev) =>
+              deps.report(`symbols/${id}/${w.state}`, m, fix, sev),
             ).props;
             applyCommon(w.child, w.props, w.type);
           }

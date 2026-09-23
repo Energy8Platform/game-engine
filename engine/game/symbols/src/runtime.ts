@@ -85,8 +85,8 @@ export function apply(ctx: Context, config: SymbolsConfig = {}): void {
   const deps: ViewDeps = {
     ctx,
     nodeTypes: () => ctx.reflect.get('nodeTypes', false) as NodeTypesService | undefined,
-    // A view has no fix to offer, but it does pick the severity (a state a def has not got).
-    report: (where, message, severity) => report(where, message, undefined, severity),
+    // A view picks the severity (a state a def has not got) and forwards `cellProps`' fix.
+    report,
   };
 
   const live = new Set<SymbolHandle>();
