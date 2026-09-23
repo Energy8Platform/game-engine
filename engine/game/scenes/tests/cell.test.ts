@@ -4,7 +4,8 @@ import { Context } from 'cordis';
 import Schema from 'schemastery';
 import type { Diagnostic, SceneDoc } from '@energy8engine/contracts';
 import { createNodeTypes, type NodeType } from '../src/node-types';
-import { container, image, text, type AssetLoader } from '../src/builtin';
+import { createDiagnostics } from '@energy8engine/diagnostics';
+import { container, image, scene, text, type AssetLoader } from '../src/builtin';
 import { cellProps } from '../src/common-schema';
 import { createScenes } from '../src/scenes';
 
@@ -82,6 +83,38 @@ describe('cellProps', () => {
     expect(bound).toEqual(['label', 'count']);
     expect(report).toHaveBeenCalledTimes(1);
     expect(report.mock.calls[0][0]).toContain('{$cell.mv +}');
+  });
+
+  it('a bound prop resolving to an object is one warning and the empty: `$cell` alone names no field', () => {
+    const report = vi.fn();
+    const { props } = cellProps(kinds, { label: '$cell' }, { mv: 64 }, report);
+    expect(props.label).toBe('');
+    expect(report).toHaveBeenCalledTimes(1);
+    expect(report.mock.calls[0]).toEqual([
+      '"label" resolved to an object; name a field',
+      expect.any(String),
+      'warning',
+    ]);
+  });
+
+  it('a number prop resolving to NaN is one warning naming the non-identifier field, and the empty', () => {
+    const report = vi.fn();
+    // `$cell.step-win` is `$cell.step` minus `win`: a subtraction, not a field.
+    const { props } = cellProps(kinds, { count: '$cell.step-win' }, { 'step-win': 3 }, report);
+    expect(props.count).toBe(0);
+    expect(report).toHaveBeenCalledTimes(1);
+    const [message, fix, severity] = report.mock.calls[0];
+    expect(message).toBe('"count" resolved to NaN');
+    expect(fix).toContain('step_win');
+    expect(severity).toBe('warning');
+  });
+
+  it('a string prop resolving to NaN is left alone: it draws "NaN"', () => {
+    const report = vi.fn();
+    expect(
+      cellProps(kinds, { label: '$cell.step-win' }, { 'step-win': 3 }, report).props.label,
+    ).toBe('NaN');
+    expect(report).not.toHaveBeenCalled();
   });
 
   it('with no data nothing is evaluated: even a malformed expression is silent at its empty', () => {
@@ -336,6 +369,50 @@ describe('mountCell', () => {
   it('a document nothing declares is null', () => {
     const { scenes } = boot();
     expect(scenes.mountCell('missing')).toBeNull();
+  });
+});
+
+describe('a $cell binding with no cell', () => {
+  const noCell = {
+    severity: 'warning',
+    plugin: 'scenes',
+    where: 'orb/mv',
+    message: '"text" reads $cell, but this document was not mounted for a cell',
+    fix: "only a symbol state's own document is mounted per cell",
+  };
+  /** `boot`'s report through a real diagnostics service: what it STORES is the contract. */
+  function stored(report: ReturnType<typeof boot>['report']) {
+    const diag = createDiagnostics();
+    report.mockImplementation((d) => diag.report(d));
+    return diag;
+  }
+
+  it('an ordinary show says so once per node and prop, and a second show adds nothing', async () => {
+    const { scenes, report } = boot();
+    const diag = stored(report);
+    await scenes.show('orb');
+    expect(diag.list()).toEqual([expect.objectContaining(noCell)]);
+    await scenes.hide('orb');
+    await scenes.show('orb');
+    expect(diag.list()).toHaveLength(1);
+  });
+
+  it('a cell scene nested through a `scene` node says so too', async () => {
+    const host: SceneDoc = {
+      id: 'host',
+      nodes: [{ id: 'slot', type: 'scene', props: { scene: 'orb' } }],
+    };
+    const { scenes, report } = boot([orb, host], [scene]);
+    const diag = stored(report);
+    await scenes.show('host');
+    expect(diag.list()).toEqual([expect.objectContaining(noCell)]);
+  });
+
+  it('a mountCell, with data or without, and its bind never say it', () => {
+    const { scenes, report } = boot();
+    scenes.mountCell('orb');
+    scenes.mountCell('orb', { mv: 64 })!.bind({ mv: 8 });
+    expect(report).not.toHaveBeenCalled();
   });
 });
 

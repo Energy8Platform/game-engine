@@ -49,6 +49,7 @@ import {
   COMMON,
   applyCommon,
   cellProps,
+  isCellBinding,
   commonProps,
   place,
   type NodeType,
@@ -294,15 +295,15 @@ const offending = (e: unknown, patch: Record<string, unknown>): string => {
  * resolved in place — `applyCommon` must never see a binding string on a
  * COMMON prop (`alpha: '$cell.hot'` would fail the whole node).
  *
- * `report` is the node's own `error(where, …)`, for an expression that
- * does not parse. A call with no cell passes none: with no data nothing is
+ * `report` is the node's own diagnostic sink (`cellProps` says what it
+ * reports). A call with no cell passes none: with no data nothing is
  * evaluated, so there is nothing to report.
  */
 function resolveCell(
   type: NodeType,
   base: Record<string, unknown>,
   cell?: Record<string, unknown>,
-  report?: (message: string) => void,
+  report?: (message: string, fix?: string, severity?: 'error' | 'warning') => void,
 ): { props: Record<string, unknown>; bound: string[]; raw: Record<string, unknown> } {
   const { props, bound } = cellProps(type, base, cell, report);
   return {
@@ -321,6 +322,11 @@ export function createScenes(options: CreateScenesOptions): ScenesService {
     report(diagnostic('error', 'scenes', where, message, fix));
   const warn = (where: string, message: string, fix?: string) =>
     report(diagnostic('warning', 'scenes', where, message, fix));
+  /** `resolveCell`'s sink for the node at `where`: `cellProps` names the severity, an error by default. */
+  const cellReport =
+    (where: string) =>
+    (message: string, fix?: string, severity: 'error' | 'warning' = 'error') =>
+      report(diagnostic(severity, 'scenes', where, message, fix));
   const nestedPin = (where: string, id: string) =>
     warn(where, `pin on a nested node "${id}" is ignored`, 'pin only top-level nodes');
   /**
@@ -457,7 +463,7 @@ export function createScenes(options: CreateScenesOptions): ScenesService {
     let raw = base;
     let masks = false;
     try {
-      ({ props, bound, raw } = resolveCell(type, base, cell, (m) => error(where, m)));
+      ({ props, bound, raw } = resolveCell(type, base, cell, cellReport(where)));
       view = type.mount(props, mountCtx([...chain, sceneId]));
       // Inside the try: a common prop off its type (`x: 'abc'`) is this
       // node's failure, not the whole set's.
@@ -525,14 +531,32 @@ export function createScenes(options: CreateScenesOptions): ScenesService {
     return entry;
   }
 
-  /** The skipped nodes of a mount that is on screen: each one an error, now that a person can see the gap. */
-  const reportMissing = (m: Mount) => {
+  /**
+   * What a mount on screen has to say, now that a person can see it: each
+   * skipped node an error, and each `$cell` binding still in the node's
+   * layered props (`rawOf` — a `setProps` literal over it silences it) a
+   * warning: a `mounted` document has no cell, so the prop stands at its
+   * empty (a built dist may never have run the host's static check). Every
+   * document is mounted hidden at `replace`, cell scenes included, which is
+   * why this waits for the screen. A `mountCell` copy is never in
+   * `mounted`, so it never comes through here. A repeat on the next
+   * `show` is byte-identical, and the diagnostics service collapses it.
+   */
+  const reportShown = (m: Mount) => {
     for (const { where, type } of m.missing)
       error(
         where,
         `node type "${type}" is not registered — the node is skipped`,
         'register it, or pick a type that is',
       );
+    for (const e of m.all)
+      for (const [k, v] of Object.entries(rawOf(e)))
+        if (isCellBinding(v))
+          warn(
+            e.where,
+            `"${k}" reads $cell, but this document was not mounted for a cell`,
+            "only a symbol state's own document is mounted per cell",
+          );
   };
 
   /**
@@ -541,7 +565,7 @@ export function createScenes(options: CreateScenesOptions): ScenesService {
    * registers again a few microtasks later: the remount in between must
    * not say the type is missing. It is reported only if it was ALSO
    * missing at the previous mount; the next `show()` still reports it if
-   * it truly stays gone (`reportMissing` reads the mount's own list).
+   * it truly stays gone (`reportShown` reads the mount's own list).
    */
   let vanished: Map<string, Set<string>> | null = null;
 
@@ -569,7 +593,7 @@ export function createScenes(options: CreateScenesOptions): ScenesService {
     showHosts(m);
     if (!visibleIds.includes(id)) return;
     const gap = vanished?.get(id);
-    reportMissing(gap ? { ...m, missing: m.missing.filter((x) => !gap.has(x.type)) } : m);
+    reportShown(gap ? { ...m, missing: m.missing.filter((x) => !gap.has(x.type)) } : m);
   }
 
   /** A nested scene `show()`n stays shown across a (re)mount of its host: the common pass put the document's `visible` back. */
@@ -920,6 +944,16 @@ export function createScenes(options: CreateScenesOptions): ScenesService {
   function requireAssets(paths: string[]): () => void {
     const holder = { paths: [...new Set(paths)] };
     required.add(holder);
+    // `e8 build` copies `assets/` and nothing else, and cannot see a path
+    // that lives in TypeScript — so the runtime says it, and still asks for
+    // it (dev serves it fine). A repeat is collapsed by the diagnostics service.
+    for (const p of holder.paths)
+      if (!p.startsWith('assets/'))
+        warn(
+          'assetLoader',
+          `"${p}" is outside assets/ — a built dist will not carry it`,
+          'move it under assets/, or name it in a document',
+        );
     // ALWAYS its own batch, never a merge into a `load()` on its way: a
     // composition that never shows a document (a row used only for
     // `mountCell`) has no `load()` to join, and "sometimes it loads" is no
@@ -975,7 +1009,7 @@ export function createScenes(options: CreateScenesOptions): ScenesService {
       if (shownNested.has(id)) settleHosts(nestingEntries(id), true);
       return;
     }
-    reportMissing(mounted.get(id)!);
+    reportShown(mounted.get(id)!);
     const view = mounted.get(id)!.view;
     container.addChildAt(view, container.getChildIndex(highlightBox));
     visibleIds.push(id);
@@ -1101,7 +1135,7 @@ export function createScenes(options: CreateScenesOptions): ScenesService {
       } finally {
         building = prev;
       }
-      // A copy is never shown, so `reportMissing`'s "wait until it is on
+      // A copy is never shown, so `reportShown`'s "wait until it is on
       // screen" rule has nothing to wait for: an unregistered type is a hole
       // in what the cell draws, now. One diagnostic per type per call — a
       // grid of 30 cells asks for this document 30 times.
@@ -1119,7 +1153,7 @@ export function createScenes(options: CreateScenesOptions): ScenesService {
           for (const e of entries) {
             if (!e.bound?.length) continue;
             try {
-              const r = resolveCell(e.type, rawOf(e), next, (m) => error(e.where, m));
+              const r = resolveCell(e.type, rawOf(e), next, cellReport(e.where));
               // A copy has no remount path (`setProps`' own is for mounted
               // nodes), so a type with no `update` can never show a new own
               // prop: `scene: '$cell.kind'` would swap in silence. One report

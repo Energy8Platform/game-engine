@@ -211,8 +211,14 @@ function boundValue(value: unknown, entry?: PropSchema): unknown {
  * string like `'x{$cell.mv}'` belongs to the document rather than to the
  * mechanic that pre-computed it. The vars are `{ cell }` and nothing else,
  * so `| currency` finds no `$session` and falls back to two decimals with
- * no symbol. A malformed expression is one `report` and the prop stands at
- * its empty — the string as written is no value for a typed prop.
+ * no symbol. A malformed expression is one `report` (an error) and the prop
+ * stands at its empty — the string as written is no value for a typed prop.
+ * Two sharp edges of that grammar are one `report` each too, a `warning`
+ * with a fix, the prop again at its empty: a value that resolves to an
+ * OBJECT (`'$cell'` alone, or a path to a record), and a `number` prop that
+ * resolves to `NaN` (likeliest: a non-identifier field, `'$cell.step-win'`
+ * parsed as a subtraction). A `string` prop's `NaN` is left alone — `'NaN'`
+ * is drawable, and the author asked for arithmetic.
  *
  * With NO data (a mount before the first `bind`) nothing is evaluated at
  * all: the prop stands at its empty, and even a malformed expression is
@@ -233,7 +239,7 @@ export const cellProps = (
   type: { schema: Schema },
   raw: Record<string, unknown>,
   data?: Record<string, unknown>,
-  report?: (message: string) => void,
+  report?: (message: string, fix?: string, severity?: 'error' | 'warning') => void,
 ): { props: Record<string, unknown>; bound: string[] } => {
   const own = dictOf(type.schema);
   const common = dictOf(COMMON);
@@ -257,7 +263,19 @@ export const cellProps = (
         bad = true;
         report?.(message);
       });
-      if (!bad) resolved[key] = boundValue(out, entry);
+      if (typeof out === 'object' && out !== null)
+        report?.(
+          `"${key}" resolved to an object; name a field`,
+          "e.g. '$cell.mv', not '$cell'",
+          'warning',
+        );
+      else if (entry?.type === 'number' && Number.isNaN(out))
+        report?.(
+          `"${key}" resolved to NaN`,
+          "a cell field must be an identifier: '$cell.step-win' is $cell.step minus win — name it step_win",
+          'warning',
+        );
+      else if (!bad) resolved[key] = boundValue(out, entry);
     }
     bound.push(key);
   }

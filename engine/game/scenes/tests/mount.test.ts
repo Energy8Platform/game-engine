@@ -438,16 +438,24 @@ describe('mounting', () => {
     expect(view.destroyed).toBe(true);
   });
 
-  it('a `$cell` binding in an ordinary document mounts at its empty value, silently', async () => {
+  it('a `$cell` binding in an ordinary document mounts at its empty value, and says so', async () => {
     // The runtime is lenient everywhere — only a cell scene is SUPPOSED to
-    // carry one, and refusing it is the host's static check, not this.
+    // carry one — but no longer silent: a built dist may never have run
+    // the host's static check.
     const { scenes, nodeTypes, report } = boot([
-      { id: 'a', nodes: [{ id: 't', type: 'text', props: { text: '$cell.mv' } }] },
+      { id: 'a', nodes: [{ id: 't', type: 'text', props: { text: 'x{$cell.mv}' } }] },
     ]);
     nodeTypes.register(text);
     await scenes.show('a');
     expect((byId(scenes, 'a', 't') as Text).text).toBe('');
-    expect(report).not.toHaveBeenCalled();
+    expect(report).toHaveBeenCalledTimes(1);
+    expect(report).toHaveBeenCalledWith(
+      expect.objectContaining({
+        severity: 'warning',
+        where: 'a/t',
+        message: '"text" reads $cell, but this document was not mounted for a cell',
+      }),
+    );
   });
 });
 

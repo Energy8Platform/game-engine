@@ -8,6 +8,7 @@ import { Container, Texture } from 'pixi.js';
 import { Context } from 'cordis';
 import Schema from 'schemastery';
 import type { Diagnostic, SceneDoc } from '@energy8engine/contracts';
+import { createDiagnostics } from '@energy8engine/diagnostics';
 import { createNodeTypes } from '../src/node-types';
 import { container, image, scene, type AssetLoader } from '../src/builtin';
 import { createScenes } from '../src/scenes';
@@ -159,15 +160,40 @@ describe('require', () => {
     const { scenes, report } = boot([docA], loader);
     await scenes.show('a');
     report.mockClear();
-    scenes.require(['x.png', 'y.png']);
+    scenes.require(['assets/x.png', 'assets/y.png']);
     await tick();
     expect(report).toHaveBeenCalledTimes(2);
-    for (const p of ['x.png', 'y.png'])
+    for (const p of ['assets/x.png', 'assets/y.png'])
       expect(report).toHaveBeenCalledWith(
         expect.objectContaining({
           severity: 'error',
           message: expect.stringContaining(`"${p}" failed to load`),
         }),
       );
+  });
+  it('a path outside assets/ is one warning at assetLoader, and is still requested', async () => {
+    const loader = spyLoader();
+    const { scenes, report } = boot([docA], loader);
+    const diag = createDiagnostics();
+    report.mockImplementation((d) => diag.report(d));
+    scenes.require(['plugins/x/art.png', 'assets/ok.png']);
+    scenes.require(['plugins/x/art.png']);
+    await tick();
+    expect(loader.calls[0]).toEqual(['plugins/x/art.png', 'assets/ok.png']);
+    expect(diag.list()).toEqual([
+      expect.objectContaining({
+        severity: 'warning',
+        where: 'assetLoader',
+        message: '"plugins/x/art.png" is outside assets/ — a built dist will not carry it',
+        fix: 'move it under assets/, or name it in a document',
+      }),
+    ]);
+  });
+
+  it('a path under assets/ is silent', async () => {
+    const { scenes, report } = boot([docA], spyLoader());
+    scenes.require(['assets/ok.png']);
+    await tick();
+    expect(report).not.toHaveBeenCalled();
   });
 });
