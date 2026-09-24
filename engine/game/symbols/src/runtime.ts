@@ -77,6 +77,27 @@ const statesOf = (def: SymbolDef): SymbolState[] => [
   ...Object.keys(def.states ?? {}),
 ];
 
+/**
+ * Every non-`scene` state's asset paths across every def, one set. Shared by `load()`
+ * (which seeds its urls with this, then adds `scene` states' paths itself — only
+ * `scenes.assetsOf` can name those) and `replace()` (which only needs to `expect` these
+ * before `h.apply` mounts a live handle — a `scene` state's paths are the scenes row's
+ * own `replace` to expect).
+ */
+const nonSceneAssets = (
+  defs: Map<string, SymbolDef>,
+  nodeTypes: NodeTypesService | undefined,
+): string[] => {
+  const urls = new Set<string>();
+  for (const def of defs.values())
+    for (const state of statesOf(def)) {
+      const node = stateNode(def, state);
+      if (!node || node.type === 'scene') continue;
+      for (const u of nodeTypes?.get(node.type)?.assets?.(node.props) ?? []) urls.add(u);
+    }
+  return [...urls];
+};
+
 export function apply(ctx: Context, config: SymbolsConfig = {}): void {
   const report = (where: string, message: string, fix?: string, severity: Severity = 'error') =>
     (ctx.reflect.get('diagnostics', false) as DiagnosticsService | undefined)?.report(
@@ -127,16 +148,12 @@ export function apply(ctx: Context, config: SymbolsConfig = {}): void {
     // hold up every other state's art. No cycle — scenes waits on nothing here.
     await Promise.resolve(scenes?.ready).catch(() => {});
     if (!alive) return;
-    const urls = new Set<string>();
+    const urls = new Set(nonSceneAssets(defs, nodeTypes));
     for (const def of defs.values())
       for (const state of statesOf(def)) {
         const node = stateNode(def, state);
-        if (!node) continue;
-        const assets =
-          node.type === 'scene'
-            ? scenes?.assetsOf(String(node.props.scene ?? ''))
-            : nodeTypes?.get(node.type)?.assets?.(node.props);
-        for (const u of assets ?? []) urls.add(u);
+        if (node?.type !== 'scene') continue;
+        for (const u of scenes?.assetsOf(String(node.props.scene ?? '')) ?? []) urls.add(u);
       }
     if (loader && urls.size > 0) {
       try {
@@ -160,6 +177,13 @@ export function apply(ctx: Context, config: SymbolsConfig = {}): void {
       current = doc;
       defs = new Map((doc?.symbols ?? []).map((d) => [d.id, d]));
       missing.clear();
+      // `h.apply` below mounts a live handle's new state right away and reads the loader's
+      // `get` synchronously; `load()` only asks the loader to load it after `await
+      // scenes.ready`. Tell the loader what to expect first so it doesn't warn "nothing
+      // loaded" in between. `scene` states are the scenes row's own `replace` to expect.
+      (ctx.reflect.get('assetLoader', false) as AssetLoader | undefined)?.expect?.(
+        nonSceneAssets(defs, deps.nodeTypes()),
+      );
       for (const h of live) h.apply(defs.get(h.id));
       void load();
     },

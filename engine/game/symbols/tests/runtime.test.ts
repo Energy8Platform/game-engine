@@ -38,12 +38,20 @@ async function boot(
   nodeTypes.register(spritesheet);
   ctx.provide('nodeTypes', nodeTypes);
   const assets: Record<string, unknown> = {};
+  /** `get`/`expect` call order, `expect`'s sorted so a Set's iteration order can't flake a test. */
+  const order: string[] = [];
   const loader = {
     load: vi.fn(async (urls: string[]) => {
       for (const u of urls) if (u.endsWith('.png')) assets[u] = png;
     }),
     unload: vi.fn(async () => {}),
-    get: (url: string) => assets[url],
+    get: (url: string) => {
+      order.push(`get ${url}`);
+      return assets[url];
+    },
+    expect: vi.fn((urls: string[]) => {
+      order.push(`expect ${[...urls].sort().join(',')}`);
+    }),
   };
   ctx.provide('assetLoader', loader);
   const report = vi.fn();
@@ -54,7 +62,7 @@ async function boot(
   await fiber;
   const symbols = ctx.get('symbols') as SymbolsService;
   const resolve = (ctx.get('assets') as { resolve(id: string): Container }).resolve;
-  return { ctx, fiber, loader, report, board, symbols, resolve };
+  return { ctx, fiber, loader, report, board, symbols, resolve, order };
 }
 
 const wrapperOf = (view: Container, state: string) =>
@@ -168,6 +176,21 @@ describe('symbols row', () => {
     expect((wrapperOf(twin, 'static')!.children[0] as Sprite).texture).toBe(png);
     expect(board.repaint).toHaveBeenCalledTimes(1);
     expect(report).toHaveBeenCalledTimes(1);
+  });
+
+  it('replace expects a live state’s new art before h.apply mounts and reads it', async () => {
+    const { symbols, resolve, order } = await boot();
+    await symbols.ready;
+    resolve('1'); // a live handle, mounted with no def yet (the fallback box)
+    order.length = 0;
+    symbols.replace({
+      version: 1,
+      symbols: [{ id: '1', static: { type: 'image', props: { src: 'assets/new.png' } } }],
+    });
+    const lastExpect = order.map((s) => s.startsWith('expect ')).lastIndexOf(true);
+    const firstGet = order.findIndex((s) => s === 'get assets/new.png');
+    expect(order).toContain('expect assets/new.png');
+    expect(firstGet).toBeGreaterThan(lastExpect);
   });
 
   it('a load failure is one diagnostic; the board still repaints', async () => {
