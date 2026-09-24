@@ -262,4 +262,67 @@ describe('createReelSystem (pluggable)', () => {
     sys.skip();
     expect(runners[0].skip).toHaveBeenCalledTimes(1);
   });
+
+  describe('onSpinStart', () => {
+    it('fires once as spin() starts, before the runner\'s run is called', async () => {
+      const { sys } = make();
+      const order: string[] = [];
+      const { style, runners } = fakeStyle('fake', () => void order.push('run'));
+      sys.motions.register(style);
+      sys.useMotion('fake', motionCfg);
+      sys.onSpinStart(() => order.push('spinStart'));
+      await sys.spin(TARGET);
+      expect(order).toEqual(['spinStart', 'run']);
+      expect(runners[0].run).toHaveBeenCalledTimes(1);
+    });
+
+    it('does not fire on cascade()', async () => {
+      const { sys } = make();
+      const fn = vi.fn();
+      sys.onSpinStart(fn);
+      const { controller } = fakeController();
+      sys.controllers.register(controller);
+      await sys.cascade([{ winningCells: [], removedCells: [], newCells: [], settledGrid: TARGET }]);
+      expect(fn).not.toHaveBeenCalled();
+    });
+
+    it("the disposer unhooks the listener", async () => {
+      const { sys } = make();
+      const { style } = fakeStyle();
+      sys.motions.register(style);
+      sys.useMotion('fake', motionCfg);
+      const fn = vi.fn();
+      const dispose = sys.onSpinStart(fn);
+      dispose();
+      await sys.spin(TARGET);
+      expect(fn).not.toHaveBeenCalled();
+    });
+
+    it('a throwing listener is swallowed and the spin still runs', async () => {
+      const { sys } = make();
+      const { style, runners } = fakeStyle();
+      sys.motions.register(style);
+      sys.useMotion('fake', motionCfg);
+      sys.onSpinStart(() => {
+        throw new Error('boom');
+      });
+      const fn = vi.fn();
+      sys.onSpinStart(fn);
+      await expect(sys.spin(TARGET)).resolves.toBeUndefined();
+      expect(fn).toHaveBeenCalledTimes(1);
+      expect(runners[0].run).toHaveBeenCalledTimes(1);
+    });
+
+    it('after destroy() nothing fires', async () => {
+      const { sys } = make();
+      const { style } = fakeStyle();
+      sys.motions.register(style);
+      sys.useMotion('fake', motionCfg);
+      const fn = vi.fn();
+      sys.onSpinStart(fn);
+      sys.destroy();
+      await sys.spin(TARGET);
+      expect(fn).not.toHaveBeenCalled();
+    });
+  });
 });

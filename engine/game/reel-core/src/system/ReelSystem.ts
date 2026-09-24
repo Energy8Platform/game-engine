@@ -62,6 +62,12 @@ export interface ReelSystem {
   readonly anticipation: { set(a: Anticipator): () => void };
   readonly controllers: Registry<BoardController>;
   planSpin(target: CellData[][], opts?: SpinRunOpts): ReelStopPlan[];
+  /**
+   * Registers a listener fired once at the very start of every `spin()` (not `cascade()`), before
+   * the motion runner's `run()` is called. A throwing listener is swallowed so one bad hook can't
+   * block the spin. Returns a disposer.
+   */
+  onSpinStart(fn: () => void): () => void;
   spin(target: CellData[][], opts?: SpinRunOpts): Promise<void>;
   /** One `tumble` round per step, through the registered `tumble` controller; throws `no reels-cascade row — a tumble step cannot play` without one. */
   cascade(steps: TumbleStep[], opts?: { turbo?: boolean }): Promise<void>;
@@ -96,6 +102,9 @@ export function createReelSystem(opts: CreateReelSystemOptions): ReelSystem {
   const { resolve, log, report } = opts;
   let board: CellData[][] = opts.board ?? emptyBoard(grid);
   let destroyed = false;
+
+  // ── spin-start hook — fired once as spin() begins, ahead of the motion runner ────────────────
+  const spinStartListeners = new Set<() => void>();
 
   // ── the grid + the overlay layer over it — built once (no rebuild path) ─────
   const view = new Container();
@@ -294,8 +303,22 @@ export function createReelSystem(opts: CreateReelSystemOptions): ReelSystem {
         : [];
     },
 
+    onSpinStart(fn) {
+      spinStartListeners.add(fn);
+      return () => {
+        spinStartListeners.delete(fn);
+      };
+    },
+
     async spin(target, runOpts) {
       if (destroyed) return;
+      for (const fn of spinStartListeners) {
+        try {
+          fn();
+        } catch {
+          // one bad hook must not block the spin
+        }
+      }
       const runner = motionRunner();
       if (!runner) {
         setBoard(target);

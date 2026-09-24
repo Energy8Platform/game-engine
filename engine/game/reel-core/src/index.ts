@@ -8,6 +8,19 @@ export type { ReelGridConfig } from './grid/ReelGrid';
 export { resolveGeometry, cellPositionOf } from './grid/geometry';
 export { EASING_BY_NAME, easingByName } from './anim/easing-map';
 
+// ── fx: animation primitives for feature presentations ─────────────────────
+export {
+  cellCenter,
+  rowStepOf,
+  colStepOf,
+  glowRing,
+  pulseCell,
+  floatLabel,
+  morphSymbol,
+  dropCell,
+  moveCell,
+} from './fx';
+
 // ── configurable reel system ────────────────────────────────────────────────
 export {
   DEFAULT_REEL_CONFIG,
