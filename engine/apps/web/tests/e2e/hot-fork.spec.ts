@@ -98,7 +98,7 @@ test('game rows: a hot row has a form, a cold row says so, a schemaless row has 
   try {
     await openComposition(page, host);
     const reels = page.getByTestId('row-reels1');
-    await expect(reels.locator('#field-reels1-config-grid-cols')).toHaveValue('5', {
+    await expect(reels.locator('#field-reels1-grid-cols')).toHaveValue('5', {
       timeout: 20_000,
     });
     await expect(page.getByTestId('row-reels1-cold')).toHaveCount(0);
@@ -147,7 +147,7 @@ test('a hot edit reaches the live board and keeps the session: same iframe, same
       el.setAttribute('data-e8-marker', 'kept');
     });
 
-    await commit(page, 'field-reels1-config-grid-cols', '4');
+    await commit(page, 'field-reels1-grid-cols', '4');
 
     // The edit lands asynchronously (PUT → patch write → frame → ide-bridge
     // → `gameRows.update` → a new board). Wait on the board itself.

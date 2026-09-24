@@ -152,10 +152,9 @@ const PATCH_WITH_MISSPELLED_REELS = `rows:
   - id: reels1
     name: '@energy8engine/reeels'
     config:
-      config:
-        grid:
-          cols: 5
-          rows: 3
+      grid:
+        cols: 5
+        rows: 3
   - id: mechanics1
     config:
       stages:
@@ -177,10 +176,9 @@ const PATCH_WITH_NOTHING_BOUND = `rows:
         height: 480
   - id: reels1
     config:
-      config:
-        grid:
-          cols: 5
-          rows: 3
+      grid:
+        cols: 5
+        rows: 3
   - id: mechanics1
     config:
       stages: {}
@@ -209,10 +207,9 @@ const PATCH_WITHOUT_MECHANICS = `rows:
         height: 480
   - id: reels1
     config:
-      config:
-        grid:
-          cols: 5
-          rows: 3
+      grid:
+        cols: 5
+        rows: 3
   - id: mechanics1
     remove: true
 `;
