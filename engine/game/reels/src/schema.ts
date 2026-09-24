@@ -6,7 +6,9 @@
  * why every field of `@energy8engine/reel-core`'s `GridConfig`/`WinConfig`
  * is listed by hand and every default below is a literal —
  * `tests/schema.test.ts` checks them against `DEFAULT_REEL_CONFIG`, so they
- * cannot drift.
+ * cannot drift. Not even a TYPE import from reel-core: schemastery's
+ * `Schema.object<X>` infers `X` rather than constraining it, so a type would
+ * not check these literals — that equality test is the guard.
  *
  * The row's config is `ReelsRowConfig` (see `./runtime`), and it is flat:
  * `grid` (`GridConfig`), `win` (`WinConfig`) and `board`. The reels' motion,
@@ -35,7 +37,13 @@ export const GridSchema = Schema.object({
   cellWidth: Schema.number().description('Rectangular cells, uniform across reels. Override `cellSize` when set.'),
   cellHeight: Schema.number().description('Rectangular cells, uniform across reels. Override `cellSize` when set.'),
   cellSizePerReel: Schema.array(
-    Schema.union([Schema.number(), Schema.object({ width: Schema.number(), height: Schema.number() })]),
+    Schema.union([
+      Schema.number(),
+      Schema.object({
+        width: Schema.number().description('cell width in px'),
+        height: Schema.number().description('cell height in px'),
+      }),
+    ]),
   ).description('Per-strip cell size (square scalar or {width,height}). Overrides the above for that reel.'),
   gap: Schema.number().default(6).description('Uniform gap (shorthand for both axes).'),
   colGap: PerAxisGap.description(
@@ -47,19 +55,19 @@ export const GridSchema = Schema.object({
     .description('Win-evaluation model. Purely presentational here (affects geometry + highlight), the math lives in Lua.'),
   minRows: Schema.natural().default(2).description('For Megaways: clamp per-reel rows to [minRows, maxRows].'),
   maxRows: Schema.natural().default(7).description('For Megaways: clamp per-reel rows to [minRows, maxRows].'),
-  topReel: Schema.union([Schema.object({ size: Schema.natural() }), Schema.const(null)])
+  topReel: Schema.union([Schema.object({ size: Schema.natural().description('symbols on the top reel') }), Schema.const(null)])
     .default(null)
     .description('Megaways top horizontal reel (renders above the grid, adds to ways).'),
   mask: Schema.boolean().default(true).description('Clip the symbols to the reel window.'),
   frameStyle: Schema.object({
-    radius: Schema.number(),
-    idle: FrameState,
-    winning: FrameState,
-    removed: FrameState,
-    fresh: FrameState,
+    radius: Schema.number().description('corner radius of the cell frame, px'),
+    idle: FrameState.description('a cell at rest'),
+    winning: FrameState.description('a cell in a win'),
+    removed: FrameState.description('a cell removed by a tumble'),
+    fresh: FrameState.description('a cell just dropped in'),
   }).description('Cell frame look per state; an absent field keeps the built-in one.'),
   decoration: Schema.object({
-    padding: Schema.number().default(0),
+    padding: Schema.number().default(0).description('px between the reel window and its decoration'),
   }).description('Padding around the reel window.'),
 });
 
@@ -67,10 +75,12 @@ export const WinSchema = Schema.object({
   highlightScale: Schema.number().default(1.12).description('Scale a winning symbol pops to.'),
   glow: Schema.boolean().default(true).description('Glow around a winning symbol.'),
   frameShake: Schema.object({
-    enabled: Schema.boolean().default(false),
-    amp: Schema.number().default(3),
-    ms: Schema.number().default(180),
-    onlyOnSymbols: Schema.union([Schema.array(Schema.string()), Schema.const(null)]).default(null),
+    enabled: Schema.boolean().default(false).description('shake the frame on landing/win'),
+    amp: Schema.number().default(3).description('shake amplitude, px'),
+    ms: Schema.number().default(180).description('shake duration, ms'),
+    onlyOnSymbols: Schema.union([Schema.array(Schema.string()), Schema.const(null)])
+      .default(null)
+      .description('shake only when one of these symbols lands; null = any'),
   }).description('Frame shake on landing/win.'),
 });
 

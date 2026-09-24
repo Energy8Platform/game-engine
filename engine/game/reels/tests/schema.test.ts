@@ -29,6 +29,22 @@ describe('@energy8engine/reels/schema', () => {
     expect(out.grid.cols).toBe(DEFAULT_REEL_CONFIG.grid.cols);
   });
 
+  // The IDE draws its form from these: a field with no description is a blank label.
+  it('every field, at any depth, has a non-empty description', () => {
+    const missing: string[] = [];
+    const walk = (node: Schema, path: string) => {
+      for (const [key, child] of Object.entries(node.dict ?? {})) {
+        const at = `${path}.${key}`;
+        if (!child.meta.description) missing.push(at);
+        walk(child, at);
+      }
+      for (const member of node.list ?? []) walk(member, path);
+      if (node.inner) walk(node.inner, `${path}[]`);
+    };
+    walk(Config, '$');
+    expect(missing).toEqual([]);
+  });
+
   it('rejects a wrong type', () => {
     expect(() => Config({ grid: { cols: 'five' } } as never)).toThrow();
     expect(() => Config({ grid: { evaluation: 'diagonal' } } as never)).toThrow();
