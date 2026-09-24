@@ -436,3 +436,45 @@ test("the third mechanic is genuinely the project's, not the engine's", () => {
   const plugin = join(FIXTURE, 'plugins', 'reel-step', 'src', 'mechanic.ts');
   expect(codeMentions(plugin, 'reel-step').length).toBeGreaterThan(0);
 });
+
+/**
+ * Slice 35's F9, read off the screen: a `refill` that changes ONE cell
+ * rebuilds only that cell's view — every other cell keeps the very same
+ * view object. `__e8.viewIds()` numbers views by identity, so "kept its
+ * view" is an equal number across the two reads; a `setData` that always
+ * destroys and re-resolves makes every number change, and this fails.
+ */
+test('a refill that changes one cell rebuilds only that cell’s view', async ({ page }) => {
+  test.setTimeout(60_000);
+  const dir = projectCopy();
+  const host = await startDevHost(dir);
+  try {
+    await page.goto('/');
+    const frame = await gameFrame(page);
+    await expect
+      .poll(() => frame.locator('#status').textContent(), { timeout: 20_000 })
+      .toBe('ready');
+    // A seated board: every cell holds a symbol, so every cell has a view.
+    expect(await frame.evaluate(() => (window as any).__e8.spin())).toEqual({ out: 'next' });
+    const board = (await frame.evaluate(() => (window as any).__e8.symbols())) as Board;
+    const before = (await frame.evaluate(() => (window as any).__e8.viewIds())) as number[][];
+    expect(before.flat().every((id) => typeof id === 'number')).toBe(true);
+
+    // A real symbol id from this board, just not the one at (0, 0).
+    const other = board.flat().find((s) => s !== board[0][0]);
+    if (!other)
+      throw new Error('the spun board holds one symbol only — nothing to change (0, 0) to');
+    await frame.evaluate((s) => (window as any).__e8.refillCell(0, 0, s), other);
+
+    const now = (await frame.evaluate(() => (window as any).__e8.symbols())) as Board;
+    expect(now[0][0]).toBe(other);
+    const after = (await frame.evaluate(() => (window as any).__e8.viewIds())) as number[][];
+    const changed = before.flatMap((col, c) =>
+      col.flatMap((id, r) => (after[c][r] === id ? [] : [`${c},${r}`])),
+    );
+    expect(changed).toEqual(['0,0']);
+  } finally {
+    await host.stop();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});

@@ -638,6 +638,10 @@ ctx.inject(['flow'], (c) =>
   ),
 );
 
+/** `__e8.viewIds()`'s numbering: one id per view object, for the page's lifetime. */
+const viewIdOf = new WeakMap<object, number>();
+let nextViewId = 0;
+
 /**
  * Test-only instrumentation for the SDD plan's Task 12, step 5. Playwright
  * has no other honest way to observe what the game actually ran than
@@ -814,11 +818,45 @@ ctx.inject(['flow'], (c) =>
    * next spin draws on it.
    */
   symbols(): (string | null)[][] | null {
+    return liveSymbols();
+  },
+  /**
+   * A stable number per cell VIEW object (`WeakMap` identity): equal numbers
+   * across two reads mean the cell kept its view — slice 35's F9, read off the
+   * screen. `null` for an empty cell or with no board.
+   */
+  viewIds(): (number | null)[][] | null {
     const grid = liveGrid();
     if (!grid) return null;
     return Array.from({ length: grid.cols }, (_, col) =>
-      Array.from({ length: grid.rows }, (_, row) => grid.getCell(col, row)?.data.symbol ?? null),
+      Array.from({ length: grid.rows }, (_, row) => {
+        const view = grid.getCell(col, row)?.view;
+        if (!view) return null;
+        let id = viewIdOf.get(view);
+        if (id === undefined) viewIdOf.set(view, (id = ++nextViewId));
+        return id;
+      }),
     );
+  },
+  /**
+   * Plays ONE `refill` step: the live board with `(col, row)` changed to
+   * `symbol`, through the composed play service — the same
+   * `play.execute(plan, board)` the flow's `present` node makes, both read
+   * per use off `ctx.reflect` like every other hook here. Throws with no
+   * play service, no board, or a board with an empty cell (a refill board
+   * has none); resolves with whatever diagnostics `execute` reported
+   * swallowed, so a failing step is still visible — as an error.
+   */
+  async refillCell(col: number, row: number, symbol: string): Promise<void> {
+    const play = ctx.reflect.get('play', false) as
+      | { execute(plan: unknown[], board: unknown): Promise<{ message: string }[]> }
+      | undefined;
+    const board = liveSymbols();
+    if (!play || !board || board.some((c) => c.includes(null)))
+      throw new Error('refillCell: no play service, or no seated board');
+    board[col][row] = symbol;
+    const problems = await play.execute([{ kind: 'refill', board }], currentBoard());
+    if (problems.length) throw new Error(problems.map((d) => d.message).join('; '));
   },
   /**
    * What the cell at `(col, row)` actually drew — the constructor name of
@@ -1017,6 +1055,15 @@ interface ViewNode {
   readonly text?: unknown;
   /** A `Sprite` has one; its `label` is the URL it was loaded from — what `cellTexture` reads. */
   readonly texture?: { readonly label?: string };
+}
+
+/** `__e8.symbols()`'s read, shared with `refillCell` (which builds its board from it). */
+function liveSymbols(): (string | null)[][] | null {
+  const grid = liveGrid();
+  if (!grid) return null;
+  return Array.from({ length: grid.cols }, (_, col) =>
+    Array.from({ length: grid.rows }, (_, row) => grid.getCell(col, row)?.data.symbol ?? null),
+  );
 }
 
 /**
