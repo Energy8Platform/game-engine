@@ -125,7 +125,7 @@ provides `mount`.
 
 - `reels1` — the reel board (`@energy8engine/reels`, on the engine's own
   `@energy8engine/reel-core`). Its config is flat: `grid` (here 5×3), `win`
-  (the win highlight) and `board` (the board's own presentation), each
+  (the win highlight) and `board` (the INITIAL board, `board[col][row]`), each
   optional and merged over the defaults. It provides `board` (what the play
   loop drives) and `reels`, the reel system the next three rows register
   into. Those three are `e8-base` rows this patch does not configure, so

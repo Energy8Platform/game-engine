@@ -1,17 +1,18 @@
-# The baseline row set every slot game composes from. Six of these eight
-# packages used to be hardcoded into `createGame` (in
+# The baseline row set every slot game composes from. The first handful of
+# these packages used to be hardcoded into `createGame` (in
 # `@energy8engine/game-runtime`) as static imports; they are rows now, and
-# this file is where they live. The other two were never hardcoded
-# anywhere — `spinlog1` is the "adding a seventh is an edit to a bundle"
-# case, done; `diagnostics1` below is the same move again, for the shared
-# service `createGame` now fills instead of only its own local array (see
-# task-2-3-report.md).
+# this file is where they live. The rest were never hardcoded anywhere —
+# each one (`spinlog1`, `diagnostics1`, the session/scene/node rows, the
+# reel rows `motion1`/`anticipation1`/`cascade1`, ...) is the "adding a row
+# is an edit to a bundle" case, done (see task-2-3-report.md for
+# `diagnostics1`, the shared service `createGame` now fills instead of only
+# its own local array).
 # `@energy8engine/project`'s `resolveComposition` reads it (see
 # `engine/ide/host/src/plugins/project.ts`, which resolves this bundle for
 # any project whose `e8.profile.yml` lists `e8-base`), the host serves the
 # result at `GET /api/composition`, and the browser's `createGame` applies
 # each row's runtime half in this order. Nothing in the engine names these
-# packages any more — replacing one, or adding a ninth, is an edit to a
+# packages any more — replacing one, or adding another, is an edit to a
 # bundle or a patch.
 #
 # Rows carry no `config` here on purpose — this is the TEMPLATE, not any
