@@ -1,8 +1,8 @@
 /**
  * `BoardApi` (from `@energy8engine/play-loop`) implemented over
  * `createReelSystem` from `@energy8engine/reel-core` — the engine's own
- * pluggable reel system (slice 35), forked from the legacy
- * `@energy8platform/game-engine/slot` facade this board used to wrap. This
+ * pluggable reel system (slice 35), forked from the legacy game-engine
+ * `slot` module's facade this board used to wrap. This
  * is the `board` half of the seam Task 7 declared: play-loop's
  * `executePlan` walks a `PresentationPlan` and calls one method per step;
  * this file is what actually moves pixels (or, in a test, a fake standing

@@ -40,7 +40,7 @@ import {
 } from '@energy8engine/contracts';
 import type { DiagnosticsService } from '@energy8engine/diagnostics';
 import type { AssetLoader, NodeTypesService, ScenesService } from '@energy8engine/scenes';
-import type { SymbolResolver } from '@energy8platform/game-engine/slot';
+import type { SymbolResolver } from '@energy8engine/reel-core';
 import { createSymbolHandle, type SymbolHandle, type ViewDeps } from './view';
 
 declare module 'cordis' {

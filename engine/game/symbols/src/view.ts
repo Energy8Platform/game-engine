@@ -1,8 +1,8 @@
 /**
- * One symbol's `SymbolView` — the legacy contract a reel board's
- * `SymbolCell` drives (`@energy8platform/game-engine/slot`): a `Container`
- * centred on `(0, 0)`, `resize`d to the cell, `playWin`'d on a win,
- * destroyed on every `setData`. Built here out of `symbols.yml`'s states
+ * One symbol's `SymbolView` — the contract a reel board's `SymbolCell`
+ * drives (`@energy8engine/reel-core`): a `Container` centred on `(0, 0)`,
+ * `resize`d to the cell, `playWin`'d on a win, destroyed when a `setData`
+ * changes the cell's symbol (the same symbol keeps its view). Built here out of `symbols.yml`'s states
  * — `static`/`idle`/`win` and every name under `states` — through
  * `@energy8engine/scenes`' node types, one *wrapper* per state: a
  * `Container` holding the type's view, scaled and pivoted so the view's
@@ -61,7 +61,7 @@ import {
   type NodeTypesService,
   type ScenesService,
 } from '@energy8engine/scenes';
-import type { SymbolView } from '@energy8platform/game-engine/slot';
+import type { SymbolView } from '@energy8engine/reel-core';
 import { fallbackBox } from './fallback';
 
 export interface ViewDeps {
