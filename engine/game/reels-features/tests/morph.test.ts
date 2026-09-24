@@ -1,96 +1,29 @@
 /**
- * The four morph kinds — `expandWild`, `dropWilds`, `reveal`, `transform` — against a real reel
- * system (`createReelSystem`: a real `ReelGrid`, `resolve` → an empty `Container`) and a fake board
- * whose `refill` records the board it is handed and seats it, the way the reels board's does.
- *
- * `Tween` runs on `Ticker.shared`, which never ticks by itself in Node: the ticker is pumped by
- * hand, as reel-core's `tests/fx.test.ts` does, and a run's duration is the ticker time it took.
+ * The four morph kinds — `expandWild`, `dropWilds`, `reveal`, `transform` — on `./harness`'s real
+ * reel system and recording board, the ticker pumped by hand.
  */
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { Container, Ticker } from 'pixi.js';
+import { describe, expect, it } from 'vitest';
 import { Tween } from '@energy8platform/game-engine/animation';
-import { createReelSystem, type CellData, type ReelSystem } from '@energy8engine/reel-core';
-import {
-  cellData,
-  type Board,
-  type PresentationStep,
-  type StepOpts,
-} from '@energy8engine/contracts';
+import type { CellData, ReelSystem } from '@energy8engine/reel-core';
 import type { StepHandler } from '@energy8engine/play-loop';
-import type { FeatureDeps } from '../src/shared';
 import { createExpandWildHandler } from '../src/handlers/expandWild';
 import { createDropWildsHandler } from '../src/handlers/dropWilds';
 import { createRevealHandler } from '../src/handlers/reveal';
 import { createTransformHandler } from '../src/handlers/transform';
+import {
+  boardWith,
+  depsOf,
+  expectCellsHome,
+  pump,
+  run,
+  setup,
+  startBoard,
+  tick,
+  useManualTicker,
+  yieldOnce,
+} from './harness';
 
-const keepTickerAlive = (): void => {};
-const clock = { t: 0 };
-beforeAll(() => {
-  (globalThis as any).requestAnimationFrame ??= () => 0;
-  (globalThis as any).cancelAnimationFrame ??= () => {};
-  Ticker.shared.add(keepTickerAlive);
-  Ticker.shared.update(clock.t);
-});
-afterAll(() => {
-  Ticker.shared.remove(keepTickerAlive);
-});
-
-const FRAME = 4;
-const yieldOnce = () => new Promise<void>((r) => setImmediate(r));
-
-/** Advance the ticker by `ms`, yielding after each frame so queued awaits run. */
-async function tick(ms: number): Promise<void> {
-  for (let t = 0; t < ms; t += FRAME) {
-    clock.t += FRAME;
-    Ticker.shared.update(clock.t);
-    await yieldOnce();
-  }
-}
-
-/** Tick until `work` settles; answers the ticker time it took. */
-async function pump(work: Promise<unknown>, maxMs = 10_000): Promise<number> {
-  let settled = false;
-  const done = work.finally(() => (settled = true));
-  const start = clock.t;
-  while (!settled && clock.t - start < maxMs) await tick(FRAME);
-  await done;
-  return clock.t - start;
-}
-
-const START = [
-  ['A', 'B', 'C'],
-  ['D', 'E', 'F'],
-  ['G', 'H', 'I'],
-];
-const startBoard = (): CellData[][] => START.map((col) => col.map((symbol) => ({ symbol })));
-
-/** The start board with `over` written on top — `over` keyed `col,row`. */
-function boardWith(over: Record<string, CellData>): CellData[][] {
-  return startBoard().map((col, c) => col.map((cell, r) => over[`${c},${r}`] ?? cell));
-}
-
-function setup() {
-  const reels = createReelSystem({
-    resolve: () => new Container() as never,
-    grid: { cols: 3, rows: 3, cellSize: 50, gap: 0 },
-    board: startBoard(),
-  });
-  const refills: Board[] = [];
-  const board = {
-    async refill(step: { kind: 'refill'; board: Board }) {
-      refills.push(step.board);
-      reels.setBoard(step.board.map((col) => col.map((cell) => cellData(cell) as CellData)));
-    },
-  };
-  return { reels, board, refills };
-}
-
-function depsOf<C>(reels: ReelSystem, config: C): FeatureDeps<C> {
-  return { reels: () => reels, config: () => config, layer: () => undefined };
-}
-
-const run = (handler: StepHandler, step: object, board: unknown, opts?: StepOpts) =>
-  handler.run(step as unknown as PresentationStep, board, opts);
+useManualTicker();
 
 interface Case {
   kind: string;
@@ -154,23 +87,6 @@ const CASES: Case[] = [
     after: boardWith({ '0,2': { symbol: 'H1' }, '2,0': { symbol: 'H1' } }),
   },
 ];
-
-/** Every cell at its own centre, at scale 1, fully opaque. */
-function expectCellsHome(reels: ReelSystem): void {
-  const { grid } = reels;
-  for (let col = 0; col < grid.cols; col++)
-    for (let row = 0; row < grid.rowsOf(col); row++) {
-      const cell = grid.getCell(col, row);
-      const home = grid.cellPosition(col, row);
-      expect([cell.position.x, cell.position.y, cell.scale.x, cell.scale.y, cell.alpha]).toEqual([
-        home.x,
-        home.y,
-        1,
-        1,
-        1,
-      ]);
-    }
-}
 
 describe.each(CASES)('$kind', ({ kind, create, step, after }) => {
   it('is the step kind', () => {

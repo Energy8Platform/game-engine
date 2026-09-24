@@ -3,16 +3,18 @@
  * decided (which reel expands, which cells reveal to what); the handler checks it against the live
  * grid, animates it, and re-seats the board where the data says it ends. It never draws a number.
  *
- *  - `checkCells` / `need` — the data check and the kit/board lookup. Both THROW: `executePlan`
- *    turns a handler's throw into the ordinary `step "<kind>" failed: …` diagnostic, and since both
- *    run before anything moves, the board is untouched.
+ *  - `checkCells` / `need` / `needLayer` — the data check and the kit/board/layer lookup. They
+ *    THROW: `executePlan` turns a handler's throw into the ordinary `step "<kind>" failed: …`
+ *    diagnostic, and since they run before anything moves, the board is untouched.
  *  - `reseat` — the end of every handler: the live board with the changed cells, through the reels
  *    board's `refill` (so `ctx.board`, `__e8.symbols()` and the symbols row's `bind` all see it).
  *  - `createPace` — one run's tempo: turbo halves every duration (the `tumble` rule), a skip zeroes
  *    what is still to start.
  *  - `createFeatureHandler` — the one handler shape the kinds share (see its doc for skip).
  */
+import type { Container } from 'pixi.js';
 import {
+  floatLabel,
   glowRing,
   type CellData,
   type ReelGrid,
@@ -126,14 +128,33 @@ export function need(
   return { kit: reels.kit(), board, reels };
 }
 
+/** The row's overlay layer (`sticky`, `giant` draw on it), or a throw. */
+export function needLayer(kind: string, deps: FeatureDeps<unknown>): OverlayLayer {
+  const layer = deps.layer();
+  if (!layer) {
+    throw new Error(
+      `the "${kind}" step needs the row's overlay layer: none was made for this reel system ` +
+        '(the "features1" row makes one per reel system)',
+    );
+  }
+  return layer;
+}
+
 /** What one run's animation works with. */
 export interface FeatureRun {
   readonly kit: ReelKit;
   readonly pace: Pace;
   /** The grid's cell, remembered for the run: a skip kills its tweens, the run's end puts it home (its centre, scale 1, alpha 1). */
   cell(col: number, row: number): SymbolCell;
-  /** A transient `glowRing` on `kit.fx`, gone when the run ends. */
-  ring(col: number, row: number, color: number): void;
+  /** A transient `glowRing` on `kit.fx`, gone when the run ends — or sooner, by the disposer it answers. */
+  ring(col: number, row: number, color: number): () => void;
+  /** A transient `floatLabel` on `kit.fx`: a skip kills it, the run's end removes it. */
+  label(x: number, y: number, text: string, color: number, ms: number): Promise<void>;
+  /**
+   * Any other view the run tweens (a giant): a skip kills its tweens, the run's end kills them
+   * again and calls `end` — the view's final state.
+   */
+  track<T extends Container>(view: T, end: () => void): T;
 }
 
 /** A kind, as `createFeatureHandler` takes it. */
@@ -154,8 +175,8 @@ export interface Feature<S, C> {
  * at once — it does not wait for the animation, which may be in a `Tween.delay` (a stagger, a
  * hold) no kill reaches; that tail sees `pace.skipped` when it wakes and starts nothing. A killed
  * fx primitive (`morphSymbol`, `pulseCell`) starts its next tween one job later — ahead of `run`'s
- * own continuation — so the run's end kills again, then puts every touched cell home and disposes
- * its rings before re-seating the board.
+ * own continuation — so the run's end kills again, then puts every touched cell home, removes its
+ * labels, ends every tracked view and disposes its rings before re-seating the board.
  */
 export function createFeatureHandler<S, C>(
   kind: string,
@@ -176,13 +197,14 @@ export function createFeatureHandler<S, C>(
       const changes = feature.changes(step, kit.grid);
 
       const pace = createPace(opts);
-      const cells = new Map<SymbolCell, Cell>();
-      const rings: (() => void)[] = [];
+      /** Everything the run tweens — cells, labels, tracked views — with how each one ends. */
+      const tracked = new Map<Container, () => void>();
+      const rings = new Set<() => void>();
       let release!: () => void;
       const skipped = new Promise<void>((r) => (release = r));
       // kills first: the killed chains resume (and start their next tween) before `run` does
       const skip = () => {
-        cells.forEach((_, cell) => Tween.killTweensOf(cell));
+        tracked.forEach((_, view) => Tween.killTweensOf(view));
         pace.skip();
         release();
       };
@@ -193,11 +215,39 @@ export function createFeatureHandler<S, C>(
         pace,
         cell(col, row) {
           const cell = kit.grid.getCell(col, row);
-          cells.set(cell, { col, row });
+          tracked.set(cell, () => {
+            if (cell.destroyed) return;
+            const home = kit.grid.cellPosition(col, row);
+            cell.position.set(home.x, home.y);
+            cell.scale.set(1);
+            cell.alpha = 1;
+          });
           return cell;
         },
         ring(col, row, color) {
-          rings.push(glowRing(kit.fx, kit.grid, col, row, color));
+          const dispose = glowRing(kit.fx, kit.grid, col, row, color);
+          const off = () => {
+            if (rings.delete(off)) dispose();
+          };
+          rings.add(off);
+          return off;
+        },
+        label(x, y, text, color, ms) {
+          const { fx } = kit;
+          const count = fx.children.length;
+          const done = floatLabel(fx, x, y, text, color, ms);
+          // floatLabel adds its Text before its first await: the child just added
+          if (fx.children.length > count) {
+            const label = fx.children[fx.children.length - 1];
+            tracked.set(label, () => {
+              if (!label.destroyed) label.destroy();
+            });
+          }
+          return done;
+        },
+        track(view, end) {
+          tracked.set(view, end);
+          return view;
         },
       };
 
@@ -205,14 +255,10 @@ export function createFeatureHandler<S, C>(
         await Promise.race([feature.animate(step, changes, run, deps.config()), skipped]);
       } finally {
         live.delete(skip);
-        rings.forEach((dispose) => dispose());
-        cells.forEach(({ col, row }, cell) => {
-          Tween.killTweensOf(cell);
-          if (cell.destroyed) return;
-          const home = kit.grid.cellPosition(col, row);
-          cell.position.set(home.x, home.y);
-          cell.scale.set(1);
-          cell.alpha = 1;
+        rings.forEach((off) => off());
+        tracked.forEach((end, view) => {
+          Tween.killTweensOf(view);
+          end();
         });
       }
       // no cell changed (a kind that only draws on the layer) — nothing to re-seat
