@@ -1,0 +1,14 @@
+// Forked from packages/game-engine/src/slot/grid/SymbolView.ts (slice 35).
+import type { Container } from 'pixi.js';
+
+/** A symbol's visual. Any Container; optionally implements the lifecycle the cell drives. */
+export interface SymbolView extends Container {
+  playIdle?(): void;
+  playWin?(): Promise<void>;
+  showStatic?(): void;
+  /** Resize the symbol to the given cell size in pixels (square scalar or rectangular). */
+  resize?(size: number | { width: number; height: number }): void;
+}
+
+/** Game-supplied factory: build the view for a symbol id (sprite / layered sprites / Spine / composite). */
+export type SymbolResolver = (symbolId: string) => SymbolView | null;
