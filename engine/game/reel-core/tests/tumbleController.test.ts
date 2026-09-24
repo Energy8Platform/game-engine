@@ -9,6 +9,7 @@ import { describe, it, expect, vi, beforeAll, afterAll } from 'vitest';
 import { Container, Ticker } from 'pixi.js';
 import { DEFAULT_REEL_CONFIG, mergeReelConfig } from '../src/index';
 import { TumbleController, type TumbleStep } from '../src/cascade/TumbleController';
+import { ReelStepController } from '../src/cascade/ReelStepController';
 import { ReelGrid } from '../src/grid/ReelGrid';
 import type { SymbolResolver } from '../src/grid/SymbolView';
 
@@ -110,11 +111,46 @@ describe('TumbleController.skip — a skipped tumble leaves no residue', () => {
         expect(cell.alpha).toBe(1);
         expect(cell.scale.x).toBe(1);
         expect(cell.scale.y).toBe(1);
+        // the skip landed inside the highlight/wait window, after `setState({ winning })` —
+        // no cell may keep that frame (nor a `fresh` one) once the step has settled
+        expect(cell.frameStyleKey).toBe('idle');
       }
     }
     expect(grid.getCell(0, 0).data.symbol).toBe('x0');
     expect(grid.getCell(1, 0).data.symbol).toBe('y0');
     expect(grid.getCell(0, 1).data.symbol).toBe('a1');
     expect(grid.getCell(2, 2).data.symbol).toBe('c2');
+  });
+});
+
+// The same frame-residue check for `ReelStepController.skip` (it shares the ticker helpers
+// above): a skip inside the highlight tween, after the winners got `setState({ winning })` —
+// the killed highlight returns early (`_dead`), before `_payWins`' own `setState({})`.
+describe('ReelStepController.skip — a skipped reel step leaves no frame residue', () => {
+  it('snaps to the settled board with every cell back to the idle frame', async () => {
+    const grid = new ReelGrid({ cols: 2, rows: 3, cellSize: 50, gap: 0, resolve });
+    grid.setGrid([
+      [{ symbol: 'a0' }, { symbol: 'a1' }, { symbol: 'a2' }],
+      [{ symbol: 'b0' }, { symbol: 'b1' }, { symbol: 'b2' }],
+    ]);
+    const cfg = mergeReelConfig(DEFAULT_REEL_CONFIG.cascade, {
+      enabled: true,
+      timings: { reveal: 40, highlight: 40, remove: 40, drop: 40, refill: 40, wait: 60 },
+    });
+    const ctrl = new ReelStepController(grid, resolve, cfg);
+    const settledGrid = [
+      [{ symbol: 'x0' }, { symbol: 'a0' }, { symbol: 'a1' }],
+      [{ symbol: 'b0' }, { symbol: 'b1' }, { symbol: 'b2' }],
+    ];
+
+    const done = ctrl.step({ winningCells: [{ col: 0, row: 2 }], shifts: [1, 0], settledGrid });
+    await tick(20); // mid-highlight
+    expect(grid.getCell(0, 2).frameStyleKey).toBe('winning');
+    ctrl.skip();
+    await pump(done);
+
+    for (let c = 0; c < 2; c++)
+      for (let r = 0; r < 3; r++) expect(grid.getCell(c, r).frameStyleKey).toBe('idle');
+    expect(grid.getCell(0, 0).data.symbol).toBe('x0');
   });
 });

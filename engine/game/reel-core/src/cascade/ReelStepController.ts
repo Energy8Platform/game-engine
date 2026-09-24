@@ -261,7 +261,13 @@ export class ReelStepController {
   skip(): void {
     this._killed = true;
     for (let c = 0; c < this._grid.cols; c++)
-      for (let r = 0; r < this._grid.rowsOf(c); r++) Tween.killTweensOf(this._grid.getCell(c, r));
+      for (let r = 0; r < this._grid.rowsOf(c); r++) {
+        const cell = this._grid.getCell(c, r);
+        Tween.killTweensOf(cell);
+        // slice 35: a skip inside the highlight/wait window must not leave a `winning` (or,
+        // after a refill, `fresh`) frame behind — the step's own reset never runs.
+        cell.setState({});
+      }
     this._cleanupTemp();
     if (this._pending && !this._grid.destroyed) this._grid.setGrid(this._pending);
     this._pending = null;

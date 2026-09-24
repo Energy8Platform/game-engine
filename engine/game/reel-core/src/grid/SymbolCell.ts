@@ -90,7 +90,9 @@ export class SymbolCell extends Container {
     } else if (!this._view || previous !== data.symbol || opts?.remount) {
       // F9 (slice 35): only a CHANGED symbol re-resolves — the same id keeps its view, so a
       // full-board `setGrid` (a refill, a repaint) rebuilds only the cells that changed —
-      // unless the caller asks for a `remount`.
+      // unless the caller asks for a `remount`. A side effect: a `playState` still in flight on
+      // a kept view survives a same-symbol `setData` (a refill no longer ends it); `skip` still
+      // collapses it.
       if (this._view) {
         this._view.destroy();
         this._view = null;
