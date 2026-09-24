@@ -152,7 +152,9 @@ export interface PlayService {
    * with no `execute` having started clears a kept skip — a request that
    * failed does not hurry the next round. `execute` starting releases every
    * arm, so a skip after a plan began is the ordinary mid-run skip and one
-   * after it ended is dropped as before. Never throws.
+   * after it ended is dropped as before. A new `arm()` drops a skip kept
+   * before it — that skip was not for the round this request fetches. Never
+   * throws.
    */
   arm(): () => void;
   /**
@@ -374,6 +376,10 @@ export function apply(ctx: Context, config: { skipEvents?: string[]; pendingMs?:
     steps,
     skip,
     arm() {
+      // A skip kept before a NEW request began is not for the round that
+      // request fetches — drop it rather than let a leaked arm (one no
+      // execute ever spends) carry a stray tap into the round this arm is for.
+      pending = false;
       const token = {};
       arms.add(token);
       return () => {

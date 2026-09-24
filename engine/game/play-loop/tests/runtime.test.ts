@@ -890,4 +890,16 @@ describe('play-loop runtime half: arm — a skip before the plan', () => {
     expect(b.skip).not.toHaveBeenCalled();
     await ctx.fiber.dispose();
   });
+
+  it('a new arm drops a skip kept before it — a leaked arm does not carry a stray tap into the next round', async () => {
+    const ctx = new Context();
+    await ctx.plugin(runtime);
+    ctx.play.arm(); // leaked: no execute ever spends it (a round whose plan never ran)
+    ctx.play.skip(); // a tap closing an error card, say
+    ctx.play.arm(); // the next round's request
+    const b = board();
+    await ctx.play.execute(plan, b.api);
+    expect(b.skip).not.toHaveBeenCalled();
+    await ctx.fiber.dispose();
+  });
 });
