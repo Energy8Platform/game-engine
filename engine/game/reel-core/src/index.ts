@@ -41,3 +41,13 @@ export type {
   CascadeConfig,
   WinConfig,
 } from './config/ReelSystemConfig';
+
+// ── motion / cascade controllers ────────────────────────────────────────────
+export { SpinEngine } from './motion/SpinEngine';
+export type { SpinData, SpinRunOpts, ReelStopPlan } from './motion/SpinEngine';
+export { AnticipationController } from './motion/AnticipationController';
+export type { AnticipationDecision } from './motion/AnticipationController';
+export { TumbleController } from './cascade/TumbleController';
+export type { TumbleStep } from './cascade/TumbleController';
+export { ReelStepController, buildReelStepTape } from './cascade/ReelStepController';
+export type { ReelStepData } from './cascade/ReelStepController';
