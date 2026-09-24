@@ -155,10 +155,11 @@ export class ReelGrid extends Container {
     return this._cells[col][row];
   }
 
-  setGrid(cells: CellData[][]): void {
+  /** Seats `cells`; an unchanged symbol keeps its view unless `remount` (see `SymbolCell.setData`). */
+  setGrid(cells: CellData[][], opts?: { remount?: boolean }): void {
     for (let c = 0; c < this._cols; c++) {
       for (let r = 0; r < this._rowsPerReel[c]; r++) {
-        this._cells[c]?.[r]?.setData(cells[c]?.[r] ?? { symbol: null });
+        this._cells[c]?.[r]?.setData(cells[c]?.[r] ?? { symbol: null }, opts);
       }
     }
   }

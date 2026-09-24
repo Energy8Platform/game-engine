@@ -146,6 +146,25 @@ describe('createReelsBoard: repaint / cellSize (real createReelSystem)', () => {
     board.destroy();
   });
 
+  it('repaint({ remount: true }) re-resolves an unchanged cell — a fresh view object', async () => {
+    const spy: SymbolResolver = vi.fn((id: string) => {
+      const c = new Container() as unknown as { __symbol: string };
+      c.__symbol = id;
+      return c as any;
+    });
+    const board = createReelsBoard({ resolve: spy, grid: { cols: 1, rows: 1 } });
+    await board.refill({ kind: 'refill', board: [[7]] });
+    const cell = board.grid.getCell(0, 0) as unknown as { view: unknown };
+    const view = cell.view;
+    const before = (spy as ReturnType<typeof vi.fn>).mock.calls.length;
+
+    board.repaint({ remount: true });
+
+    expect((spy as ReturnType<typeof vi.fn>).mock.calls.length).toBe(before + 1);
+    expect(cell.view).not.toBe(view);
+    board.destroy();
+  });
+
   it('repaint is a no-op after destroy — does not throw', () => {
     const board = createReelsBoard({ resolve, grid: { cols: 1, rows: 1 } });
     board.destroy();

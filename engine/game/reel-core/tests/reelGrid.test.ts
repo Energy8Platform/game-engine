@@ -50,3 +50,19 @@ describe('ReelGrid', () => {
     expect(grid.getCell(2, 0).x).toBe(160);
   });
 });
+
+describe('ReelGrid.setGrid — remount', () => {
+  it('setGrid(same) keeps each view; setGrid(same, { remount: true }) replaces it', () => {
+    const grid = new ReelGrid({ cols: 1, rows: 1, cellSize: 50, resolve });
+    const board = [[{ symbol: 'A' }]];
+    grid.setGrid(board);
+    const first = grid.getCell(0, 0).view;
+
+    grid.setGrid(board);
+    expect(grid.getCell(0, 0).view).toBe(first);
+
+    grid.setGrid(board, { remount: true });
+    expect(grid.getCell(0, 0).view).not.toBe(first);
+    expect((first as unknown as Container).destroyed).toBe(true);
+  });
+});

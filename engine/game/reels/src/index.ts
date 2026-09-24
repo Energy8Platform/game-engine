@@ -113,6 +113,8 @@ export interface CellLike {
 /** The slice of `ReelGrid` this board needs — cell lookup, and the extent to walk for `bindAll`. */
 export interface GridLike {
   getCell(col: number, row: number): CellLike;
+  /** Seats a board; `remount` re-resolves even an unchanged symbol's view — what `repaint({ remount: true })` drives. */
+  setGrid(cells: CellData[][], opts?: { remount?: boolean }): void;
   readonly cols: number;
   readonly rows: number;
   /** `ReelGrid.geometry`'s centre, in the view's local space — what `origin: 'center'` offsets by. Optional: this package's test fakes have none. */
@@ -156,7 +158,8 @@ export function boardFromReelSystem(
   // landing symbols before that: a `repaint()` in that window would `setBoard(oldBoard)` and
   // put the previous spin's art back. Deferred until the last op in flight settles, run once.
   let inFlight = 0;
-  let pendingRepaint = false;
+  // The strongest repaint asked for while an op was in flight: a remount covers a plain one.
+  let pendingRepaint: false | { remount: boolean } = false;
   // Every seated cell hands its own data to its view: a symbol state's `$cell.<field>` props
   // (an orb's ×N) resolve here, AFTER the op that seated it — never during a spin, where the
   // tape's symbols carry no data and the default look is what a spinning reel wants. A view
@@ -170,8 +173,11 @@ export function boardFromReelSystem(
         cell?.view?.bind?.(cell.data);
       }
   };
-  const repaint = () => {
-    reelSystem.setBoard(reelSystem.board);
+  const repaint = (remount = false) => {
+    // A remount re-seats the SAME board through the grid — `ReelSystem.setBoard` takes no
+    // options, and the board itself is unchanged, so its closure needs no update.
+    if (remount) reelSystem.grid.setGrid(reelSystem.board, { remount: true });
+    else reelSystem.setBoard(reelSystem.board);
     bindAll();
   };
   // The tempo the last method was handed — what a page's `__e8.lastStepOpts()`
@@ -202,8 +208,9 @@ export function boardFromReelSystem(
         await run(step, opts);
       } finally {
         if (--inFlight === 0 && pendingRepaint) {
+          const { remount } = pendingRepaint;
           pendingRepaint = false;
-          repaint();
+          repaint(remount);
         }
       }
     };
@@ -357,10 +364,13 @@ export function boardFromReelSystem(
 
     // Forces a redraw without changing any symbol — a config edit (e.g. a frame style) that
     // `setBoard` alone would pick up on the NEXT spin/refill, made visible right away — or,
-    // with an op in flight, as soon as it lands.
-    repaint() {
-      if (inFlight > 0) pendingRepaint = true;
-      else repaint();
+    // with an op in flight, as soon as it lands. An unchanged symbol keeps its view (F9);
+    // `remount: true` re-resolves every cell's view — for art that reaches a view only on a
+    // fresh mount (a symbol state's late-loaded scene, `@energy8engine/symbols`).
+    repaint(opts?: { remount?: boolean }) {
+      const remount = !!opts?.remount;
+      if (inFlight > 0) pendingRepaint = { remount: remount || (pendingRepaint && pendingRepaint.remount) };
+      else repaint(remount);
     },
 
     get cellSize() {
@@ -386,8 +396,8 @@ export interface ReelsBoard extends BoardApi {
   readonly view: Container;
   /** The grid this board drives — same object `revealWins`/`remove` reach via `getCell`. */
   readonly grid: GridLike;
-  /** Re-`setBoard`s the current board to force every cell to redraw — after any op in flight lands; a no-op after `destroy()`. */
-  repaint(): void;
+  /** Re-seats the current board so every cell redraws (`remount: true` re-resolves each view too) — after any op in flight lands; a no-op after `destroy()`. */
+  repaint(opts?: { remount?: boolean }): void;
   /** One cell's footprint — square, from the reel config's `grid.cellSize` (96 when absent). */
   readonly cellSize: { width: number; height: number };
   /** The live reel system's config (`grid`, `win`) — the geometry a project's own step can draw against. */
@@ -438,8 +448,8 @@ export function createReelsBoard(options: CreateReelSystemOptions): ReelsBoard {
     system: reelSystem,
     // Unlike the BoardApi methods above, a stale repaint/skip is nothing to refuse over —
     // there is no spin result either could misreport — so these are no-ops, not throws.
-    repaint() {
-      if (!destroyed) api.repaint();
+    repaint(opts?: { remount?: boolean }) {
+      if (!destroyed) api.repaint(opts);
     },
     skip(opts?: { overlays?: boolean }) {
       if (!destroyed) api.skip(opts);

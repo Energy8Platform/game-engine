@@ -168,7 +168,10 @@ export function apply(ctx: Context, config: SymbolsConfig = {}): void {
     }
     if (!alive) return;
     for (const h of live) h.refresh();
-    (ctx.reflect.get('board', false) as { repaint?(): void } | undefined)?.repaint?.();
+    // `remount`: the board keeps an unchanged symbol's view (reel-core's F9), and a cell copy
+    // reaches late art only on a fresh mount — see the `scenes` note above.
+    type Repaintable = { repaint?(opts?: { remount?: boolean }): void };
+    (ctx.reflect.get('board', false) as Repaintable | undefined)?.repaint?.({ remount: true });
   }
 
   const symbols: SymbolsService = {

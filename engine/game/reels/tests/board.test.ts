@@ -59,6 +59,10 @@ function fakeReelSystem(initialBoard: ReelSystemLike['board'] = []) {
       if (last) board = last.settledGrid;
     },
   );
+  // The grid's own re-seat — what `repaint({ remount: true })` drives, past `setBoard`.
+  const setGrid = vi.fn((target: ReelSystemLike['board'], opts?: { remount?: boolean }) => {
+    calls.push(['setGrid', target, opts]);
+  });
   const skip = vi.fn((_opts?: { overlays?: boolean }) => {
     calls.push(['skip']);
   });
@@ -66,6 +70,7 @@ function fakeReelSystem(initialBoard: ReelSystemLike['board'] = []) {
   const reelSystem: ReelSystemLike = {
     grid: {
       getCell,
+      setGrid,
       get cols() {
         return board.length;
       },
@@ -89,6 +94,7 @@ function fakeReelSystem(initialBoard: ReelSystemLike['board'] = []) {
     setBoard,
     cascade,
     skip,
+    setGrid,
     getCell,
     cellAt: (c: number, r: number) => cells.get(`${c}:${r}`),
     bindAt: (c: number, r: number) =>
@@ -370,6 +376,40 @@ describe('boardFromReelSystem: repaint / cellSize', () => {
     // idle again: immediate, and nothing left pending
     board.repaint();
     expect(setBoard).toHaveBeenCalledTimes(2);
+  });
+
+  it('repaint({ remount: true }) re-seats through grid.setGrid with remount, not setBoard', () => {
+    const initial = [[{ symbol: 'a' }]];
+    const { reelSystem, setBoard, setGrid } = fakeReelSystem(initial);
+    const board = boardFromReelSystem(reelSystem);
+
+    board.repaint({ remount: true });
+
+    expect(setGrid).toHaveBeenCalledWith(initial, { remount: true });
+    expect(setBoard).not.toHaveBeenCalled();
+  });
+
+  it('a deferred repaint keeps the strongest request: remount then plain, during a spin, lands as one remount', async () => {
+    const { reelSystem, spin, setBoard, setGrid } = fakeReelSystem([[{ symbol: 'a' }]]);
+    let land!: () => void;
+    spin.mockImplementation(() => new Promise<void>((resolve) => (land = resolve)));
+    const board = boardFromReelSystem(reelSystem);
+
+    const spinning = board.spinTo({ kind: 'spinTo', board: [[2]] });
+    board.repaint({ remount: true });
+    board.repaint();
+    expect(setGrid).not.toHaveBeenCalled();
+
+    land();
+    await spinning;
+    expect(setGrid).toHaveBeenCalledTimes(1);
+    expect(setGrid).toHaveBeenCalledWith(reelSystem.board, { remount: true });
+    expect(setBoard).not.toHaveBeenCalled();
+
+    // spent: the next plain repaint is plain
+    board.repaint();
+    expect(setGrid).toHaveBeenCalledTimes(1);
+    expect(setBoard).toHaveBeenCalledTimes(1);
   });
 
   it('cellSize reads grid.cellSize off the fake, square', () => {

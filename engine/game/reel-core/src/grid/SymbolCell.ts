@@ -77,7 +77,8 @@ export class SymbolCell extends Container {
     return this._data;
   }
 
-  setData(data: CellData): void {
+  /** `remount: true` re-resolves the view even for the same symbol — for art that reaches a view only on a fresh mount. */
+  setData(data: CellData, opts?: { remount?: boolean }): void {
     if (this.destroyed) return; // a killed-tween chain may resume after the cell is gone
     const previous = this._data?.symbol;
     this._data = data;
@@ -86,9 +87,10 @@ export class SymbolCell extends Container {
         this._view.destroy();
         this._view = null;
       }
-    } else if (!this._view || previous !== data.symbol) {
+    } else if (!this._view || previous !== data.symbol || opts?.remount) {
       // F9 (slice 35): only a CHANGED symbol re-resolves — the same id keeps its view, so a
-      // full-board `setGrid` (a refill, a repaint) rebuilds only the cells that changed.
+      // full-board `setGrid` (a refill, a repaint) rebuilds only the cells that changed —
+      // unless the caller asks for a `remount`.
       if (this._view) {
         this._view.destroy();
         this._view = null;
