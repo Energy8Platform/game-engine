@@ -108,6 +108,7 @@ import {
   diagnostic,
   type Diagnostic,
   type FlowTraceEntry,
+  type RefillStep,
   type StepOpts,
 } from '@energy8engine/contracts';
 import type { EventsService, FlowService } from '@energy8engine/flow';
@@ -840,23 +841,19 @@ let nextViewId = 0;
   },
   /**
    * Plays ONE `refill` step: the live board with `(col, row)` changed to
-   * `symbol`, through the composed play service — the same
-   * `play.execute(plan, board)` the flow's `present` node makes, both read
-   * per use off `ctx.reflect` like every other hook here. Throws with no
-   * play service, no board, or a board with an empty cell (a refill board
-   * has none); resolves with whatever diagnostics `execute` reported
-   * swallowed, so a failing step is still visible — as an error.
+   * `symbol`, through the live board's own `refill` step method — the same
+   * reels-board refill path `@energy8engine/reels`'s `board.refill` runs
+   * (`engine/game/reels/src/index.ts`), read per use off `currentBoard()`
+   * like every other board hook here. Throws with no board, or a board with
+   * an empty cell (a refill board has none).
    */
   async refillCell(col: number, row: number, symbol: string): Promise<void> {
-    const play = ctx.reflect.get('play', false) as
-      | { execute(plan: unknown[], board: unknown): Promise<{ message: string }[]> }
-      | undefined;
-    const board = liveSymbols();
-    if (!play || !board || board.some((c) => c.includes(null)))
-      throw new Error('refillCell: no play service, or no seated board');
-    board[col][row] = symbol;
-    const problems = await play.execute([{ kind: 'refill', board }], currentBoard());
-    if (problems.length) throw new Error(problems.map((d) => d.message).join('; '));
+    const board = currentBoard();
+    const next = liveSymbols();
+    if (!board || !next || next.some((c) => c.includes(null)))
+      throw new Error('refillCell: no board, or no seated board');
+    next[col][row] = symbol;
+    await board.refill({ kind: 'refill', board: next as unknown as RefillStep['board'] });
   },
   /**
    * What the cell at `(col, row)` actually drew — the constructor name of
