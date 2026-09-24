@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { describe, expect, it, vi } from 'vitest';
+import { beforeAll, describe, expect, it, vi } from 'vitest';
 import { Context } from 'cordis';
 import Schema from 'schemastery';
 import {
@@ -10,6 +10,8 @@ import {
   type MotionStyle,
   type ReelSystem,
 } from '@energy8engine/reel-core';
+import { Container } from 'pixi.js';
+import * as reelsRow from '@energy8engine/reels/runtime';
 import * as runtime from '../src/runtime';
 import { Config } from '../src/schema';
 
@@ -115,6 +117,73 @@ describe('reels-motion runtime half', () => {
     expect(fake.isUseMotionDisposed()).toBe(true);
   });
 
+});
+
+/**
+ * The REAL `reels1` row (`@energy8engine/reels/runtime`) under this row — not the fake above.
+ * (Here rather than in `reels`' tests: `reels-motion` depends on `reels`, so the other way round
+ * would be a package cycle.)
+ */
+describe('reels-motion on the real reels row', () => {
+  const assetsService = {
+    name: 'assets',
+    apply(ctx: Context) {
+      ctx.provide('assets', { resolve: () => new Container() as never });
+    },
+  };
+  const flush = () => new Promise<void>((r) => setTimeout(r, 0));
+  // the real SpinEngine starts pixi's shared Ticker, which asks for animation frames
+  beforeAll(() => {
+    (globalThis as any).requestAnimationFrame ??= () => 0;
+    (globalThis as any).cancelAnimationFrame ??= () => {};
+  });
+
+  it('after a hot re-apply of reels1, a spin runs the style on the NEW system — no "no motion row" warning', async () => {
+    const ctx = new Context();
+    const report = vi.fn();
+    ctx.provide('diagnostics', { report } as never);
+    await ctx.plugin(assetsService);
+    const reelsFiber = ctx.plugin(reelsRow, { grid: { cols: 5, rows: 3 } });
+    await reelsFiber;
+    await ctx.plugin(runtime, {});
+    const first = ctx.reels;
+
+    await reelsFiber.update({ grid: { cols: 3, rows: 3 } });
+    await vi.waitFor(() => expect(ctx.reels?.config.grid.cols).toBe(3));
+    expect(ctx.reels).not.toBe(first);
+    await vi.waitFor(() => expect(ctx.reels.motions.get('swap')).toBeDefined());
+
+    const swap = ctx.reels.motions.get('swap')!;
+    const create = vi.spyOn(swap, 'create');
+    // not awaited: the real SpinEngine needs a live ticker to land; the pick happens up front
+    void ctx.board.spinTo({ kind: 'spinTo', board: [[1, 2, 3], [4, 5, 6], [7, 8, 9]] });
+    await flush();
+
+    expect(create).toHaveBeenCalledTimes(1);
+    expect(create.mock.calls[0][0].grid).toBe(ctx.reels.grid);
+    expect(report).not.toHaveBeenCalledWith(
+      expect.objectContaining({ message: expect.stringContaining('no motion row') }),
+    );
+
+    create.mockRestore();
+    ctx.board.skip?.();
+    await ctx.fiber.dispose();
+  });
+
+  it('a partial nested patch keeps the other defaults of that object — as useMotion sees it', async () => {
+    const ctx = new Context();
+    await ctx.plugin(assetsService);
+    await ctx.plugin(reelsRow, { grid: { cols: 1, rows: 1 } });
+    const useMotion = vi.spyOn(ctx.reels, 'useMotion');
+
+    await ctx.plugin(runtime, { settle: { ms: 100 } });
+
+    expect(useMotion).toHaveBeenCalledWith('swap', {
+      ...DEFAULT_REEL_CONFIG.motion,
+      settle: { ...DEFAULT_REEL_CONFIG.motion.settle, ms: 100 },
+    });
+    await ctx.fiber.dispose();
+  });
 });
 
 describe('reels-motion schema', () => {
