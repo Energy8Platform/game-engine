@@ -188,6 +188,17 @@ export interface ScenesService {
    */
   setProps(ref: SceneRef, patch: Record<string, unknown>): boolean;
   /**
+   * Plays every mounted copy of the node once through its type's `once` (a
+   * strip's one-shot) and settles when the last one ends: `true` when the
+   * type has a `once` and a copy played, `false` otherwise. Every copy,
+   * the way `setProps` patches every copy — nesting is by copy, and only
+   * one of them is on screen. `visible` is the caller's: a node of a hidden
+   * document plays unseen. A node nothing mounted is `false` with an error;
+   * a copy whose `once` throws is reported at its `where`, and the others
+   * still play.
+   */
+  once(ref: SceneRef): Promise<boolean>;
+  /**
    * A mounted node's full prop schema — `COMMON` with the type's own dict
    * merged over it, so a type owning `width`/`height` wins the name the
    * same way `applyCommon` lets it. What a caller coercing a literal reads:
@@ -1314,6 +1325,28 @@ export function createScenes(options: CreateScenesOptions): ScenesService {
         e.failed = false;
       }
       return true;
+    },
+    async once(ref) {
+      const entries = entriesOf(ref);
+      if (entries.length === 0) {
+        error(
+          `${ref.scene}/${ref.node}`,
+          `node "${ref.node}" is not mounted in scene "${ref.scene}" — nothing to play`,
+          'check the scene and node ids',
+        );
+        return false;
+      }
+      const ran = entries.filter((e) => e.type.once);
+      await Promise.all(
+        ran.map(async (e) => {
+          try {
+            await e.type.once!(e.view, e.props, mountCtx([]));
+          } catch (err) {
+            error(e.where, `${e.node.type} "${e.node.id}" failed to play: ${why(err)}`);
+          }
+        }),
+      );
+      return ran.length > 0;
     },
     nodeSchema(ref) {
       const e = entryOf(ref);
