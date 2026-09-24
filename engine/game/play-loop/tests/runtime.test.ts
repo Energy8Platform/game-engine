@@ -823,3 +823,71 @@ describe('play-loop runtime half: pendingMs', () => {
     await ctx.fiber.dispose();
   });
 });
+
+describe('play-loop runtime half: arm — a skip before the plan', () => {
+  /** A one-step plan whose board records `skip` calls; resolves at once. */
+  const board = () => {
+    const skip = vi.fn();
+    return { skip, api: { spinTo: async () => {}, skip } as unknown as BoardApi };
+  };
+  const plan = [{ kind: 'spinTo' as const, board: [[1]] }];
+
+  it('with no run and no arm, a skip is dropped — the next execute is not latched', async () => {
+    const ctx = new Context();
+    await ctx.plugin(runtime);
+    ctx.play.skip();
+    const b = board();
+    await ctx.play.execute(plan, b.api);
+    expect(b.skip).not.toHaveBeenCalled();
+    await ctx.fiber.dispose();
+  });
+
+  it('armed, a skip is kept: the next execute collapses its first step as it starts', async () => {
+    const ctx = new Context();
+    await ctx.plugin(runtime);
+    ctx.play.arm();
+    ctx.play.skip();
+    const b = board();
+    await ctx.play.execute(plan, b.api);
+    expect(b.skip).toHaveBeenCalledTimes(1);
+    await ctx.fiber.dispose();
+  });
+
+  it('the release before any execute clears a kept skip — a failed request does not hurry the next round', async () => {
+    const ctx = new Context();
+    await ctx.plugin(runtime);
+    const release = ctx.play.arm();
+    ctx.play.skip();
+    release();
+    release(); // idempotent
+    const b = board();
+    await ctx.play.execute(plan, b.api);
+    expect(b.skip).not.toHaveBeenCalled();
+    await ctx.fiber.dispose();
+  });
+
+  it('arms nest: one of two released, the skip is still kept', async () => {
+    const ctx = new Context();
+    await ctx.plugin(runtime);
+    const first = ctx.play.arm();
+    ctx.play.arm();
+    ctx.play.skip();
+    first();
+    const b = board();
+    await ctx.play.execute(plan, b.api);
+    expect(b.skip).toHaveBeenCalledTimes(1);
+    await ctx.fiber.dispose();
+  });
+
+  it('execute disarms: a skip after the plan ended is dropped though the arm was never released', async () => {
+    const ctx = new Context();
+    await ctx.plugin(runtime);
+    ctx.play.arm(); // released only when the run goes idle — not yet
+    await ctx.play.execute(plan, board().api);
+    ctx.play.skip(); // the plan is over; nothing live, nothing armed
+    const b = board();
+    await ctx.play.execute(plan, b.api);
+    expect(b.skip).not.toHaveBeenCalled();
+    await ctx.fiber.dispose();
+  });
+});

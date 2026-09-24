@@ -125,10 +125,11 @@ export interface PlayService {
    * plugin's step kind. Both are optional, and anything that cannot be
    * hurried is simply passed over.
    *
-   * **A no-op with no run in flight**, and **latched for the rest of the
-   * run** when there is one: every step that STARTS after a skip is
-   * collapsed as it starts, so a multi-round tumble chain ends at the
-   * result instead of skipping one round and playing the rest in full.
+   * **A no-op with no run in flight** — unless the row is armed (see
+   * `arm`), when it is kept for the plan on its way, and **latched for the
+   * rest of the run** when there is one: every step that STARTS after a
+   * skip is collapsed as it starts, so a multi-round tumble chain ends at
+   * the result instead of skipping one round and playing the rest in full.
    *
    * **The result still lands.** A skip shortens the watching, it does not
    * abandon the round — `execute`'s promise resolves as usual, with the
@@ -139,6 +140,21 @@ export interface PlayService {
    * to be hurried must not cost the others theirs.
    */
   skip(): void;
+  /**
+   * "A plan is on its way" — what the flow's `spin`/`step` nodes call before
+   * they ask the session for a round. Until the next `execute` starts, or the
+   * returned release is called, a `skip()` with no run in flight is KEPT, and
+   * that next `execute` starts latched: every step collapsed as it starts,
+   * exactly as a skip mid-run does. Without it a second tap during the
+   * round's request landed on no live run and was dropped.
+   *
+   * Arms nest (a set, not a flag); a release is idempotent, and the LAST one
+   * with no `execute` having started clears a kept skip — a request that
+   * failed does not hurry the next round. `execute` starting releases every
+   * arm, so a skip after a plan began is the ordinary mid-run skip and one
+   * after it ended is dropped as before. Never throws.
+   */
+  arm(): () => void;
   /**
    * The registry `execute` consults by default — the same object
    * `ctx.steps` names. Exposed here as well so a caller holding the play
@@ -262,14 +278,23 @@ export function apply(ctx: Context, config: { skipEvents?: string[]; pendingMs?:
   // step is skippable (see `ExecuteHooks`).
   let skipped = false;
 
+  // `arm()`'s live tokens, and a skip that landed while one was live but no
+  // run was — kept for the plan on its way (see `PlayService.arm`).
+  const arms = new Set<object>();
+  let pending = false;
+
   const skip = () => {
     // No live run, nothing to collapse. Without this guard an idle `ui.skip`
     // (a stray `__e8.skip()`, a flow `emit`) still reached the LAST board
     // this row played against, and `ReelSystem.skip()` unconditionally
     // destroys every child of the `fx` overlay layer — so an idle skip wiped
     // a game's own overlay art. `execute` clears `lastBoard` when it
-    // resolves, which is what makes "live" mean live.
-    if (!lastBoard) return;
+    // resolves, which is what makes "live" mean live. An ARMED row keeps it
+    // instead: the round's plan is on its way, and the skip is for it.
+    if (!lastBoard) {
+      if (arms.size > 0) pending = true;
+      return;
+    }
     skipped = true;
     fanOut();
   };
@@ -305,6 +330,11 @@ export function apply(ctx: Context, config: { skipEvents?: string[]; pendingMs?:
 
   ctx.provide('play', {
     async execute(plan, board, registry = steps, opts) {
+      // A skip kept while the request was in flight latches this run from
+      // its first step; every arm is spent — a later skip is mid-run or idle.
+      skipped = pending;
+      pending = false;
+      arms.clear();
       lastBoard = board;
       lastRegistry = registry;
       const problems = await executePlan(
@@ -343,6 +373,13 @@ export function apply(ctx: Context, config: { skipEvents?: string[]; pendingMs?:
     },
     steps,
     skip,
+    arm() {
+      const token = {};
+      arms.add(token);
+      return () => {
+        if (arms.delete(token) && arms.size === 0) pending = false;
+      };
+    },
     record(entry) {
       try {
         // Looked up per call, not captured at apply time. Row order
