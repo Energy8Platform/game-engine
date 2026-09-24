@@ -349,9 +349,11 @@ export function apply(ctx: Context, config: { skipEvents?: string[]; pendingMs?:
         registry,
         opts,
         {
-          // A re-fan collapses the step that just started, and nothing else:
-          // the overlay layer was swept by the skip that latched the run, and
-          // sweeping it again would take whatever the game drew there since.
+          // A re-fan collapses the step that just started, and nothing else.
+          // A skip tapped MID-run already swept the overlay layer, and sweeping
+          // it again would take whatever the game drew there since. A skip
+          // ARMED before the run (`pending`) never sweeps it in this run at
+          // all — accepted: the game's own clear-on-spin still applies.
           onStepStarted: () => {
             if (skipped) fanOut({ overlays: false });
           },
