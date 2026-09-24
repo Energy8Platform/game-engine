@@ -192,22 +192,34 @@ async function playThrough(
   ctx: Context,
   request: PlayRequest,
   report: RunCtx['report'],
+  idle: RunCtx['idle'],
 ): Promise<{ out: string; vars?: Record<string, unknown> }> {
   const session = ctx.reflect.get('session', false) as SessionService | undefined;
   if (!session) {
     report('no session row in this composition');
     return { out: 'failed', vars: { error: 'no session' } };
   }
-  try {
-    const { result, diagnostics } = await session.play(request);
-    if (result) return { out: 'result', vars: { result, request } };
-    for (const d of diagnostics) report(d.message, d.severity);
-    return { out: 'failed', vars: { error: diagnostics.map((d) => d.message).join('; ') || 'no result' } };
-  } catch (e) {
-    const message = e instanceof Error ? e.message : String(e);
-    report(message);
-    return { out: 'failed', vars: { error: message } };
-  }
+  // "A plan is on its way" (`PlayService.arm`): a second tap while this
+  // request is in flight is kept for the plan instead of landing on no live
+  // run. Released at once on a failure (no plan is coming), else when the
+  // run goes idle — normally long after `present`'s `execute` spent it.
+  // Lenient: a composition without a play row still spins.
+  const release = (ctx.reflect.get('play', false) as PlayService | undefined)?.arm?.();
+  const out = await (async () => {
+    try {
+      const { result, diagnostics } = await session.play(request);
+      if (result) return { out: 'result', vars: { result, request } };
+      for (const d of diagnostics) report(d.message, d.severity);
+      return { out: 'failed', vars: { error: diagnostics.map((d) => d.message).join('; ') || 'no result' } };
+    } catch (e) {
+      const message = e instanceof Error ? e.message : String(e);
+      report(message);
+      return { out: 'failed', vars: { error: message } };
+    }
+  })();
+  if (out.out === 'failed') release?.();
+  else void idle().then(() => release?.());
+  return out;
 }
 
 /**
@@ -238,7 +250,7 @@ const spin: FlowNodeKind<{ action: string; betLevel?: string }> = {
     betLevel: Schema.string().description('bet level (a number): a literal, `$expr`, or a `{…}` template'),
   }),
   outs: ['result', 'failed'],
-  async run(p, { ctx, vars, report }) {
+  async run(p, { ctx, vars, report, idle }) {
     const action = resolve(p.action, vars, report);
     if (typeof action !== 'string' || action === '') {
       report(`'spin' has no action to send (resolved from '${p.action}')`);
@@ -246,7 +258,7 @@ const spin: FlowNodeKind<{ action: string; betLevel?: string }> = {
     }
     const request: PlayRequest = { action };
     applyBetLevel(p.betLevel, vars, request, report);
-    return playThrough(ctx, request, report);
+    return playThrough(ctx, request, report, idle);
   },
 };
 
@@ -277,7 +289,7 @@ const step: FlowNodeKind<{ roundId: string; action: string }> = {
       .description('next action name: a literal, `$expr`, or a `{…}` template'),
   }),
   outs: ['result', 'failed'],
-  async run(p, { ctx, vars, report }) {
+  async run(p, { ctx, vars, report, idle }) {
     const roundId = resolve(p.roundId, vars, report);
     if (typeof roundId !== 'string' || roundId === '') {
       report(`'step' has no roundId to send (resolved from '${p.roundId}')`);
@@ -289,7 +301,7 @@ const step: FlowNodeKind<{ roundId: string; action: string }> = {
       return { out: 'failed', vars: { error: "'step' has no action" } };
     }
     const request: PlayRequest = { action, roundId };
-    return playThrough(ctx, request, report);
+    return playThrough(ctx, request, report, idle);
   },
 };
 

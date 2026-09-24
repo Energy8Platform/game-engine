@@ -250,6 +250,62 @@ describe('built-in kinds', () => {
     expect(rc.report).toHaveBeenCalledWith('offline');
   });
 
+  /** A play row whose `arm` records when it was called and released, against `session.play`. */
+  const armingPlay = (log: string[]) => ({
+    arm: vi.fn(() => {
+      log.push('arm');
+      return () => log.push('release');
+    }),
+  });
+
+  it('spin: arms the play row before session.play and releases at once on failed', async () => {
+    const log: string[] = [];
+    const session = {
+      ...fakeSession(),
+      play: vi.fn(async () => {
+        log.push('play');
+        return { diagnostics: [{ severity: 'error', message: 'down' }] };
+      }),
+    };
+    const { rc } = runCtx({ session, play: armingPlay(log) });
+    const out = await kind('spin').run!(spinProps(), rc);
+    expect(out).toMatchObject({ out: 'failed' });
+    expect(log).toEqual(['arm', 'play', 'release']);
+  });
+
+  it('spin: on result the release waits for the run to go idle', async () => {
+    const log: string[] = [];
+    let idle!: () => void;
+    const { rc } = runCtx({ session: fakeSession(), play: armingPlay(log) });
+    rc.idle = () => new Promise<void>((r) => (idle = r));
+    const out = await kind('spin').run!(spinProps(), rc);
+    expect(out).toMatchObject({ out: 'result' });
+    expect(log).toEqual(['arm']);
+    idle();
+    await new Promise((r) => setTimeout(r, 0));
+    expect(log).toEqual(['arm', 'release']);
+  });
+
+  it('step: arms too, and a thrown session releases at once', async () => {
+    const log: string[] = [];
+    const session = {
+      ...fakeSession(),
+      play: vi.fn(async () => {
+        log.push('play');
+        throw new Error('gone');
+      }),
+    };
+    const { rc } = runCtx({ session, play: armingPlay(log) });
+    const out = await kind('step').run!(stepProps({ roundId: 'r1', action: 'next' }), rc);
+    expect(out).toMatchObject({ out: 'failed' });
+    expect(log).toEqual(['arm', 'play', 'release']);
+  });
+
+  it('spin: a composition without a play row still spins', async () => {
+    const { rc } = runCtx({ session: fakeSession() });
+    await expect(kind('spin').run!(spinProps(), rc)).resolves.toMatchObject({ out: 'result' });
+  });
+
   const stepProps = (props: Record<string, unknown> = {}) =>
     kind('step').schema(props) as { roundId: string; action: string };
 
