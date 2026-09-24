@@ -138,12 +138,16 @@ export function createReelSystem(opts: CreateReelSystemOptions): ReelSystem {
   };
 
   // ── motion: the active `useMotion` pick, its runner created lazily and cached ─
-  const motions = createRegistry<MotionStyle>(
-    (s) => s.key,
-    () => {},
-  );
   let active: { key: string; config: MotionConfig } | null = null;
   let motion: { style: MotionStyle; runner: MotionRunner } | null = null;
+  // unregistering the style whose runner is cached skips and drops it (a `motion1` hot re-apply
+  // unregisters its styles); the next spin resolves the key again
+  const motions = createRegistry<MotionStyle>(
+    (s) => s.key,
+    (key) => {
+      if (motion?.style.key === key) dropMotion();
+    },
+  );
 
   function dropMotion(): void {
     motion?.runner.skip();
@@ -238,6 +242,7 @@ export function createReelSystem(opts: CreateReelSystemOptions): ReelSystem {
   }
 
   function skip(skipOpts?: { overlays?: boolean }): void {
+    if (destroyed) return;
     motion?.runner.skip();
     for (const { runner } of runners.values()) runner.skip();
     if (skipOpts?.overlays !== false) {

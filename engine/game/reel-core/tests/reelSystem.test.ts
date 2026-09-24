@@ -237,4 +237,29 @@ describe('createReelSystem (pluggable)', () => {
     expect(runners[0].run).toHaveBeenCalledTimes(1);
     expect(report).not.toHaveBeenCalled();
   });
+
+  it('unregistering the active style skips and drops its runner; re-registering builds a fresh one', async () => {
+    const { sys } = make();
+    const { style, runners } = fakeStyle();
+    const dispose = sys.motions.register(style);
+    sys.useMotion('fake', motionCfg);
+    await sys.spin(TARGET);
+    dispose();
+    expect(runners[0].skip).toHaveBeenCalledTimes(1);
+    sys.motions.register(style);
+    await sys.spin(TARGET);
+    expect(runners).toHaveLength(2);
+    expect(runners[1].run).toHaveBeenCalledTimes(1);
+  });
+
+  it('skip after destroy is a no-op', async () => {
+    const { sys } = make();
+    const { style, runners } = fakeStyle();
+    sys.motions.register(style);
+    sys.useMotion('fake', motionCfg);
+    await sys.spin(TARGET);
+    sys.destroy();
+    sys.skip();
+    expect(runners[0].skip).toHaveBeenCalledTimes(1);
+  });
 });
