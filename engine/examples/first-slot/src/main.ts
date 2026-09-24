@@ -839,6 +839,15 @@ let nextViewId = 0;
       }),
     );
   },
+  /** What the `features1` row's persistent layer holds now: sticky rings and giant symbols. `null` with no board. */
+  featureOverlays(): { sticky: number; giant: number } | null {
+    const grid = liveGrid();
+    if (!grid) return null;
+    const layer = (grid as unknown as { children: { label?: string; children: { label?: string }[] }[] }).children
+      .find((c) => c.label === 'reels-features');
+    const count = (label: string) => layer?.children.filter((c) => c.label === label).length ?? 0;
+    return { sticky: count('sticky'), giant: count('giant') };
+  },
   /**
    * Plays ONE `refill` step: the live board with `(col, row)` changed to
    * `symbol`, through the live board's own `refill` step method — the same
