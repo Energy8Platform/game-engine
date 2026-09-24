@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { Container } from 'pixi.js';
-import type { SymbolResolver } from '@energy8platform/game-engine/slot';
+import type { SymbolResolver } from '@energy8engine/reel-core';
 import { executePlan } from '@energy8engine/play-loop';
 import { createReelsBoard } from '../src/index';
 
@@ -24,13 +24,13 @@ const resolve: SymbolResolver = vi.fn((id: string) => {
 
 describe('createReelsBoard (real createReelSystem, synchronous paths only)', () => {
   it('constructs headlessly and exposes a mountable view', () => {
-    const board = createReelsBoard({ resolve, config: { grid: { cols: 2, rows: 2 } } });
+    const board = createReelsBoard({ resolve, grid: { cols: 2, rows: 2 } });
     expect(board.view).toBeInstanceOf(Container);
     board.destroy();
   });
 
   it('refill really updates the board read back through the same grid the board drives', async () => {
-    const board = createReelsBoard({ resolve, config: { grid: { cols: 2, rows: 1 } } });
+    const board = createReelsBoard({ resolve, grid: { cols: 2, rows: 1 } });
 
     await board.refill({ kind: 'refill', board: [[9], [3]] });
 
@@ -41,7 +41,7 @@ describe('createReelsBoard (real createReelSystem, synchronous paths only)', () 
   });
 
   it('remove really flips the cell to the removed frame state (SymbolCell.setState is synchronous)', async () => {
-    const board = createReelsBoard({ resolve, config: { grid: { cols: 1, rows: 1 } } });
+    const board = createReelsBoard({ resolve, grid: { cols: 1, rows: 1 } });
     await board.refill({ kind: 'refill', board: [[1]] });
 
     await board.remove({ kind: 'remove', cells: [{ col: 0, row: 0 }] });
@@ -67,7 +67,7 @@ describe('createReelsBoard — after destroy()', () => {
   const plan = [{ kind: 'spinTo' as const, board: [[1]] }];
 
   it('every BoardApi method throws, naming the cause', async () => {
-    const board = createReelsBoard({ resolve, config: { grid: { cols: 1, rows: 1 } } });
+    const board = createReelsBoard({ resolve, grid: { cols: 1, rows: 1 } });
     board.destroy();
 
     for (const call of [
@@ -93,13 +93,13 @@ describe('createReelsBoard — after destroy()', () => {
   // `skip` joins `repaint` on the other side of that rule: there is no spin
   // result a stale skip could misreport, so it is a no-op, not a throw.
   it('skip() after destroy is a quiet no-op, not a refusal', () => {
-    const board = createReelsBoard({ resolve, config: { grid: { cols: 1, rows: 1 } } });
+    const board = createReelsBoard({ resolve, grid: { cols: 1, rows: 1 } });
     board.destroy();
     expect(() => board.skip()).not.toThrow();
   });
 
   it('a plan run against it is a play-loop diagnostic, not a throw and not a silent "done"', async () => {
-    const board = createReelsBoard({ resolve, config: { grid: { cols: 1, rows: 1 } } });
+    const board = createReelsBoard({ resolve, grid: { cols: 1, rows: 1 } });
     board.destroy();
 
     const problems = await executePlan(plan, board);
@@ -112,38 +112,42 @@ describe('createReelsBoard — after destroy()', () => {
 
 describe('createReelsBoard: repaint / cellSize (real createReelSystem)', () => {
   it('cellSize reflects the grid config, defaulting to 96 square', () => {
-    const withDefault = createReelsBoard({ resolve, config: { grid: { cols: 1, rows: 1 } } });
+    const withDefault = createReelsBoard({ resolve, grid: { cols: 1, rows: 1 } });
     expect(withDefault.cellSize).toEqual({ width: 96, height: 96 });
     withDefault.destroy();
 
     const withCustom = createReelsBoard({
       resolve,
-      config: { grid: { cols: 1, rows: 1, cellSize: 64 } },
+      grid: { cols: 1, rows: 1, cellSize: 64 },
     });
     expect(withCustom.cellSize).toEqual({ width: 64, height: 64 });
     withCustom.destroy();
   });
 
-  it('repaint re-resolves the board in place — same data, a fresh view', async () => {
-    const calls: string[] = [];
+  // F9 (slice 35): a cell keeps its view for the same symbol, so a repaint
+  // re-seats the board without re-resolving an unchanged cell — and still
+  // re-binds it (`bindAll`), which is what a symbol state's `$cell` props need.
+  it('repaint keeps the view of an unchanged cell — no re-resolve, same object', async () => {
     const spy: SymbolResolver = vi.fn((id: string) => {
-      calls.push(id);
       const c = new Container() as unknown as { __symbol: string };
       c.__symbol = id;
       return c as any;
     });
-    const board = createReelsBoard({ resolve: spy, config: { grid: { cols: 1, rows: 1 } } });
+    const board = createReelsBoard({ resolve: spy, grid: { cols: 1, rows: 1 } });
     await board.refill({ kind: 'refill', board: [[7]] });
-    const before = calls.length;
+    const cell = board.grid.getCell(0, 0) as unknown as { view: unknown };
+    const view = cell.view;
+    const before = (spy as ReturnType<typeof vi.fn>).mock.calls.length;
 
     board.repaint();
 
-    expect(calls.length).toBeGreaterThan(before);
+    expect((spy as ReturnType<typeof vi.fn>).mock.calls.length).toBe(before);
+    expect(cell.view).toBe(view);
     board.destroy();
   });
 
   it('repaint is a no-op after destroy — does not throw', () => {
-    const board = createReelsBoard({ resolve, config: { grid: { cols: 1, rows: 1 } } });
+    const board = createReelsBoard({ resolve, grid: { cols: 1, rows: 1 } });
     board.destroy();
     expect(() => board.repaint()).not.toThrow();
   });

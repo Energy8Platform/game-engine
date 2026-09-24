@@ -250,9 +250,12 @@ export function apply(ctx: Context, config: { skipEvents?: string[]; pendingMs?:
   let lastBoard: BoardApi | undefined;
   let lastRegistry: BoardStepRegistry = steps;
 
-  const hurry = (target: { skip?(): void } | undefined) => {
+  const hurry = (
+    target: { skip?(opts?: { overlays?: boolean }): void } | undefined,
+    opts?: { overlays?: boolean },
+  ) => {
     try {
-      target?.skip?.();
+      target?.skip?.(opts);
     } catch {
       // Swallowed deliberately: one thing refusing to be hurried must not
       // cost the rest of them their skip, and `skip()` has no return value
@@ -261,8 +264,9 @@ export function apply(ctx: Context, config: { skipEvents?: string[]; pendingMs?:
     }
   };
 
-  const fanOut = () => {
-    hurry(lastBoard);
+  // `opts` reaches the BOARD only: a handler's `skip()` knows no overlay layer.
+  const fanOut = (opts?: { overlays?: boolean }) => {
+    hurry(lastBoard, opts);
     try {
       for (const kind of lastRegistry.kinds()) hurry(lastRegistry.get(kind));
     } catch {
@@ -345,8 +349,11 @@ export function apply(ctx: Context, config: { skipEvents?: string[]; pendingMs?:
         registry,
         opts,
         {
+          // A re-fan collapses the step that just started, and nothing else:
+          // the overlay layer was swept by the skip that latched the run, and
+          // sweeping it again would take whatever the game drew there since.
           onStepStarted: () => {
-            if (skipped) fanOut();
+            if (skipped) fanOut({ overlays: false });
           },
         },
         { pendingMs: config.pendingMs },

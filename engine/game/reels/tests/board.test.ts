@@ -1,13 +1,13 @@
 import { describe, expect, it, vi } from 'vitest';
-import { boardFromReelSystem, type CellLike, type LegacyReelSystem } from '../src/index';
+import { boardFromReelSystem, type CellLike, type ReelSystemLike } from '../src/index';
 
 /**
- * A fake `LegacyReelSystem` recording exactly what was measured in Step 1:
+ * A fake `ReelSystemLike` recording exactly what was measured in Step 1:
  * `spin`/`setBoard` take a `CellData[][]`, `grid.getCell(col,row)` returns
  * an object with `setState`/`setData`/`playWin`. No pixi, no ticker — the
  * point of the fake is that this suite never needs either.
  */
-function fakeReelSystem(initialBoard: LegacyReelSystem['board'] = []) {
+function fakeReelSystem(initialBoard: ReelSystemLike['board'] = []) {
   const calls: unknown[] = [];
   const cells = new Map<string, ReturnType<typeof makeCell>>();
   // Plain mutable local, exposed through a GETTER on `reelSystem.board` below — faithful to the
@@ -42,7 +42,7 @@ function fakeReelSystem(initialBoard: LegacyReelSystem['board'] = []) {
   const spin = vi.fn(async (target: unknown, opts?: unknown) => {
     calls.push(['spin', target, opts]);
   });
-  const setBoard = vi.fn((target: LegacyReelSystem['board']) => {
+  const setBoard = vi.fn((target: ReelSystemLike['board']) => {
     calls.push(['setBoard', target]);
     board = target;
   });
@@ -53,17 +53,17 @@ function fakeReelSystem(initialBoard: LegacyReelSystem['board'] = []) {
   // its `_dead` guard skips once the round was skipped; that is why `tumble`
   // re-seats them with a `setBoard` of its own.
   const cascade = vi.fn(
-    async (steps: { settledGrid: LegacyReelSystem['board'] }[], opts?: unknown) => {
+    async (steps: { settledGrid: ReelSystemLike['board'] }[], opts?: unknown) => {
       calls.push(['cascade', steps, opts]);
       const last = steps[steps.length - 1];
       if (last) board = last.settledGrid;
     },
   );
-  const skip = vi.fn(() => {
+  const skip = vi.fn((_opts?: { overlays?: boolean }) => {
     calls.push(['skip']);
   });
 
-  const reelSystem: LegacyReelSystem = {
+  const reelSystem: ReelSystemLike = {
     grid: {
       getCell,
       get cols() {
@@ -376,7 +376,7 @@ describe('boardFromReelSystem: repaint / cellSize', () => {
     const { reelSystem } = fakeReelSystem();
     const board = boardFromReelSystem({
       ...reelSystem,
-      config: { grid: { cellSize: 64 } } as unknown as LegacyReelSystem['config'],
+      config: { grid: { cellSize: 64 } } as unknown as ReelSystemLike['config'],
     });
 
     expect(board.cellSize).toEqual({ width: 64, height: 64 });
@@ -658,18 +658,19 @@ describe('boardFromReelSystem: turbo, skip, config, lastOpts', () => {
     expect(cellAt(0, 0)!.playWin).toHaveBeenCalledTimes(1);
   });
 
-  it('skip forwards to the legacy ReelSystem.skip', () => {
+  it('skip forwards to ReelSystem.skip, with its opts', () => {
     const { reelSystem, skip } = fakeReelSystem();
     const board = boardFromReelSystem(reelSystem);
 
     board.skip();
+    board.skip({ overlays: false });
 
-    expect(skip).toHaveBeenCalledTimes(1);
+    expect(skip.mock.calls).toEqual([[undefined], [{ overlays: false }]]);
   });
 
   it('config is the reel system\'s own, read through', () => {
     const { reelSystem } = fakeReelSystem();
-    const config = { grid: { cellSize: 64 } } as unknown as LegacyReelSystem['config'];
+    const config = { grid: { cellSize: 64 } } as unknown as ReelSystemLike['config'];
     const board = boardFromReelSystem({ ...reelSystem, config });
 
     expect(board.config).toBe(config);

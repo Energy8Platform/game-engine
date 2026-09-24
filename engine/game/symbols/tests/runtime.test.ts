@@ -272,7 +272,7 @@ describe('symbols row against the real reels board', () => {
     (ctx.get('nodeTypes') as ReturnType<typeof createNodeTypes>).register({ ...image, update });
     const board = createReelsBoard({
       resolve,
-      config: { grid: { cols: 2, rows: 1, cellSize: 64 } },
+      grid: { cols: 2, rows: 1, cellSize: 64 },
     });
     ctx.provide('board', board);
     await board.refill({ kind: 'refill', board: [[1], [2]] });

@@ -1,27 +1,38 @@
 /**
- * `BoardApi` (from `@energy8engine/play-loop`) implemented over the legacy
- * `createReelSystem` from `@energy8platform/game-engine/slot`. This is the
- * `board` half of the seam Task 7 declared: play-loop's `executePlan` walks
- * a `PresentationPlan` and calls one method per step; this file is what
- * actually moves pixels (or, in a test, a fake standing in for pixels).
+ * `BoardApi` (from `@energy8engine/play-loop`) implemented over
+ * `createReelSystem` from `@energy8engine/reel-core` — the engine's own
+ * pluggable reel system (slice 35), forked from the legacy
+ * `@energy8platform/game-engine/slot` facade this board used to wrap. This
+ * is the `board` half of the seam Task 7 declared: play-loop's
+ * `executePlan` walks a `PresentationPlan` and calls one method per step;
+ * this file is what actually moves pixels (or, in a test, a fake standing
+ * in for pixels).
  *
- * What Step 1's spike measured (see task-9-report.md for the full record):
+ * The reel system owns the grid, the board and the `fx` overlay layer; HOW
+ * the reels spin and HOW a `tumble` plays are registered into it by other
+ * rows (a motion style, the `tumble` controller). Until one is, `spin`
+ * snaps the reels to the result (and says so through `report`), and
+ * `cascade` throws — the throw is `tumble`'s step failing, which
+ * `executePlan` turns into a diagnostic.
+ *
+ * What Step 1's spike measured against the legacy facade, and still holds
+ * of the fork (see task-9-report.md for the full record):
  *
  *  - `createReelSystem(...)` builds `Container`/`ReelGrid`/`SymbolCell`
  *    scene-graph objects headlessly — no live pixi `Application`, no DOM,
  *    plain Node is enough. `setBoard(board)` is fully SYNCHRONOUS (sets the
  *    board and returns `undefined`); `grid.getCell(col,row).setState(...)`
  *    and `.setData(...)` are synchronous too.
- *  - `spin(target)` and `SymbolCell.playWin()` are both Promise-returning
- *    and both route through the legacy `Tween`/`Ticker.shared` — without a
- *    live, running pixi `Application` driving `requestAnimationFrame`,
- *    they never settle (confirmed: 50ms of wall-clock time with no ticker
- *    pump left `spin()` still pending, and the ticker itself throws
- *    `requestAnimationFrame is not defined` the moment it tries to
- *    self-schedule in Node). This is exactly why this file's own tests run
- *    against a fake, per the play-loop module doc, and why a real spin can
- *    only be proven working in Task 12's headless BROWSER run.
- *  - `ReelSystem.cascade(steps)` / `.reelStep(steps)` exist but do not fit
+ *  - A registered motion style's `spin` and `SymbolCell.playWin()` are both
+ *    Promise-returning and both route through the engine's
+ *    `Tween`/`Ticker.shared` — without a live, running pixi `Application`
+ *    driving `requestAnimationFrame`, they never settle (confirmed: 50ms of
+ *    wall-clock time with no ticker pump left `spin()` still pending, and
+ *    the ticker itself throws `requestAnimationFrame is not defined` the
+ *    moment it tries to self-schedule in Node). This is exactly why this
+ *    file's own tests run against a fake, per the play-loop module doc, or
+ *    against a fake motion style registered on the real system.
+ *  - `ReelSystem.cascade(steps)` exists but does not fit
  *    `revealWins`/`remove`/`refill` as independent calls: a `TumbleStep`
  *    bundles `winningCells` + `removedCells` + `newCells` + `settledGrid`
  *    into ONE call, while `BoardApi` invokes these three methods
@@ -53,22 +64,20 @@
  *
  * One more measured decision baked in here: the step vocabulary's `Board`
  * carries a symbol id (a number or a name) or a per-cell record, but the
- * legacy `SymbolResolver` is keyed by `string` and the legacy `CellData` is
+ * reel-core's `SymbolResolver` is keyed by `string` and its `CellData` is
  * a flat `{ symbol, ...extras }`. Converted through `cellData()`
  * (`@energy8engine/contracts`) — the one function every consumer of a
  * `Board` cell goes through, so this file, a project's own plugin, and any
  * future one agree on the mapping.
  */
-import { createReelSystem } from '@energy8platform/game-engine/slot';
+import { createReelSystem } from '@energy8engine/reel-core';
 import type {
   CellData,
   CreateReelSystemOptions,
   ReelSystem,
-  ReelSystemConfig,
   SymbolView,
-  StepRunOpts,
-  TumbleStep as LegacyTumbleStep,
-} from '@energy8platform/game-engine/slot';
+  TumbleStep as CoreTumbleStep,
+} from '@energy8engine/reel-core';
 import type { Container } from 'pixi.js';
 import { cellData } from '@energy8engine/contracts';
 import type {
@@ -85,7 +94,7 @@ import type { BoardApi } from '@energy8engine/play-loop';
 
 export type { BoardApi } from '@energy8engine/play-loop';
 
-/** The one legacy cell object `revealWins`/`remove` drive directly — measured on `SymbolCell`. */
+/** The one cell object `revealWins`/`remove` drive directly — measured on `SymbolCell`. */
 export interface CellLike {
   setState(state: { winning?: boolean; removed?: boolean; fresh?: boolean }): void;
   setData(data: CellData): void;
@@ -106,27 +115,27 @@ export interface GridLike {
   getCell(col: number, row: number): CellLike;
   readonly cols: number;
   readonly rows: number;
-  /** The legacy `ReelGrid.geometry`'s centre, in the view's local space — what `origin: 'center'` offsets by. Optional: this package's test fakes have none. */
+  /** `ReelGrid.geometry`'s centre, in the view's local space — what `origin: 'center'` offsets by. Optional: this package's test fakes have none. */
   readonly geometry?: { centerX: number; centerY: number };
 }
 
 /**
- * The slice of the legacy `ReelSystem` this board is written against. The
+ * The slice of reel-core's `ReelSystem` this board is written against. The
  * real `ReelSystem` satisfies this structurally (see `createReelsBoard`
  * below); a test fake only has to implement these members.
  */
-export interface LegacyReelSystem {
+export interface ReelSystemLike {
   readonly grid: GridLike;
   /** Read by `remove()` to re-sync this after nulling cells directly — see its comment below. */
   readonly board: CellData[][];
   spin(target: CellData[][], opts?: { turbo?: boolean }): Promise<void>;
   setBoard(target: CellData[][]): void;
   /** One cascade round per step — what `tumble` drives. */
-  cascade(steps: LegacyTumbleStep[], opts?: StepRunOpts<LegacyTumbleStep>): Promise<void>;
-  /** Collapse every in-flight animation (spin tape, tumble chain, overlay tweens) to its end state. */
-  skip(): void;
+  cascade(steps: CoreTumbleStep[], opts?: { turbo?: boolean }): Promise<void>;
+  /** Collapse every in-flight animation (spin, tumble chain, overlay tweens) to its end state; `overlays: false` spares the `fx` layer. */
+  skip(opts?: { overlays?: boolean }): void;
   /** Read by `cellSize`/`config` below; the real `ReelSystem` always has it, the fake this package's tests use may not. */
-  readonly config?: ReelSystemConfig;
+  readonly config?: ReelSystem['config'];
 }
 
 /** Each `Board` cell — a number, a name, or a record — through the shared `cellData()` mapping. */
@@ -137,12 +146,12 @@ function toCellBoard(board: Board): CellData[][] {
 /**
  * Builds `BoardApi` plus `repaint`/`cellSize`/`config`/`lastOpts`
  * (declared on `ReelsBoard` below, not on `BoardApi` itself — `Omit` just
- * borrows its extra members here) over an already-constructed legacy reel
- * system — or, in a test, a fake satisfying `LegacyReelSystem`.
+ * borrows its extra members here) over an already-constructed reel
+ * system — or, in a test, a fake satisfying `ReelSystemLike`.
  */
 export function boardFromReelSystem(
-  reelSystem: LegacyReelSystem,
-): Omit<ReelsBoard, 'view' | 'grid' | 'destroy'> {
+  reelSystem: ReelSystemLike,
+): Omit<ReelsBoard, 'view' | 'grid' | 'system' | 'destroy'> {
   // `ReelSystem.spin` sets its `board` only once the spin resolves, while the engine seats the
   // landing symbols before that: a `repaint()` in that window would `setBoard(oldBoard)` and
   // put the previous spin's art back. Deferred until the last op in flight settles, run once.
@@ -171,7 +180,7 @@ export function boardFromReelSystem(
   let lastOpts: StepOpts | undefined;
   // Cells whose `playState` is currently in flight — what `skip()` below walks to
   // collapse each one to its resting look. Unlike `revealWins`'s `playWin()`
-  // (a legacy `AnimatedSymbol` tween `skip()` has never reached into, and still
+  // (an `AnimatedSymbol` tween `skip()` has never reached into, and still
   // doesn't), a `playState` view exposes exactly the primitive for this —
   // `showStatic()` — because the symbols package's `playState` is built to be
   // torn down early (see `@energy8engine/symbols`' `view.ts`: "showStatic tears
@@ -205,7 +214,7 @@ export function boardFromReelSystem(
     }),
 
     // `turbo` reaches nothing here, and that is measured rather than missed:
-    // the only time this step spends is the legacy `SymbolCell.playWin()`,
+    // the only time this step spends is `SymbolCell.playWin()`,
     // which takes no run options — its tween length is `win` config, not a
     // per-call speed. So a turbo reveal runs at the same pace as a normal one
     // and the step accepts `opts` purely to keep the shape uniform. Adding an
@@ -245,7 +254,7 @@ export function boardFromReelSystem(
     // Not `revealWins` with a field: no amount, no line — a named state
     // (`symbols.yml`'s `states`) played on cells the mechanic chose, win or
     // not. Reaches the view directly, never through `spin`/`cascade`: the
-    // legacy facade has no notion of a symbol's own states at all. A cell
+    // reel system has no notion of a symbol's own states at all. A cell
     // past a short reel (`getCell` answers `undefined`), an empty cell (no
     // view) and a plain `SymbolView` with no `playState` of its own are all
     // skipped rather than thrown over — the same tolerance `bindAll` already
@@ -273,13 +282,13 @@ export function boardFromReelSystem(
       bindAll();
     }),
 
-    // One vocabulary step, one legacy `TumbleStep`, one `cascade` call — a
+    // One vocabulary step, one reel-core `TumbleStep`, one `cascade` call — a
     // chain of N rounds arrives as N of these, each settling on its own board.
     // (`cascade` is generic over the step and loops; handing it one step per
     // call is what keeps `executePlan`'s one-step-at-a-time contract intact.)
     //
     // A `remove`-style re-sync afterwards, and it is not redundant with the
-    // `board = settledGrid` the facade's `cascade` assigns as each step lands.
+    // `board = settledGrid` the reel system's `cascade` assigns as each step lands.
     // That assignment updates the ReelSystem's own closure only; the CELLS are
     // seated by `TumbleController`'s own `setGrid(settledGrid)`, which its
     // `_dead` guard skips entirely once the round was SKIPPED (or the grid
@@ -296,14 +305,14 @@ export function boardFromReelSystem(
             winningCells: step.winning,
             removedCells: step.removed,
             drops: step.drops,
-            // The legacy `newCells.symbol` is a bare string: a record's extras
+            // reel-core's `newCells.symbol` is a bare string: a record's extras
             // cannot ride here. They do not need to — `settledGrid` below is
             // what each cell takes its data from once the drop lands.
             //
             // The cast is for an EMPTY fresh cell. `cellData` answers `null`
             // there, and `null` is exactly what the controller's
             // `cell.setData({ symbol })` means by "no symbol" — the same value
-            // `remove()` above hands it. The legacy field is typed `string`
+            // `remove()` above hands it. The field is typed `string`
             // only because nothing had given it an empty one before; `?? ''`
             // would be strictly worse, since `resolve('')` is a symbol lookup
             // that cannot succeed.
@@ -321,28 +330,29 @@ export function boardFromReelSystem(
       bindAll();
     }),
 
-    // Collapse whatever is animating — the legacy `ReelSystem.skip()` forwards
-    // to the live spin/tumble/reel-step controllers. Synchronous: the op's own
-    // promise resolves a moment later, on its own.
+    // Collapse whatever is animating — `ReelSystem.skip()` forwards to the
+    // live motion runner and every board controller's runner. Synchronous:
+    // the op's own promise resolves a moment later, on its own.
     //
-    // It is not only the in-flight ops: that same call unconditionally kills
-    // every tween on the `fx` overlay layer and then removes and destroys its
-    // children — so a bespoke ring, label or sprite a game drew there is gone
-    // after a skip, whether or not anything was animating. Nothing here can
-    // narrow that without reaching past the facade; a game that draws into
-    // `fx` redraws it after a skip.
+    // It is not only the in-flight ops: unless `opts.overlays` is `false`,
+    // that same call kills every tween on the `fx` overlay layer and then
+    // removes and destroys its children — so a bespoke ring, label or sprite
+    // a game drew there is gone after a skip, whether or not anything was
+    // animating. play-loop's latched skip sweeps it once per skipped run (the
+    // skip that latched it) and re-fans every later step with
+    // `{ overlays: false }`, so what a game draws after the first skip stays.
     //
     // `reelSystem.skip()` doesn't know a cell's `playState` exists at all —
-    // that's this board's own bookkeeping, not the legacy facade's — so a
+    // that's this board's own bookkeeping, not the reel system's — so a
     // `playState` still in flight is collapsed here explicitly, the same
     // "hurry to the end state" bargain `skip()` already makes for everything
     // else. `showStatic()` on each is enough: the `.finally()` on `playState`'s
     // own promise (above) already removes it from `statesPlaying`, so calling
     // it twice for the same view can't happen.
-    skip() {
+    skip(opts?: { overlays?: boolean }) {
       for (const view of statesPlaying) view.showStatic?.();
       statesPlaying.clear();
-      reelSystem.skip();
+      reelSystem.skip(opts);
     },
 
     // Forces a redraw without changing any symbol — a config edit (e.g. a frame style) that
@@ -358,9 +368,9 @@ export function boardFromReelSystem(
       return { width: size, height: size };
     },
 
-    // The reel system's own config, read-only, so a project's step handler can
-    // time itself against the SAME `cascade.timings`/`motion` numbers this
-    // board animates with instead of guessing them.
+    // The reel system's own config (`grid`, `win`), read-only, so a project's
+    // step handler can place itself against the SAME geometry this board
+    // draws with instead of guessing it.
     get config() {
       return reelSystem.config;
     },
@@ -380,22 +390,24 @@ export interface ReelsBoard extends BoardApi {
   repaint(): void;
   /** One cell's footprint — square, from the reel config's `grid.cellSize` (96 when absent). */
   readonly cellSize: { width: number; height: number };
-  /** The live reel system's config — the timings a project's own step can animate against. */
-  readonly config: ReelSystemConfig | undefined;
+  /** The live reel system's config (`grid`, `win`) — the geometry a project's own step can draw against. */
+  readonly config: ReelSystem['config'] | undefined;
   /** The `StepOpts` the last board method was handed; `undefined` before the first one. */
   readonly lastOpts: StepOpts | undefined;
-  /** Collapse every in-flight animation to its end state; a no-op after `destroy()`. */
-  skip(): void;
+  /** Collapse every in-flight animation to its end state (`overlays: false` spares `fx`); a no-op after `destroy()`. */
+  skip(opts?: { overlays?: boolean }): void;
+  /** The reel system underneath — what the row provides as the `reels` service, for motion/controller rows to register into. */
+  readonly system: ReelSystem;
   destroy(): void;
 }
 
 /**
- * Constructs the real legacy reel system and wraps it as `BoardApi` in one
+ * Constructs the real reel system and wraps it as `BoardApi` in one
  * call — the production entry point. `boardFromReelSystem` above is what
  * this package's tests exercise directly, against a fake; this function is
  * covered by a lighter construction/wiring check, since the animated paths
- * it drives (`spin`, `playWin`) cannot settle without a live pixi
- * `Application` running its ticker (see the module doc above).
+ * it drives (a motion style's `spin`, `playWin`) cannot settle without a
+ * live pixi `Application` running its ticker (see the module doc above).
  */
 export function createReelsBoard(options: CreateReelSystemOptions): ReelsBoard {
   const reelSystem: ReelSystem = createReelSystem(options);
@@ -423,13 +435,14 @@ export function createReelsBoard(options: CreateReelSystemOptions): ReelsBoard {
     playState: guarded(api.playState),
     view: reelSystem.view,
     grid: reelSystem.grid,
+    system: reelSystem,
     // Unlike the BoardApi methods above, a stale repaint/skip is nothing to refuse over —
     // there is no spin result either could misreport — so these are no-ops, not throws.
     repaint() {
       if (!destroyed) api.repaint();
     },
-    skip() {
-      if (!destroyed) api.skip();
+    skip(opts?: { overlays?: boolean }) {
+      if (!destroyed) api.skip(opts);
     },
     get cellSize() {
       return api.cellSize;

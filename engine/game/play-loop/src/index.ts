@@ -102,8 +102,12 @@ export interface BoardApi {
   tumble(step: TumbleStep, opts?: StepOpts): Promise<void>;
   /** The named cells play a state of their symbol (`symbols.yml`'s `states`) and return to rest. */
   playState(step: PlayStateStep, opts?: StepOpts): Promise<void>;
-  /** Collapse whatever is presenting right now to its end state. */
-  skip?(): void;
+  /**
+   * Collapse whatever is presenting right now to its end state. `overlays: false`
+   * leaves the board's overlay layer (the reels' `fx`) alone — what every re-fan
+   * of a latched skip passes, so a skipped run sweeps the overlay only once.
+   */
+  skip?(opts?: { overlays?: boolean }): void;
 }
 
 /**

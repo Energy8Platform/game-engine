@@ -4,11 +4,20 @@
  * See `@energy8engine/renderer-pixi`'s `src/runtime.ts` module doc: this is
  * a real TypeScript module served through `dev-game`'s own vite instance,
  * not a hand-written, import-free twin — `createReelsBoard` (from `./index`)
- * pulls in `pixi.js` and `@energy8platform/game-engine/slot` transitively,
- * and vite resolves both.
+ * pulls in `pixi.js` and `@energy8engine/reel-core` transitively, and vite
+ * resolves both.
+ *
+ * **The row provides two services.** `board` (`ReelsBoard`, the `BoardApi`
+ * play-loop drives) and `reels` — the `ReelSystem` underneath, which the
+ * motion, anticipation and cascade rows `ctx.inject(['reels'], …)` to
+ * register into. A hot re-apply builds a NEW reel system and provides it;
+ * an `inject` callback runs again against it, so whatever those rows
+ * register inside its `effect` lands on the new one. With no motion row,
+ * a spin snaps to the result and the reel system's `report` says so — as
+ * a `warning` from `reels` at `reels1` on the composition's `diagnostics`.
  *
  * **`config.resolve` has no home in a bundle or patch row.** Every other
- * field this row needs (`config.grid`, ...) is plain YAML data; `resolve`
+ * field this row needs (`grid`, `win`, `board`) is plain YAML data; `resolve`
  * — the `SymbolResolver` that turns a symbol id into the actual pixi view
  * a player sees — is a JavaScript function, the one piece of a real game's
  * own art this framework cannot ask a `.yml` file to hold. See
@@ -44,8 +53,17 @@
 import type { Context } from 'cordis';
 import Schema from 'schemastery';
 import { Container } from 'pixi.js';
+import { diagnostic } from '@energy8engine/contracts';
+import type { DiagnosticsService } from '@energy8engine/diagnostics';
 import { createReelsBoard, type ReelsBoard } from './index';
-import type { CreateReelSystemOptions, SymbolResolver } from '@energy8platform/game-engine/slot';
+import type {
+  CellData,
+  DeepPartial,
+  GridConfig,
+  ReelSystem,
+  SymbolResolver,
+  WinConfig,
+} from '@energy8engine/reel-core';
 import type {} from '@energy8engine/scenes/runtime';
 
 /** What this row needs from whoever supplies the game's art. */
@@ -57,14 +75,24 @@ export interface AssetsService {
 declare module 'cordis' {
   interface Context {
     board: ReelsBoard;
+    reels: ReelSystem;
     assets: AssetsService;
   }
 }
 
+/** The `reels1` row's config — `./schema.ts`'s `Config`. `resolve` may ride here too, from code; see the module doc. */
+export interface ReelsRowConfig {
+  grid?: DeepPartial<GridConfig>;
+  win?: DeepPartial<WinConfig>;
+  /** Initial board, board[col][row]; empty cells by default. */
+  board?: CellData[][];
+  resolve?: SymbolResolver;
+}
+
 export const name = 'reels';
 
-/** `config` is `CreateReelSystemOptions` minus `resolve` — `{ config: { grid }, ... }` — see the module doc on where `resolve` comes from. */
-export function apply(ctx: Context, config: Partial<CreateReelSystemOptions>): void {
+/** `config` is flat — `{ grid, win, board }` — see the module doc on where `resolve` comes from. */
+export function apply(ctx: Context, config: ReelsRowConfig): void {
   const assets = ctx.reflect.get('assets', false) as AssetsService | undefined;
   const resolve = config?.resolve ?? assets?.resolve;
   if (typeof resolve !== 'function') {
@@ -74,11 +102,22 @@ export function apply(ctx: Context, config: Partial<CreateReelSystemOptions>): v
     );
   }
 
-  const board = createReelsBoard({ ...config, resolve } as CreateReelSystemOptions);
+  const board = createReelsBoard({
+    resolve,
+    grid: config?.grid,
+    win: config?.win,
+    board: config?.board,
+    // Read per report, not captured: a `diagnostics` row may come and go around this one.
+    report: (severity, message) =>
+      (ctx.reflect.get('diagnostics', false) as DiagnosticsService | undefined)?.report(
+        diagnostic(severity, 'reels', 'reels1', message),
+      ),
+  });
   ctx.effect(() => () => board.destroy(), 'reels:board');
   ctx.provide('board', board);
+  ctx.provide('reels', board.system);
 
-  // `origin: 'center'` positions `board.view` at the legacy grid's own
+  // `origin: 'center'` positions `board.view` at the grid's own
   // centre (`ReelGrid.geometry`) instead of reel 0's cell centre; `'cell'`
   // (the default) is the identity placement, `(0, 0)`.
   const place = (props: { origin?: 'cell' | 'center' }) => {

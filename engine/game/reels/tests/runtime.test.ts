@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { Container } from 'pixi.js';
 import { Context } from 'cordis';
 import { createNodeTypes } from '@energy8engine/scenes';
-import type { SymbolResolver } from '@energy8platform/game-engine/slot';
+import { DEFAULT_REEL_CONFIG, type MotionStyle, type SymbolResolver } from '@energy8engine/reel-core';
 import * as runtime from '../src/runtime';
 
 /**
@@ -32,7 +32,7 @@ describe('reels runtime half', () => {
     const ctx = new Context();
     await ctx.plugin(assetsService);
 
-    await ctx.plugin(runtime, { config: { grid: { cols: 2, rows: 2 } } });
+    await ctx.plugin(runtime, { grid: { cols: 2, rows: 2 } });
 
     expect(ctx.board).toBeDefined();
     expect(typeof ctx.board.spinTo).toBe('function');
@@ -46,7 +46,7 @@ describe('reels runtime half', () => {
     // No `assets` provided anywhere, and no `resolve` in the config —
     // this throws, which is how a row reports failure: the loader turns
     // it into a Diagnostic naming the row.
-    await expect(ctx.plugin(runtime, { config: { grid: { cols: 2, rows: 2 } } })).rejects.toThrow(
+    await expect(ctx.plugin(runtime, { grid: { cols: 2, rows: 2 } })).rejects.toThrow(
       /resolver/i,
     );
 
@@ -56,7 +56,7 @@ describe('reels runtime half', () => {
   it('never registers, and never throws, when nodeTypes does not appear at all', async () => {
     const ctx = new Context();
     await ctx.plugin(assetsService);
-    await ctx.plugin(runtime, { config: { grid: { cols: 2, rows: 2 } } });
+    await ctx.plugin(runtime, { grid: { cols: 2, rows: 2 } });
 
     expect(ctx.board).toBeDefined();
     expect(ctx.reflect.get('nodeTypes', false)).toBeUndefined();
@@ -65,11 +65,90 @@ describe('reels runtime half', () => {
   });
 });
 
+/** A motion style that records the targets it ran to and seats them at once. */
+function fakeStyle(key = 'fake') {
+  const ran: unknown[] = [];
+  const style: MotionStyle = {
+    key,
+    create: (kit) => ({
+      plan: () => [],
+      run: async (target) => {
+        ran.push(target);
+        kit.setBoard(target);
+      },
+      skip() {},
+    }),
+  };
+  return { style, ran };
+}
+
+describe('the reels service', () => {
+  it('the row provides `reels`, and a style registered on it is what board.spinTo runs', async () => {
+    const ctx = new Context();
+    await ctx.plugin(assetsService);
+    await ctx.plugin(runtime, { grid: { cols: 1, rows: 1 } });
+
+    const { style, ran } = fakeStyle();
+    ctx.reels.motions.register(style);
+    ctx.reels.useMotion('fake', DEFAULT_REEL_CONFIG.motion);
+    await ctx.board.spinTo({ kind: 'spinTo', board: [[7]] });
+
+    expect(ran).toEqual([[[{ symbol: '7' }]]]);
+    expect(ctx.reels.board).toEqual([[{ symbol: '7' }]]);
+    await ctx.fiber.dispose();
+  });
+
+  it('a hot re-apply provides a NEW reels, and a dependent that injects it has registered on the new one', async () => {
+    const ctx = new Context();
+    await ctx.plugin(assetsService);
+    const fiber = ctx.plugin(runtime, { grid: { cols: 5, rows: 3 } });
+    await fiber;
+    const { style } = fakeStyle();
+    await ctx.plugin({
+      name: 'motion-dependent',
+      apply(c: Context) {
+        c.inject(['reels'], (rc) => {
+          rc.effect(() => rc.reels.motions.register(style), 'dependent:style');
+        });
+      },
+    });
+    await vi.waitFor(() => expect(ctx.reels.motions.get('fake')).toBe(style));
+    const first = ctx.reels;
+
+    await fiber.update({ grid: { cols: 3, rows: 3 } });
+
+    // Mid re-apply the service is briefly unprovided; wait for the new one.
+    await vi.waitFor(() => expect(ctx.reels?.config.grid.cols).toBe(3));
+    expect(ctx.reels).not.toBe(first);
+    await vi.waitFor(() => expect(ctx.reels.motions.get('fake')).toBe(style));
+    await ctx.fiber.dispose();
+  });
+
+  it("with no motion row, a spin snaps and the warning reaches the composition's diagnostics", async () => {
+    const ctx = new Context();
+    const report = vi.fn();
+    ctx.provide('diagnostics', { report } as never);
+    await ctx.plugin(assetsService);
+    await ctx.plugin(runtime, { grid: { cols: 1, rows: 1 } });
+
+    await ctx.board.spinTo({ kind: 'spinTo', board: [[4]] });
+
+    expect(ctx.reels.board).toEqual([[{ symbol: '4' }]]);
+    expect(report).toHaveBeenCalledWith({
+      severity: 'warning',
+      plugin: 'reels',
+      where: 'reels1',
+      message: 'no motion row — the reels snap to the result',
+    });
+    await ctx.fiber.dispose();
+  });
+});
+
 describe('the reels node type', () => {
   it('registers `reels` once nodeTypes appears, regardless of order; mount wraps the board view; unmount detaches and destroys the wrapper', async () => {
     const ctx = new Context();
     await ctx.plugin(assetsService);
-    await ctx.plugin(runtime, { config: { grid: { cols: 5, rows: 3 } } });
+    await ctx.plugin(runtime, { grid: { cols: 5, rows: 3 } });
     const nodeTypes = createNodeTypes();
     ctx.provide('nodeTypes', nodeTypes);
     await vi.waitFor(() => expect(nodeTypes.get('reels')).toBeDefined());
@@ -92,7 +171,7 @@ describe('the reels node type', () => {
   it('origin: center offsets the wrapped view by the grid’s centre; update toggles it in place, same wrapper', async () => {
     const ctx = new Context();
     await ctx.plugin(assetsService);
-    await ctx.plugin(runtime, { config: { grid: { cols: 5, rows: 3, cellSize: 100, gap: 10 } } });
+    await ctx.plugin(runtime, { grid: { cols: 5, rows: 3, cellSize: 100, gap: 10 } });
     const nodeTypes = createNodeTypes();
     ctx.provide('nodeTypes', nodeTypes);
     await vi.waitFor(() => expect(nodeTypes.get('reels')).toBeDefined());
@@ -119,7 +198,7 @@ describe('the reels node type', () => {
   it('a fresh mount ahead of the old unmount (scenes.ts remountNode order: mount THEN unmount) leaves the board view under the fresh wrapper, not torn out', async () => {
     const ctx = new Context();
     await ctx.plugin(assetsService);
-    await ctx.plugin(runtime, { config: { grid: { cols: 5, rows: 3, cellSize: 100, gap: 10 } } });
+    await ctx.plugin(runtime, { grid: { cols: 5, rows: 3, cellSize: 100, gap: 10 } });
     const nodeTypes = createNodeTypes();
     ctx.provide('nodeTypes', nodeTypes);
     await vi.waitFor(() => expect(nodeTypes.get('reels')).toBeDefined());
@@ -155,11 +234,11 @@ describe('the reels node type', () => {
     await ctx.plugin(assetsService);
     const nodeTypes = createNodeTypes();
     ctx.provide('nodeTypes', nodeTypes);
-    const fiber = ctx.plugin(runtime, { config: { grid: { cols: 5, rows: 3 } } });
+    const fiber = ctx.plugin(runtime, { grid: { cols: 5, rows: 3 } });
     await fiber;
     await vi.waitFor(() => expect(nodeTypes.get('reels')).toBeDefined());
     const first = nodeTypes.get('reels')!;
-    await fiber.update({ config: { grid: { cols: 3, rows: 3 } } });
+    await fiber.update({ grid: { cols: 3, rows: 3 } });
     await vi.waitFor(() => expect(nodeTypes.get('reels')).not.toBe(first));
     await fiber.dispose();
     expect(nodeTypes.get('reels')).toBeUndefined();

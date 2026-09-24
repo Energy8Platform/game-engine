@@ -472,6 +472,7 @@ describe('play-loop runtime half: turbo and skip', () => {
     await ctx.plugin(runtime);
 
     const order: string[] = [];
+    const skipArgs: unknown[] = [];
     let release!: () => void;
     const held = new Promise<void>((resolve) => (release = resolve));
     let started = 0;
@@ -484,7 +485,10 @@ describe('play-loop runtime half: turbo and skip', () => {
 
     const running = ctx.play.execute([step, step, step], {
       tumble,
-      skip: () => order.push('skip'),
+      skip: (opts?: { overlays?: boolean }) => {
+        order.push('skip');
+        skipArgs.push(opts);
+      },
     } as unknown as BoardApi);
     ctx.play.skip(); // during round 1, the way a second tap on Spin arrives
     release();
@@ -494,6 +498,9 @@ describe('play-loop runtime half: turbo and skip', () => {
     // moment they started — after the call, never before it (a skip landing
     // first would be wiped by the controller's own `_killed = false`).
     expect(order).toEqual(['tumble', 'skip', 'tumble', 'skip', 'tumble', 'skip']);
+    // The fx overlay is swept once per skipped run — by the first skip; every
+    // re-fan collapses the step alone and leaves the overlay layer be.
+    expect(skipArgs).toEqual([undefined, { overlays: false }, { overlays: false }]);
 
     await ctx.fiber.dispose();
   });
