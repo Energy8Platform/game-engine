@@ -19,6 +19,8 @@ export interface AssetLoader {
   load(urls: string[]): Promise<void>;
   unload(urls: string[]): Promise<void>;
   get(url: string): Texture | undefined;
+  /** Paths something declared it will load — a document names them, or a row `require`d them: `get` does not call them "nothing loaded". Loads nothing. Optional: a loader without it warns as before. */
+  expect?(urls: string[]): void;
 }
 
 export const container: NodeType = {

@@ -964,6 +964,7 @@ export function createScenes(options: CreateScenesOptions): ScenesService {
   function requireAssets(paths: string[]): () => void {
     const holder = { paths: [...new Set(paths)] };
     required.add(holder);
+    loader.expect?.(holder.paths);
     // `e8 build` copies `assets/` and nothing else, and cannot see a path
     // that lives in TypeScript — so the runtime says it, and still asks for
     // it (dev serves it fine). A repeat is collapsed by the diagnostics service.
@@ -1111,6 +1112,10 @@ export function createScenes(options: CreateScenesOptions): ScenesService {
       }
       docs.clear();
       for (const doc of next) docs.set(doc.id, doc);
+      // Every path a declared document names is one something WILL load (on
+      // its `show`), so the loader must not call it "nothing loaded" when a
+      // hidden mount draws it first. Before the remount: mounting calls `get`.
+      loader.expect?.([...new Set(next.flatMap((d) => assetsOf(d.id)))]);
       remount([...changed]);
     },
     highlight(ref) {

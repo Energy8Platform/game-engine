@@ -206,3 +206,57 @@ describe('require', () => {
     );
   });
 });
+
+describe('declared paths reach the loader before anything mounts', () => {
+  function expectLoader() {
+    const order: string[] = [];
+    const expected: string[][] = [];
+    const loader: AssetLoader = {
+      load: vi.fn(async () => {}),
+      unload: vi.fn(async () => {}),
+      get: (url) => {
+        order.push(`get ${url}`);
+        return Texture.EMPTY;
+      },
+      expect: (urls) => {
+        order.push(`expect ${[...urls].sort().join(',')}`);
+        expected.push([...urls]);
+      },
+    };
+    return { loader, order, expected };
+  }
+
+  it('replace expects every declared document’s paths, hidden ones included, before mounting', () => {
+    const { loader, order, expected } = expectLoader();
+    boot(
+      [
+        docA,
+        { id: 'b', nodes: [{ id: 'art', type: 'image', props: { src: 'b.png' } }] },
+      ],
+      loader,
+    );
+    expect(expected.flat().sort()).toEqual(['b.png', 'bg.png']);
+    // Mounting calls `get`; the expect must come first.
+    const firstGet = order.findIndex((s) => s.startsWith('get '));
+    const lastExpect = order.map((s) => s.startsWith('expect ')).lastIndexOf(true);
+    expect(lastExpect).toBeGreaterThanOrEqual(0);
+    expect(firstGet).toBeGreaterThan(lastExpect);
+  });
+
+  it('require expects its paths at once, before its batch runs', () => {
+    const { loader, expected } = expectLoader();
+    const { scenes } = boot([], loader);
+    expected.length = 0;
+    scenes.require(['assets/fx.png']);
+    // Synchronously — no tick awaited.
+    expect(expected).toEqual([['assets/fx.png']]);
+  });
+
+  it('a loader without expect still boots and requires', async () => {
+    const loader = spyLoader();
+    const { scenes } = boot([docA], loader);
+    scenes.require(['assets/fx.png']);
+    await tick();
+    expect(loader.calls).toContainEqual(['assets/fx.png']);
+  });
+});

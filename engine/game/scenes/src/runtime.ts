@@ -68,8 +68,12 @@ export const inject = ['renderer'];
  *
  * Only after the first batch settled: a `get` during boot is the ordinary
  * "not yet" — `image.mount` draws an empty sprite and `update` fills it in
- * when the load lands. And never for a path a batch DID ask for: that one
- * has its own error from `load()` already.
+ * when the load lands. And never for a path a batch DID ask for (that one
+ * has its own error from `load()` already), nor for one something DECLARED
+ * (`expect`): every path a declared document names — `replace()` mounts
+ * them all, hidden, long before `show` loads them — and every path a row
+ * `require`d. Additive: a path stays declared after the document naming it
+ * is gone.
  *
  * Built per `apply` rather than as a module constant, because those three
  * bits of state are this composition's: after a hot re-apply (or a second
@@ -91,6 +95,9 @@ const createPixiLoader = (report: (d: Diagnostic) => void): AssetLoader => {
       }
     },
     unload: async (urls) => { await Assets.unload(urls.map((u) => `/${u}`)); },
+    expect: (urls) => {
+      for (const u of urls) asked.add(u);
+    },
     get: (url) => {
       const texture = Assets.get(`/${url}`) as ReturnType<AssetLoader['get']>;
       if (texture === undefined && settled && !asked.has(url) && !reported.has(url)) {

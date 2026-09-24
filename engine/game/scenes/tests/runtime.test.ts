@@ -314,6 +314,53 @@ describe('scenes row', () => {
     expect(report).toHaveBeenCalledTimes(1);
     await fiber.dispose();
   });
+
+  // `Assets.load` rejects in this environment (no `document`), which still
+  // settles the first batch — the moment after which a miss is a warning.
+  it('after the first batch, a hidden declared document’s path is not "nothing loaded"; an undeclared one is', async () => {
+    const report = vi.fn();
+    const { ctx, fiber } = boot(
+      fetchOk({
+        scenes: [
+          { id: 'a', nodes: [{ id: 'n', type: 'image', props: { src: 'a.png' } }] },
+          { id: 'b', nodes: [{ id: 'n', type: 'image', props: { src: 'b.png' } }] },
+        ],
+        diagnostics: [],
+        nodeTypes: [],
+      }),
+    );
+    ctx.provide('diagnostics', { report });
+    await fiber;
+    await vi.waitFor(() => expect(ctx.get('scenes')!.docs().has('b')).toBe(true));
+    const loader = ctx.get('assetLoader')!;
+    await expect(loader.load(['other.png'])).rejects.toThrow();
+
+    loader.get('b.png'); // declared by document b, never shown
+    expect(report).not.toHaveBeenCalledWith(expect.objectContaining({ message: expect.stringContaining('b.png') }));
+
+    loader.get('stray.png'); // named by nothing
+    expect(report).toHaveBeenCalledWith(
+      expect.objectContaining({ where: 'assetLoader', message: expect.stringContaining('stray.png') }),
+    );
+    await fiber.dispose();
+  });
+
+  it('an expected path stays expected after the document naming it is replaced away', async () => {
+    const report = vi.fn();
+    const { ctx, fiber } = boot(
+      fetchOk({ scenes: [{ id: 'b', nodes: [{ id: 'n', type: 'image', props: { src: 'b.png' } }] }], diagnostics: [], nodeTypes: [] }),
+    );
+    ctx.provide('diagnostics', { report });
+    await fiber;
+    await vi.waitFor(() => expect(ctx.get('scenes')!.docs().has('b')).toBe(true));
+    ctx.get('scenes')!.replace([]);
+    const loader = ctx.get('assetLoader')!;
+    await expect(loader.load(['other.png'])).rejects.toThrow();
+    // Additive by design: the warning is a hint about paths nothing EVER named.
+    loader.get('b.png');
+    expect(report).not.toHaveBeenCalledWith(expect.objectContaining({ message: expect.stringContaining('b.png') }));
+    await fiber.dispose();
+  });
 });
 
 describe('ui.tap', () => {
