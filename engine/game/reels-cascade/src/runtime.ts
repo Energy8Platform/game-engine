@@ -5,7 +5,7 @@
  *  - the `tumble` board controller (`tumbleController`, `@energy8engine/reel-core`) into
  *    `ctx.reels.controllers` — `ReelSystem.cascade` delegates a `tumble` step to it, and throws
  *    `no reels-cascade row` without one;
- *  - the `reelStep` step handler (`./reel-step`) into play-loop's `ctx.steps`.
+ *  - the `reelStep` step handler (`./reelStep`) into play-loop's `ctx.steps`.
  *
  * The row's presence is the cascade switch (spec §3.3): its config carries no `enabled`
  * (see `./schema`), and both controllers are handed `{ ...config, enabled: true }` — the forked
@@ -30,7 +30,7 @@ import {
 } from '@energy8engine/reel-core';
 import type {} from '@energy8engine/reels/runtime';
 import type {} from '@energy8engine/play-loop/runtime';
-import { createReelStepHandler } from './reel-step';
+import { createReelStepHandler } from './reelStep';
 
 export const name = 'reels-cascade';
 

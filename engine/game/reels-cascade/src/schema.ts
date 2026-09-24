@@ -31,7 +31,7 @@ export const Config = Schema.object({
       .default(220)
       .description('Fresh symbols dropping in from the top (ms).'),
     wait: Schema.number().default(150).description('Pause after a step settles (ms).'),
-  }).description('Per-phase durations of one cascade / reel-step round.'),
+  }).description('Per-phase durations of one cascade / reelStep round.'),
   easings: Schema.object({
     highlight: easing('easeOutQuad', 'highlight'),
     remove: easing('easeInBack', 'remove'),

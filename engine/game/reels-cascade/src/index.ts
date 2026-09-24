@@ -5,5 +5,5 @@
 export { name, apply } from './runtime';
 export type { CascadeRowConfig } from './runtime';
 export { Config } from './schema';
-export { createReelStepHandler } from './reel-step';
-export type { ReelStepStep } from './reel-step';
+export { createReelStepHandler } from './reelStep';
+export type { ReelStepStep } from './reelStep';

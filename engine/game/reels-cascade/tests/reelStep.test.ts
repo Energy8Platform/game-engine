@@ -15,7 +15,7 @@ import { createBoardStepRegistry, executePlan } from '@energy8engine/play-loop';
 import type { BoardApi } from '@energy8engine/play-loop';
 import type { PresentationStep } from '@energy8engine/contracts';
 import { DEFAULT_REEL_CONFIG, type ReelSystem } from '@energy8engine/reel-core';
-import type { ReelStepStep } from '../src/reel-step';
+import type { ReelStepStep } from '../src/reelStep';
 
 /** Every `controller.step(data, index)` call the recorder saw, in order (chain cases only). */
 interface Recorded {
@@ -48,7 +48,7 @@ vi.mock('@energy8engine/reel-core', async (importOriginal) => {
   };
 });
 
-const { createReelStepHandler } = await import('../src/reel-step');
+const { createReelStepHandler } = await import('../src/reelStep');
 
 const SETTLED = [
   [7, 1, 2],
