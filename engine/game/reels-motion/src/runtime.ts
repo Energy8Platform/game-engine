@@ -21,7 +21,13 @@
  * away) tears down all four in one disposer.
  */
 import type { Context } from 'cordis';
-import { BUILTIN_MOTION_STYLES, type MotionConfig } from '@energy8engine/reel-core';
+import {
+  BUILTIN_MOTION_STYLES,
+  DEFAULT_REEL_CONFIG,
+  mergeReelConfig,
+  type DeepPartial,
+  type MotionConfig,
+} from '@energy8engine/reel-core';
 import type {} from '@energy8engine/reels/runtime';
 
 export const name = 'reels-motion';
@@ -34,16 +40,22 @@ export const name = 'reels-motion';
  */
 export type MotionRowConfig = MotionConfig;
 
-/** The row's config is already a `MotionConfig` — `useMotion`'s second argument, verbatim. */
-function motionOf(config: MotionRowConfig): MotionConfig {
-  return config;
+/**
+ * The row's config over `DEFAULT_REEL_CONFIG.motion` — `useMotion`'s second argument. Nothing
+ * runs `./schema`'s defaults between the patch and `apply` (the loader hands a row its config
+ * verbatim, and a bundle row no patch configures arrives as `{}`), so the row fills them itself:
+ * `{}` is `swap` with every default, the schema's own answer.
+ */
+function motionOf(config: DeepPartial<MotionRowConfig> | undefined): MotionConfig {
+  return mergeReelConfig(DEFAULT_REEL_CONFIG.motion, config);
 }
 
-export function apply(ctx: Context, config: MotionRowConfig): void {
+export function apply(ctx: Context, config: DeepPartial<MotionRowConfig>): void {
+  const motion = motionOf(config);
   ctx.inject(['reels'], (c) => {
     c.effect(() => {
       const offs = BUILTIN_MOTION_STYLES.map((s) => c.reels.motions.register(s));
-      const off = c.reels.useMotion(config.style, motionOf(config));
+      const off = c.reels.useMotion(motion.style, motion);
       return () => {
         off();
         offs.forEach((f) => f());

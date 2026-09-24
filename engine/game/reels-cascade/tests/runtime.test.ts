@@ -11,6 +11,13 @@ import {
 import { createBoardStepRegistry, type BoardStepRegistry } from '@energy8engine/play-loop';
 import * as runtime from '../src/runtime';
 import { Config } from '../src/schema';
+import { tumbleController } from '@energy8engine/reel-core';
+
+// The real factory, spied on — so a test can read the config the row handed it.
+vi.mock('@energy8engine/reel-core', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@energy8engine/reel-core')>();
+  return { ...actual, tumbleController: vi.fn(actual.tumbleController) };
+});
 
 /** A fake `reels` service — just enough of `ReelSystem` for this row to touch: `controllers.register`. */
 function fakeReels() {
@@ -45,6 +52,23 @@ describe('reels-cascade runtime half', () => {
     expect(fake.register).toHaveBeenCalledTimes(1);
     expect(fake.registered.get('tumble')?.kind).toBe('tumble');
     expect(steps.has('reelStep')).toBe(true);
+
+    await ctx.fiber.dispose();
+  });
+
+  it('an empty config (a bundle row no patch configured) hands the controller every default', async () => {
+    // `resolveComposition` hands such a row `config: {}` and the loader applies it verbatim.
+    const fake = fakeReels();
+    const ctx = new Context();
+    await ctx.plugin(service('reels', fake.reels));
+    vi.mocked(tumbleController).mockClear();
+
+    await ctx.plugin(runtime, {});
+
+    expect(vi.mocked(tumbleController)).toHaveBeenCalledWith({
+      ...DEFAULT_REEL_CONFIG.cascade,
+      enabled: true,
+    });
 
     await ctx.fiber.dispose();
   });

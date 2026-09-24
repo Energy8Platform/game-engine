@@ -15,13 +15,25 @@
  * the anticipator lands on the fresh one too.
  */
 import type { Context } from 'cordis';
-import { createAnticipator, type AnticipationConfig } from '@energy8engine/reel-core';
+import {
+  createAnticipator,
+  DEFAULT_REEL_CONFIG,
+  mergeReelConfig,
+  type AnticipationConfig,
+  type DeepPartial,
+} from '@energy8engine/reel-core';
 import type {} from '@energy8engine/reels/runtime';
 
 export const name = 'reels-anticipation';
 
-export function apply(ctx: Context, config: AnticipationConfig): void {
+/**
+ * `config` is merged over `DEFAULT_REEL_CONFIG.anticipation`: the loader hands a row its config
+ * verbatim, and a bundle row no patch configures arrives as `{}` — nothing runs `./schema`'s
+ * defaults on the way, so the row fills them itself.
+ */
+export function apply(ctx: Context, config: DeepPartial<AnticipationConfig>): void {
+  const anticipation = mergeReelConfig(DEFAULT_REEL_CONFIG.anticipation, config);
   ctx.inject(['reels'], (c) => {
-    c.effect(() => c.reels.anticipation.set(createAnticipator(config)), 'reels-anticipation');
+    c.effect(() => c.reels.anticipation.set(createAnticipator(anticipation)), 'reels-anticipation');
   });
 }

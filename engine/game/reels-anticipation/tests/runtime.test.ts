@@ -51,6 +51,19 @@ describe('reels-anticipation runtime half', () => {
     await ctx.fiber.dispose();
   });
 
+  it('an empty config (a bundle row no patch configured) builds the default anticipator', async () => {
+    // `resolveComposition` hands such a row `config: {}` and the loader applies it verbatim.
+    const fake = fakeReels();
+    const ctx = new Context();
+    await ctx.plugin(reelsService(fake.reels));
+
+    await ctx.plugin(runtime, {});
+
+    expect(fake.current()!.config).toEqual(DEFAULT_REEL_CONFIG.anticipation);
+
+    await ctx.fiber.dispose();
+  });
+
   it('dispose unsets the anticipator', async () => {
     const fake = fakeReels();
     const ctx = new Context();

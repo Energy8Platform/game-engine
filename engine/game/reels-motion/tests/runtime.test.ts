@@ -72,6 +72,20 @@ describe('reels-motion runtime half', () => {
     await ctx.fiber.dispose();
   });
 
+  it('an empty config (a bundle row no patch configured) activates `swap` with every default', async () => {
+    // `resolveComposition` hands such a row `config: {}` and the loader applies it verbatim —
+    // nothing runs the schema's defaults on the way, so the row has to fill them itself.
+    const fake = fakeReels();
+    const ctx = new Context();
+    await ctx.plugin(reelsService(fake.reels));
+
+    await ctx.plugin(runtime, {} as MotionConfig);
+
+    expect(fake.useMotionCalls).toEqual([{ key: 'swap', config: DEFAULT_REEL_CONFIG.motion }]);
+
+    await ctx.fiber.dispose();
+  });
+
   it('a config override picks a different style and passes the merged config through', async () => {
     const fake = fakeReels();
     const ctx = new Context();

@@ -16,7 +16,13 @@
  * either order relative to `reels1`/`playloop1`, or without them.
  */
 import type { Context } from 'cordis';
-import { tumbleController, type CascadeConfig } from '@energy8engine/reel-core';
+import {
+  DEFAULT_REEL_CONFIG,
+  mergeReelConfig,
+  tumbleController,
+  type CascadeConfig,
+  type DeepPartial,
+} from '@energy8engine/reel-core';
 import type {} from '@energy8engine/reels/runtime';
 import type {} from '@energy8engine/play-loop/runtime';
 import { createReelStepHandler } from './reel-step';
@@ -26,8 +32,14 @@ export const name = 'reels-cascade';
 /** `CascadeConfig` without `enabled` — see the module doc. */
 export type CascadeRowConfig = Omit<CascadeConfig, 'enabled'>;
 
-export function apply(ctx: Context, config: CascadeRowConfig): void {
-  const cascade = (): CascadeConfig => ({ ...config, enabled: true });
+/**
+ * `config` is merged over `DEFAULT_REEL_CONFIG.cascade`: the loader hands a row its config
+ * verbatim, and a bundle row no patch configures arrives as `{}` — nothing runs `./schema`'s
+ * defaults on the way, so the row fills them itself.
+ */
+export function apply(ctx: Context, config: DeepPartial<CascadeRowConfig>): void {
+  const merged = mergeReelConfig(DEFAULT_REEL_CONFIG.cascade, config);
+  const cascade = (): CascadeConfig => ({ ...merged, enabled: true });
 
   ctx.inject(['reels'], (c) => {
     c.effect(
