@@ -235,12 +235,14 @@ test('the turbo checkbox: lastStepOpts reflects it, and the run is measurably fa
 /**
  * Case 3. `spin()` left un-awaited, a 100 ms real wait (long enough for
  * the flow to have left `idle` and the board's own spin animation to be
- * under way — `spin`'s POST plus `mechanics.present` both settle well
- * under that on a warm dev server), then `skip()` — the same bus event the
- * button's own second click emits, caught by `play-loop`'s subscription,
- * never a flow node. The still-pending `spin()` promise is the proof: it
- * resolves by `next` (the `draw` node's own exit) within 1 s of the skip
- * landing, not merely "eventually".
+ * under way — a skip that lands before the plan — the POST still in
+ * flight — is kept by the armed play row since slice 34 (case 3b proves
+ * that window on purpose), so the 100 ms is no longer a race with the
+ * network), then `skip()` — the same bus event the button's own second
+ * click emits, caught by `play-loop`'s subscription, never a flow node.
+ * The still-pending `spin()` promise is the proof: it resolves by `next`
+ * (the `draw` node's own exit) within 1 s of the skip landing, not merely
+ * "eventually".
  */
 test('skip, 100 ms into a spin, collapses the presentation — it resolves within 1 s of the skip', async ({
   page,
@@ -257,6 +259,41 @@ test('skip, 100 ms into a spin, collapses the presentation — it resolves withi
 
   expect(outcome).toEqual({ out: 'next' });
   expect(elapsedMs).toBeLessThan(1000);
+});
+
+/**
+ * Case 3b (slice 34). The window case 3 only hoped to miss: a skip that
+ * lands while the round's request is still in flight. `page.route` holds
+ * `/api/spin` for `HOLD_MS`, and the skip is sent only once the held request
+ * has been SEEN — so it provably arrives before any plan exists. The flow's
+ * `spin` node armed the play row, so the skip is kept, and the plan that
+ * arrives after the hold is collapsed from its first step. Without the arm
+ * the spin resolves after the hold PLUS a played-out round (≥ 2 s).
+ */
+test('a skip during a held spin request is kept, and the round collapses when its plan arrives', async ({
+  page,
+}) => {
+  host = await startDevHost(dir);
+  await readyPage(page);
+
+  const HOLD_MS = 800;
+  let seen!: () => void;
+  const requested = new Promise<void>((r) => (seen = r));
+  await page.route('**/api/spin', async (route) => {
+    seen();
+    await new Promise((r) => setTimeout(r, HOLD_MS));
+    await route.continue();
+  });
+
+  const spinPromise = page.evaluate(() => (window as any).__e8.spin());
+  await requested;
+  const skipAt = Date.now();
+  await page.evaluate(() => (window as any).__e8.skip());
+  const outcome = await spinPromise;
+  const elapsedMs = Date.now() - skipAt;
+
+  expect(outcome).toEqual({ out: 'next' });
+  expect(elapsedMs, `held ${HOLD_MS} ms`).toBeLessThan(HOLD_MS + 1000);
 });
 
 /**
