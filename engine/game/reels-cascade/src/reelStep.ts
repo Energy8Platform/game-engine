@@ -13,6 +13,9 @@
  * **Tempo.** `opts` (`StepOpts`) is forwarded to `controller.step` (turbo halves its timings)
  * and to `board.refill` — which records what it was last called with (`ReelsBoard.lastOpts`),
  * so calling it with no `opts` would overwrite what `spinTo` had recorded.
+ *
+ * **Skip.** `skip()` hurries the cached controller (`ReelStepController.skip`: kill tweens, snap
+ * to the settled board); the held `step` then returns and `run` finishes with its `refill`.
  */
 import {
   ReelStepController,
@@ -71,6 +74,10 @@ export function createReelStepHandler(deps: {
 
   return {
     kind: 'reelStep',
+
+    // play-loop's skip latch hurries every registered handler: the cached controller snaps to
+    // the in-flight step's settled board, and `run` then re-syncs the board as usual.
+    skip: () => controller?.skip(),
 
     async run(step: PresentationStep, board: unknown, opts?: StepOpts): Promise<void> {
       const reelStep = step as unknown as ReelStepStep;

@@ -39,8 +39,13 @@ export const Config = Schema.object({
   }).description('Per-phase easings.'),
   perStepDecel: Schema.number()
     .default(0.08)
-    .description('Slow each successive step to build tension: factor = 1 + step * this (capped).'),
-  perStepDecelCap: Schema.number().default(1.5).description('Cap on the per-step slowdown factor.'),
+    .description(
+      'reelStep only: slow each successive round to build tension, factor = 1 + round * this ' +
+        '(capped). No effect on tumble, which the board plays one step per call.',
+    ),
+  perStepDecelCap: Schema.number()
+    .default(1.5)
+    .description('reelStep only: cap on the per-round slowdown factor (no effect on tumble).'),
   dimNonWinners: Schema.boolean()
     .default(false)
     .description('Dim non-winning symbols during the highlight phase.'),
@@ -60,5 +65,8 @@ export const Config = Schema.object({
     persistInFreeSpins: Schema.boolean()
       .default(false)
       .description('Keep climbing across free spins instead of resetting per spin.'),
-  }).description('Running win multiplier (Pragmatic Tumble / Avalanche).'),
+  }).description(
+    'Running win multiplier (Pragmatic Tumble / Avalanche). No effect yet: the controllers ' +
+      'count it, but nothing in the engine draws or reads it.',
+  ),
 });

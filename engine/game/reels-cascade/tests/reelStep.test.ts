@@ -26,6 +26,9 @@ interface Recorded {
 }
 const recorded: Recorded[] = [];
 let recording = false;
+/** When on, `step` holds (never settles by itself) until the controller's `skip()` releases it. */
+let holding = false;
+let skipCalls = 0;
 const constructed: unknown[][] = [];
 
 vi.mock('@energy8engine/reel-core', async (importOriginal) => {
@@ -33,16 +36,23 @@ vi.mock('@energy8engine/reel-core', async (importOriginal) => {
   const Real = actual.ReelStepController;
   return {
     ...actual,
-    // Records when `recording` is on; otherwise the real controller does the work.
+    // Records when `recording` is on, holds when `holding` is on; otherwise the real
+    // controller does the work.
     ReelStepController: class {
       private real: InstanceType<typeof Real>;
+      private release: (() => void) | null = null;
       constructor(...args: ConstructorParameters<typeof Real>) {
         constructed.push(args);
         this.real = new Real(...args);
       }
       async step(data: Omit<Recorded, 'index'>, index?: number, opts?: { turbo?: boolean }) {
         if (recording) recorded.push({ ...data, index });
+        else if (holding) await new Promise<void>((r) => (this.release = r));
         else await this.real.step(data as never, index, opts);
+      }
+      skip() {
+        skipCalls++;
+        this.release?.();
       }
     },
   };
@@ -112,6 +122,8 @@ beforeEach(() => {
   recorded.length = 0;
   constructed.length = 0;
   recording = false;
+  holding = false;
+  skipCalls = 0;
 });
 
 describe('reelStep: the step the board did not have', () => {
@@ -172,6 +184,26 @@ describe('reelStep: the step the board did not have', () => {
 
     expect(constructed).toHaveLength(2);
     expect(constructed[1][0]).toBe(reels.kit().grid);
+  });
+
+  it('skip() hurries the held controller step, and the run settles on the settled board', async () => {
+    holding = true;
+    const calls: string[] = [];
+    const handler = handlerFor(fakeReels(calls));
+
+    const run = handler.run(asStep(QUIET_STEP), fakeBoard(calls), undefined);
+    // `run` reaches `controller.step` synchronously — the step is held there now
+    expect(constructed).toHaveLength(1);
+    handler.skip?.();
+    expect(skipCalls).toBe(1);
+    await run;
+
+    expect(calls).toEqual([`refill:${JSON.stringify(SETTLED)}`]);
+  });
+
+  it('skip() with no run yet is a no-op', () => {
+    expect(() => handlerFor(fakeReels([])).skip?.()).not.toThrow();
+    expect(skipCalls).toBe(0);
   });
 
   it('unregistering takes the step away again', () => {
