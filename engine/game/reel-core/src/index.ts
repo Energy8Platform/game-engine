@@ -24,6 +24,8 @@ export type {
   DeepPartial,
   EasingName,
   EvaluationMode,
+  CellSizeSpec,
+  ResolvedGeometry,
   GridConfig,
   MotionConfig,
   MotionStyleKey,
