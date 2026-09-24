@@ -53,3 +53,18 @@ export { TumbleController } from './cascade/TumbleController';
 export type { TumbleStep } from './cascade/TumbleController';
 export { ReelStepController, buildReelStepTape } from './cascade/ReelStepController';
 export type { ReelStepData } from './cascade/ReelStepController';
+
+// ── pluggable reel system ───────────────────────────────────────────────────
+export { createReelSystem } from './system/ReelSystem';
+export type { CreateReelSystemOptions, ReelSystem } from './system/ReelSystem';
+export { BUILTIN_MOTION_STYLES, createAnticipator, tumbleController } from './system/builtins';
+export type {
+  ReelKit,
+  MotionRunner,
+  MotionStyle,
+  Anticipator,
+  ControllerRunner,
+  BoardController,
+  Registry,
+  Report,
+} from './system/contracts';
