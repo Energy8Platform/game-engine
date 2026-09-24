@@ -1296,7 +1296,7 @@ describe('ide rpc — broadcastGameComposition reaches the root and the preview'
         {
           id: 'reels1',
           name: '@energy8engine/reels',
-          config: { config: { grid: { cols: 6, rows: 3 } } },
+          config: { grid: { cols: 6, rows: 3 } },
           from: 'patch',
           runtimeUrl: null,
           schema: null,

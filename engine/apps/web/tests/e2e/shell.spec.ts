@@ -231,15 +231,15 @@ test('Cmd/Ctrl+S saves the active editor and only it', async ({ page }) => {
     await openIde(page, host);
     await openInEditor(page, 'game/script.spin');
     await page.keyboard.type('-- not saved');
-    await openInEditor(page, 'plugins/reel-step/src/step.ts');
+    await openInEditor(page, 'plugins/reel-step/src/mechanic.ts');
     await page.keyboard.type('// saved by keyboard\n');
 
     await page.keyboard.press(process.platform === 'darwin' ? 'Meta+s' : 'Control+s');
 
     await expect
-      .poll(() => readFileSync(join(dir, 'plugins/reel-step/src/step.ts'), 'utf8'))
+      .poll(() => readFileSync(join(dir, 'plugins/reel-step/src/mechanic.ts'), 'utf8'))
       .toContain('saved by keyboard');
-    await expect(page.getByTestId('doc-f:plugins/reel-step/src/step.ts')).not.toContainText('●');
+    await expect(page.getByTestId('doc-f:plugins/reel-step/src/mechanic.ts')).not.toContainText('●');
     await expect(page.getByTestId('doc-f:game/script.spin')).toContainText('●');
     expect(readFileSync(join(dir, 'game/script.spin'), 'utf8')).toBe(spinBefore);
   } finally {

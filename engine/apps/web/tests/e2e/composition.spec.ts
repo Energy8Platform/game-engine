@@ -574,7 +574,7 @@ test('removing the mechanics row says so instead of booting to ready', async ({ 
  * read with it, so nothing on the page speaks for `play` any more. Two
  * things still do, and both are asserted because they say different
  * things: at boot, the row that needs what `playloop1` ALSO provided —
- * `ctx.steps`, the registry `reelstep1`'s step handler registers into —
+ * `ctx.steps`, the registry `cascade1`'s `reelStep` handler registers into —
  * names itself (`removeRowId` rather than a wholesale patch, so that row
  * is still here); and on the first click, the `present` node names the
  * service it could not find, in the game's own log, where before this
@@ -599,7 +599,7 @@ test('removing the play loop row says so at boot, and the first click names the 
     await expect(
       mount,
       'the row whose step handler had nowhere to register names itself',
-    ).toContainText('the "reelstep1" row requires "steps"');
+    ).toContainText('the "cascade1" row requires "steps"');
 
     // The spin still runs — the button is not in the mount — and its
     // `present` says which service the presentation needed.

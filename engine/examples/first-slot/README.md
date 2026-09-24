@@ -123,11 +123,21 @@ provides `mount`.
 
 ### Row notes
 
-- `reels1` — NOT a typo: the row's own `config` **is** `CreateReelSystemOptions`
-  (`@energy8platform/game-engine/slot`'s options for `createReelSystem`,
-  `resolve` aside), and that type's own field for reel settings is also named
-  `config` (`ReelSystemConfig`, holding `grid` among others). The outer key is
-  the row's config; the inner one is the reel system's.
+- `reels1` — the reel board (`@energy8engine/reels`, on the engine's own
+  `@energy8engine/reel-core`). Its config is flat: `grid` (here 5×3), `win`
+  (the win highlight) and `board` (the board's own presentation), each
+  optional and merged over the defaults. It provides `board` (what the play
+  loop drives) and `reels`, the reel system the next three rows register
+  into. Those three are `e8-base` rows this patch does not configure, so
+  each runs on its defaults; give one a row here to change it:
+  - `motion1` — HOW the reels spin: registers the `swap`, `strip` and
+    `cascade-drop` styles and activates `style` (default `swap`). Drop it
+    and a spin snaps to the result, with a warning.
+  - `anticipation1` — the trailing-reel slowdown on a scatter hunt;
+    composed but off until its config says `enabled: true`.
+  - `cascade1` — the `tumble` controller and the `reelStep` step handler.
+    Its config is the timings/easings/multiplier of both; the row being
+    composed is the switch, so there is no `enabled`.
 - `mechanics1` — binds `base_game` to `reel-step`, a mechanic no row in
   `e8-base` ships and nothing in the engine has heard of. That is legal:
   `MechanicsService.bind` says a binding to an unregistered id is not a
@@ -138,9 +148,10 @@ provides `mount`.
   possible. `reel-step` is not installed and not published: it is
   `plugins/reel-step/` in this project, a directory placed by hand, which the
   host resolves ahead of `node_modules` (`readProjectPlugin` in the IDE host's
-  `resolvePackage.ts`). It brings a mechanic that emits a `reelStep` step, and
-  the handler that performs one — `classic` and `cascade` needed only the
-  first, because the six built-in step kinds already covered them.
+  `resolvePackage.ts`). It brings a mechanic that emits a `reelStep` step —
+  a step none of the built-in kinds cover. The handler that performs it is
+  not the plugin's: it is `cascade1`'s, which is why `reelstep1`'s own
+  `config` is empty.
 
 ## `editor.html` / `src/editor.ts`
 

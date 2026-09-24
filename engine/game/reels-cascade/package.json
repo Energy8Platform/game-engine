@@ -12,7 +12,8 @@
   "e8": {
     "runtime": {
       "entry": "./src/runtime.ts",
-      "schema": "./src/schema.ts"
+      "schema": "./src/schema.ts",
+      "requires": ["steps"]
     },
     "hot": true
   },

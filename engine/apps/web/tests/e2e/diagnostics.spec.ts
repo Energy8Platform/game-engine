@@ -346,8 +346,8 @@ const BOOT_FAILURES: BootFailure[] = [
     prepare: (dir) =>
       patchFile(
         join(dir, 'plugins', 'reel-step', 'src', 'index.ts'),
-        'export function apply(ctx: Context, config: ReelStepRowConfig = {}): void {',
-        "export function apply(ctx: Context, config: ReelStepRowConfig = {}): void {\n  throw new Error('boot-failure-probe: the reel-step row refused to apply');",
+        'export function apply(ctx: Context): void {',
+        "export function apply(ctx: Context): void {\n  throw new Error('boot-failure-probe: the reel-step row refused to apply');",
       ),
     fragment: 'boot-failure-probe',
   },

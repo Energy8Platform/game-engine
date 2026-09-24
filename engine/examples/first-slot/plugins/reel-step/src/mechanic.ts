@@ -13,8 +13,9 @@
  * enter at the top, and the bottom ones ride off. `remove` + `refill` cannot
  * express it: they are two steps over a whole board with no per-reel
  * distance between them, and the distances are the step. So `reel-step`
- * brings its own kind, `reelStep`, and (in `./step.ts`) the code that runs
- * it. Neither lives in the engine.
+ * brings its own kind, `reelStep`. The code that runs it is the engine's
+ * `cascade1` row (`@energy8engine/reels-cascade`'s `reelStep` handler); the
+ * mechanic that emits it is not in the engine — it is this file.
  *
  * The shape it reads is `first-slot`'s `base_game.reel_steps` — see that
  * game's `.spin` header and `@energy8engine/session-dev`'s `types.ts` for
@@ -61,7 +62,7 @@ export interface ReelStepStageData {
  * The step this plugin adds to the board's vocabulary.
  *
  * A **plain interface, deliberately not `extends UnknownPresentationStep`.**
- * That `extends` compiles and makes a single `as` cast work in `./step.ts`,
+ * That `extends` compiles and makes a single `as` cast work in a handler,
  * and it costs exactly what `@energy8engine/play-loop`'s `StepHandler` doc
  * warns it costs: the inherited index signature swallows excess properties
  * on this plugin's OWN literals, so a stray `shiftsTypo:` alongside the real

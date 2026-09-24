@@ -939,12 +939,12 @@ describe('PUT /api/composition/rows/:id', () => {
     const dir = e8BaseWorkspace();
     host = await createIdeHost({ root: dir, port: 0 });
     const res = await put(host.url, 'reels1', {
-      config: { config: { grid: { cols: 6, rows: 3 } } },
+      config: { grid: { cols: 6, rows: 3 } },
     });
     expect(res.status).toBe(200);
     const body = await res.json();
     expect(body.reload).toBe(false);
-    expect(rowOf(body.rows, 'reels1').config).toEqual({ config: { grid: { cols: 6, rows: 3 } } });
+    expect(rowOf(body.rows, 'reels1').config).toEqual({ grid: { cols: 6, rows: 3 } });
   });
 
   /**
@@ -1047,14 +1047,14 @@ describe('PUT /api/composition/rows/:id', () => {
     // Checked BEFORE the write: a value cordis would refuse at apply time
     // is not worth a disk write, a reload, and a game-composition frame
     // telling the game to re-apply something that cannot apply. The row's
-    // real config shape is `{ config: { grid } }` (see `@energy8engine/reels`'s
+    // real config shape is `{ grid, win, board }` (see `@energy8engine/reels`'s
     // `Config`); a stray key the schema does not know passes through, as
     // schemastery's objects are not strict — only a WRONG value is refused.
     const dir = e8BaseWorkspace();
     host = await createIdeHost({ root: dir, port: 0 });
     expect(existsSync(join(dir, 'e8.patch.yml'))).toBe(false); // the fixture has none: a write would create it
 
-    const res = await put(host.url, 'reels1', { config: { config: { grid: { cols: 'x' } } } });
+    const res = await put(host.url, 'reels1', { config: { grid: { cols: 'x' } } });
 
     expect(res.status).toBe(400);
     const body = await res.json();
@@ -1140,7 +1140,7 @@ describe('PUT /api/composition/rows/:id', () => {
     const preview = await listen(`ws://127.0.0.1:${fiber.ctx.server.port}/ide`);
 
     const body = await (
-      await put(host.url, 'reels1', { config: { config: { grid: { cols: 4, rows: 3 } } } })
+      await put(host.url, 'reels1', { config: { grid: { cols: 4, rows: 3 } } })
     ).json();
     const frameOf = async ({ frames }: { frames: ServerMessage[] }) => {
       for (let i = 0; i < 50 && !frames.some((m) => m.type === 'game-composition'); i++) {

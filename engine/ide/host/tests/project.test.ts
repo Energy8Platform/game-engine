@@ -101,7 +101,7 @@ describe('project plugin', () => {
     await host.stop();
   });
 
-  it('warns when game-runtime’s tumble is on but the reels’ cascade is off — rows found by package name', async () => {
+  it('warns when game-runtime’s tumble is on but no reels-cascade row is composed — rows found by package name', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'ide-host-project-tumble-'));
     writeFileSync(join(dir, 'e8.yml'), '[]\n');
     writeFileSync(join(dir, 'e8.profile.yml'), 'bundles:\n  - e8-t\n');
@@ -125,14 +125,15 @@ describe('project plugin', () => {
         severity: 'warning',
         plugin: 'composition',
         where: 'r1',
-        message: 'm1.config.tumble is on but r1.config.config.cascade.enabled is off — the tumble is instant',
-        fix: 'enable r1.config.config.cascade',
+        message:
+          'm1.config.tumble is on but no @energy8engine/reels-cascade row is composed — every tumble step fails',
+        fix: 'compose the @energy8engine/reels-cascade row (e8-base names it cascade1)',
       },
     ]);
-    // The pair agrees once the reel system's own cascade is switched on.
+    // The pair agrees once a cascade row is composed — the row is the switch.
     writeFileSync(
       join(dir, 'e8.patch.yml'),
-      'rows:\n  - id: r1\n    config: { config: { cascade: { enabled: true } } }\n',
+      "rows:\n  - id: c1\n    name: '@energy8engine/reels-cascade'\n",
     );
     await host.ctx.project.reload();
     expect(host.ctx.project.diagnostics).toEqual([]);
@@ -282,7 +283,7 @@ describe('project.writePatchRow', () => {
           id: 'scenes1',
           config: { design: { width: 480, height: 288 }, portrait: { width: 288, height: 480 } },
         },
-        { id: 'reels1', config: { config: { grid: { cols: 5, rows: 3 } } } },
+        { id: 'reels1', config: { grid: { cols: 5, rows: 3 } } },
         { id: 'mechanics1', config: { stages: { base_game: 'classic' } } },
         { id: 'playloop1', config: { skipEvents: ['ui.skip', 'ui.tap'] } },
         {
@@ -306,7 +307,7 @@ describe('project.writePatchRow', () => {
           id: 'scenes1',
           config: { design: { width: 480, height: 288 }, portrait: { width: 288, height: 480 } },
         },
-        { id: 'reels1', config: { config: { grid: { cols: 5, rows: 3 } } } },
+        { id: 'reels1', config: { grid: { cols: 5, rows: 3 } } },
         { id: 'mechanics1', config: { stages: { base_game: 'reel-step' } } },
         { id: 'playloop1', config: { skipEvents: ['ui.skip', 'ui.tap'] } },
         {

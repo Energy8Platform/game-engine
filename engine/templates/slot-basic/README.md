@@ -135,11 +135,21 @@ provides `mount`.
 
 ### Row notes
 
-- `reels1` — NOT a typo: the row's own `config` **is** `CreateReelSystemOptions`
-  (`@energy8platform/game-engine/slot`'s options for `createReelSystem`,
-  `resolve` aside), and that type's own field for reel settings is also named
-  `config` (`ReelSystemConfig`, holding `grid` among others). The outer key is
-  the row's config; the inner one is the reel system's.
+- `reels1` — the reel board (`@energy8engine/reels`, on the engine's own
+  `@energy8engine/reel-core`). Its config is flat: `grid` (here 5×3), `win`
+  (the win highlight) and `board` (the board's own presentation), each
+  optional and merged over the defaults. It provides `board` (what the play
+  loop drives) and `reels`, the reel system the next three rows register
+  into. Those three are `e8-base` rows this patch does not configure, so
+  each runs on its defaults; give one a row here to change it:
+  - `motion1` — HOW the reels spin: registers the `swap`, `strip` and
+    `cascade-drop` styles and activates `style` (default `swap`). Drop it
+    and a spin snaps to the result, with a warning.
+  - `anticipation1` — the trailing-reel slowdown on a scatter hunt;
+    composed but off until its config says `enabled: true`.
+  - `cascade1` — the `tumble` controller and the `reelStep` step handler.
+    Its config is the timings/easings/multiplier of both; the row being
+    composed is the switch, so there is no `enabled`.
 
 ## `editor.html`
 

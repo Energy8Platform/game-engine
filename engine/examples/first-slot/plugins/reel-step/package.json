@@ -11,7 +11,7 @@
   "e8": {
     "runtime": {
       "entry": "./src/index.ts",
-      "requires": ["mechanics", "steps"]
+      "requires": ["mechanics"]
     },
     "hot": false
   },
@@ -23,8 +23,6 @@
   "peerDependencies": {
     "@energy8engine/contracts": "*",
     "@energy8engine/game-runtime": "*",
-    "@energy8engine/play-loop": "*",
-    "@energy8platform/game-engine": "^0.41.0",
     "cordis": "4.0.0-rc.8"
   },
   "devDependencies": {

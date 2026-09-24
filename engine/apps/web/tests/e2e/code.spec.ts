@@ -504,7 +504,7 @@ test('a TypeScript file under plugins/ gets no .spin marker', async ({ page }) =
   });
   try {
     await page.goto(IDE_URL);
-    await page.getByTestId('explorer-plugins/reel-step/src/step.ts').click();
+    await page.getByTestId('explorer-plugins/reel-step/src/mechanic.ts').click();
     await expect(page.locator('.monaco-editor')).toBeVisible({ timeout: 10_000 });
     await page.getByTestId('editor').click();
     await page.keyboard.type('\nconst game = 1;\n');

@@ -79,6 +79,30 @@ rows:
     name: '@energy8engine/symbols'
   - id: reels1
     name: '@energy8engine/reels'
+  # How the reels spin: registers the three built-in motion styles (`swap`,
+  # `strip`, `cascade-drop`) into `reels1`'s `reels` service and activates the
+  # one its `style` names (default `swap`). Without this row a spin snaps
+  # straight to the result, and `reels1` says so as a warning. It reaches
+  # `reels` through `ctx.inject(['reels'], ...)` — re-run on every hot
+  # re-apply of `reels1` — so its place in this list is NOT load-bearing;
+  # it sits right after `reels1` only so the reel rows read as one group.
+  - id: motion1
+    name: '@energy8engine/reels-motion'
+  # The anticipator (`reels.anticipation`): which trailing reels slow down
+  # when enough trigger symbols have already landed. With no config it is
+  # composed but OFF (`enabled: false`) — a project turns it on in its patch.
+  # Same `ctx.inject(['reels'], ...)` as `motion1`, so the same "order is
+  # not load-bearing" holds.
+  - id: anticipation1
+    name: '@energy8engine/reels-anticipation'
+  # The cascade family: the `tumble` board controller (`reels` delegates a
+  # tumble step to it, and fails that step without this row) and the
+  # `reelStep` step handler, into `playloop1`'s `steps`. The row being here
+  # IS the cascade switch — its config has no `enabled`. Both registrations
+  # go through `ctx.inject` (`['reels']`, `['steps']`), so it composes before
+  # `playloop1` just as well as after it; list order is not load-bearing.
+  - id: cascade1
+    name: '@energy8engine/reels-cascade'
   - id: mechanics1
     name: '@energy8engine/game-runtime'
   - id: playloop1

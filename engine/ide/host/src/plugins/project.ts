@@ -165,26 +165,25 @@ async function readProject(
 }
 
 /**
- * Tumble needs two switches: `game-runtime`'s `tumble` makes the cascade
- * mechanic present tumbles, and the reel system only animates them when
- * ITS `cascade.enabled` is on — with one and not the other the tumble
- * lands instantly and nothing says why. Rows are found by package name,
- * not by the bundle's ids.
+ * `game-runtime`'s `tumble` makes the cascade mechanic present tumbles, and
+ * only the `@energy8engine/reels-cascade` row (e8-base's `cascade1`) can
+ * play one: without it every tumble step fails at run time. The row being
+ * composed IS the reels' cascade switch (it has no `enabled`), so this says
+ * so before the first spin rather than after. Rows are found by package
+ * name, not by the bundle's ids.
  */
 function tumblePair(composition: ResolvedComposition): Diagnostic[] {
   const mechanics = composition.rows.find((r) => r.name === '@energy8engine/game-runtime');
   const reels = composition.rows.find((r) => r.name === '@energy8engine/reels');
   if (!mechanics || !reels || mechanics.config.tumble !== true) return [];
-  const inner = isRecord(reels.config.config) ? reels.config.config : {};
-  const cascade = isRecord(inner.cascade) ? inner.cascade : {};
-  if (cascade.enabled === true) return [];
+  if (composition.rows.some((r) => r.name === '@energy8engine/reels-cascade')) return [];
   return [
     diagnostic(
       'warning',
       'composition',
       reels.id,
-      `${mechanics.id}.config.tumble is on but ${reels.id}.config.config.cascade.enabled is off — the tumble is instant`,
-      `enable ${reels.id}.config.config.cascade`,
+      `${mechanics.id}.config.tumble is on but no @energy8engine/reels-cascade row is composed — every tumble step fails`,
+      'compose the @energy8engine/reels-cascade row (e8-base names it cascade1)',
     ),
   ];
 }

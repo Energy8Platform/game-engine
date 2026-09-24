@@ -12,13 +12,11 @@ rows:
       portrait:
         width: 288
         height: 480
-  # The inner `config` is the reel system's own, not a typo — README.md.
   - id: reels1
     config:
-      config:
-        grid:
-          cols: 5
-          rows: 3
+      grid:
+        cols: 5
+        rows: 3
   - id: mechanics1
     config:
       stages:

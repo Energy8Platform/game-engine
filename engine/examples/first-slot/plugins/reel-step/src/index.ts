@@ -1,6 +1,6 @@
 /**
- * `reel-step` — a mechanic that arrives as a PROJECT plugin, bringing the
- * step it needs with it.
+ * `reel-step` — a mechanic that arrives as a PROJECT plugin; the step it
+ * emits is performed by the engine's `cascade1` row.
  *
  * This directory is not installed, not published, and not a workspace. It is
  * `<project>/plugins/reel-step`, a folder placed by hand, which the host
@@ -24,63 +24,36 @@
  * around it — without becoming an installed package and quietly weakening
  * the "resolves with no install" half of that claim.
  *
- * **Both halves are here, and that is the whole point.** `classic` and
- * `cascade` ship in the engine because they fit the four step kinds the
- * board already performs. `reel-step` does not fit them (see `./mechanic.ts`), so
- * it brings:
+ * **Only the mechanic is here now.** `classic` and `cascade` ship in the
+ * engine because they fit the four step kinds the board already performs.
+ * `reel-step` does not fit them (see `./mechanic.ts`), so it emits its own
+ * step kind, `reelStep`, registered with `ctx.mechanics` as
+ * `{ id, requires, present }`. The code that PERFORMS a `reelStep` used to
+ * live here too (`./step.ts`, driving the legacy `ReelStepController`); it
+ * is the engine's `cascade1` row now (`@energy8engine/reels-cascade`,
+ * which registers the `reelStep` handler into play-loop's `ctx.steps` and
+ * reads its timings from that row's config). So this plugin brings the part
+ * the engine cannot know — which cells paid and how far each reel scrolls —
+ * and the engine brings the part every scrolling mechanic shares.
  *
- *  1. the **mechanic** — `{ id, requires, present }`, registered with
- *     `ctx.mechanics`, emitting steps of kind `reelStep`;
- *  2. the **step handler** — a `StepHandler` registered in a
- *     `BoardStepRegistry`, which knows how to run `reelStep` on a real reel
- *     board (`./step.ts`).
+ * **Reversibility (§5.4).** Both registrations go through `ctx.effect`, so a
+ * row that leaves the composition takes its mechanic and its claim on the
+ * art with it.
  *
- * **Where the registry comes from.** `ctx.steps`, composed by the
- * `playloop1` row (`@energy8engine/play-loop`'s runtime half) — the same
- * registry `ctx.play.execute` consults by default. So this plugin registers
- * a handler and the game's page keeps calling
- * `ctx.play.execute(plan, board)` with two arguments, exactly as it did
- * before any of this existed. Nothing about the wiring is this project's to
- * arrange: no service to create, no name to agree on, no argument to
- * thread through the page. (It was, briefly — see task-8-9-report.md for
- * the round in which the registry was composed by nobody and this plugin
- * had to invent the handshake.)
+ * **Nothing throws out of `apply`.** The mechanic is pure and registers
+ * regardless; a row that failed to apply would leave `base_game` bound to
+ * an id nobody registered.
  *
- * **Reversibility (§5.4).** All three registrations go through `ctx.effect`,
- * so a row that leaves the composition takes its mechanic, its step handler
- * and its claim on the art with it. `BoardStepRegistry.register` returns a
- * plain disposer for exactly this — it does no teardown of its own (its own
- * doc says so), which is why the wrapping is here and not there.
- *
- * **Nothing throws out of `apply`.** A missing service is reported from the
- * step that needed it (see `./step.ts`), not by refusing to compose: the
- * mechanic is pure and can register regardless, and a row that fails to
- * apply would leave `base_game` bound to an id nobody registered — a second,
- * less useful complaint about the same missing piece.
- *
- * **`e8.runtime.requires: ["mechanics", "steps"]`** (this package's own
- * `package.json`), alongside the two `ctx.inject(…)` calls below and not
- * instead of them. The two do different jobs: `inject` is what keeps this
- * row from throwing when `mechanics1` or `playloop1` composes in either
- * order, or not at all — its callback simply never runs. `requires` is
- * what says so, once, to a person: an `inject` callback that silently
- * never fires looks identical to one doing its job quietly, and
- * `@energy8engine/game-runtime`'s `createGame` is what turns that silence
- * into a diagnostic — checked once, after the whole composition has
- * applied, never as a reason to reorder anything.
- *
- * Both halves, because the argument above is the same word for word for
- * each of them. It listed only `mechanics` for a while, on the reasoning
- * that a missing `steps` is really `playloop1`'s absence and so somebody
- * else's story to tell. Nobody else tells it: no row declares what it
- * PROVIDES, so nothing derives "the step registry is gone" from
- * `playloop1` being gone, and a game's page can only ever speak for the
- * services IT reads — `first-slot`'s page happens to read `ctx.play`, but
- * a game that never calls `execute` itself would leave this row's silence
- * the only evidence there was. Measured with `playloop1` removed: the
- * screen now carries `the "reelstep1" row requires "steps"` alongside the
- * page's own complaint, so the row that cannot do its job is named by
- * itself rather than inferred from a neighbour.
+ * **`e8.runtime.requires: ["mechanics"]`** (this package's own
+ * `package.json`), alongside the `ctx.inject(['mechanics'], …)` below and
+ * not instead of it. The two do different jobs: `inject` is what keeps this
+ * row from throwing when `mechanics1` composes in either order, or not at
+ * all — its callback simply never runs. `requires` is what says so, once,
+ * to a person: an `inject` callback that silently never fires looks
+ * identical to one doing its job quietly, and `@energy8engine/game-runtime`'s
+ * `createGame` is what turns that silence into a diagnostic. (It listed
+ * `steps` too while the step handler lived here; a missing `steps` is now
+ * `cascade1`'s to report.)
  */
 import type { Context } from 'cordis';
 // Type-only and fully erased — the same device `first-slot`'s `main.ts`
@@ -88,33 +61,15 @@ import type { Context } from 'cordis';
 // `Context`; importing its types is not importing it, and nothing about
 // this line pulls `game-runtime` into the browser bundle.
 import type {} from '@energy8engine/game-runtime';
-// The module that DECLARES `ctx.steps` and `ctx.play` on cordis's
-// `Context`. Type-only and erased, same as the `game-runtime` line above —
-// this plugin reaches the registry off the composed context, it does not
-// import the play loop.
-import type {} from '@energy8engine/play-loop/runtime';
-import type { SymbolResolver } from '@energy8platform/game-engine/slot';
 import { mechanic } from './mechanic';
-import { createReelStepHandler, type CascadeOverride } from './step';
 
 export { expects, mechanic, plan } from './mechanic';
 export type { ReelStepRound, ReelStepStageData, ReelStepStep } from './mechanic';
-export { createReelStepHandler } from './step';
 
 export const name = 'reel-step';
 
-export interface ReelStepRowConfig {
-  /**
-   * Overrides on the scroll's own timings and easings — the legacy
-   * `CascadeConfig`, which drives `reelStep` as well as `cascade`. Shallow:
-   * a row replaces a whole sub-object (`timings`, `easings`, `multiplier`),
-   * not one leaf of it.
-   */
-  cascade?: CascadeOverride;
-}
-
-export function apply(ctx: Context, config: ReelStepRowConfig = {}): void {
-  // Half one: the mechanic. Through `ctx.inject` rather than a static
+export function apply(ctx: Context): void {
+  // The mechanic. Through `ctx.inject` rather than a static
   // `inject: ['mechanics']`, so this row composes whether or not a mechanics
   // registry is in the composition — and registers the moment one appears,
   // in either row order. `MechanicsService.bind` is written for exactly this
@@ -123,20 +78,6 @@ export function apply(ctx: Context, config: ReelStepRowConfig = {}): void {
   // row that applies before this one.
   ctx.inject(['mechanics'], (mechanicsCtx) => {
     mechanicsCtx.effect(() => mechanicsCtx.mechanics.register(mechanic), 'reel-step:mechanic');
-  });
-
-  // Half two: the step, into the registry `playloop1` composed. Same
-  // `ctx.inject` shape and the same reason as the mechanic above — the row
-  // order between this plugin and the play loop is not this plugin's to
-  // assume. `resolve` is read per run, not captured here; see
-  // `createReelStepHandler`.
-  const handler = createReelStepHandler({
-    resolve: () =>
-      (ctx.reflect.get('assets', false) as { resolve?: SymbolResolver } | undefined)?.resolve,
-    cascade: config.cascade,
-  });
-  ctx.inject(['steps'], (stepsCtx) => {
-    stepsCtx.effect(() => stepsCtx.steps.register(handler), 'reel-step:step');
   });
 
   // And the art. A row that draws with a path NO document names has to say

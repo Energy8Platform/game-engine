@@ -14,6 +14,11 @@
  * `ctx.inject([...], …)`, not a static `inject` field: `reels1` is `hot: true`, and a hot
  * re-apply provides a NEW `reels` — the callback re-runs against it. And the row composes in
  * either order relative to `reels1`/`playloop1`, or without them.
+ *
+ * `e8.runtime.requires: ["steps"]` (`package.json`) is what says so when `playloop1` is gone:
+ * an `inject` callback that never fires is silent, and `createGame` turns a missing required
+ * service into a diagnostic naming this row. (It moved here with the `reelStep` handler from
+ * `first-slot`'s `reel-step` plugin, which declared it for the same reason.)
  */
 import type { Context } from 'cordis';
 import {
