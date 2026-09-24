@@ -12,12 +12,14 @@ overlay layer for what outlives a run (sticky rings, giant symbols).
 | kind | data | board after |
 |---|---|---|
 | `expandWild` | `reel`, `symbol`, `rows?` | those cells = `symbol` |
+| `walkWild` | `path` (≥ 2 cells), `symbol` | `path`'s last cell = `symbol`, the cells it left = empty |
 | `dropWilds` | `cells`, `symbol`, `multiplier?` | those cells = `symbol` (+ `multiplier`) |
 | `reveal` | `cells`, `symbol` | those cells = `symbol` |
 | `transform` | `cells`, `to` | those cells = `to` |
 | `multipliers` | `cells: {col,row,value}[]`, `total?` | those cells carry `multiplier: value` |
 | `sticky` | `cells`, `on` | unchanged (rings on the overlay layer until `on: false`) |
 | `giant` | `col`, `row`, `width`, `height`, `symbol` | covered cells = `symbol` (the overlay stays until the next spin) |
+| `nudge` | `reel`, `by` (± rows), `settled` | that reel = `settled` |
 
 The `features1` row that registers them — `src/runtime.ts` / `src/schema.ts`, where the `e8` block
 points — is still to come.

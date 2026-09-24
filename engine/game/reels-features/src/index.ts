@@ -21,3 +21,7 @@ export { createStickyHandler } from './handlers/sticky';
 export type { StickyConfig, StickyStep } from './handlers/sticky';
 export { createGiantHandler } from './handlers/giant';
 export type { GiantConfig, GiantStep } from './handlers/giant';
+export { createWalkWildHandler } from './handlers/walkWild';
+export type { WalkWildConfig, WalkWildStep } from './handlers/walkWild';
+export { createNudgeHandler } from './handlers/nudge';
+export type { NudgeConfig, NudgeStep } from './handlers/nudge';

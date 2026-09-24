@@ -74,6 +74,24 @@ export function boardWith(over: Record<string, CellData>): CellData[][] {
   return startBoard().map((col, c) => col.map((cell, r) => over[`${c},${r}`] ?? cell));
 }
 
+/** Starts `work`, ticks `atMs` in, runs `beforeSkip`, skips: the run must settle with no more ticks. */
+export async function skipMidRun(
+  handler: StepHandler,
+  work: Promise<void>,
+  atMs = 30,
+  beforeSkip?: () => void,
+): Promise<void> {
+  let settled = false;
+  const done = work.finally(() => (settled = true));
+  await tick(atMs);
+  expect(settled).toBe(false);
+  beforeSkip?.();
+  handler.skip?.();
+  for (let i = 0; i < 5; i++) await yieldOnce();
+  expect(settled).toBe(true);
+  await done;
+}
+
 /** A 3×3 grid of 50px cells on the start board, and a board whose refills are recorded. */
 export function setup(resolve: SymbolResolver = () => new Container() as never) {
   const reels = createReelSystem({

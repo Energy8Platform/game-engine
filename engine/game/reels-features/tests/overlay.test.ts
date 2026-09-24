@@ -6,7 +6,6 @@ import { describe, expect, it, vi } from 'vitest';
 import { Container, Text } from 'pixi.js';
 import { Tween } from '@energy8platform/game-engine/animation';
 import type { ReelSystem } from '@energy8engine/reel-core';
-import type { StepHandler } from '@energy8engine/play-loop';
 import { createOverlayLayer, type OverlayLayer } from '../src/layer';
 import { createMultipliersHandler } from '../src/handlers/multipliers';
 import { createStickyHandler } from '../src/handlers/sticky';
@@ -18,31 +17,13 @@ import {
   pump,
   run,
   setup,
+  skipMidRun,
   startBoard,
   tick,
   useManualTicker,
-  yieldOnce,
 } from './harness';
 
 useManualTicker();
-
-/** Starts `work`, ticks `atMs` in, skips: the run must settle with no further ticks. */
-async function skipMidRun(
-  handler: StepHandler,
-  work: Promise<void>,
-  atMs = 30,
-  beforeSkip?: () => void,
-): Promise<void> {
-  let settled = false;
-  const done = work.finally(() => (settled = true));
-  await tick(atMs);
-  expect(settled).toBe(false);
-  beforeSkip?.();
-  handler.skip?.();
-  for (let i = 0; i < 5; i++) await yieldOnce();
-  expect(settled).toBe(true);
-  await done;
-}
 
 const childrenLabelled = (layer: OverlayLayer, label: string) =>
   layer.view.children.filter((child) => child.label === label);
