@@ -16,8 +16,10 @@
  * earlier ones leave, and so every kind that changes a symbol leaves at
  * least one cell no other step touches afterwards (`nudge`'s (4,0),
  * `walkWild`'s emptied trail, …) — `AFTER`, written out by hand below, is
- * what they imply together. `multipliers` keeps every symbol (it adds a
- * badge), and `sticky` changes none: their proof is no diagnostic, and the
+ * what they imply together. `multipliers` keeps every symbol and adds a
+ * `multiplier` to the cell's data (as `dropWilds` does with its own), which
+ * `symbols()` cannot see: `MULTIPLIERS` is that half of the board, read
+ * through `__e8.cellMultiplier()`. `sticky` changes no cell: its proof is the
  * overlay count read through `__e8.featureOverlays()`.
  *
  * Talks to the game on its own URL (`host.gameUrl`), like `tempo.spec.ts`:
@@ -67,14 +69,14 @@ const FEATURES = [
   },
   // (1,2) → 1
   { kind: 'transform', cells: [{ col: 1, row: 2 }], to: 1 },
-  // symbols kept, badges added
+  // symbols kept; (0,1) and (4,0) carry multiplier 3 and 4 — not (3,0): its 2 is dropWilds'
   {
     kind: 'multipliers',
     cells: [
-      { col: 3, row: 0, value: 2 },
       { col: 0, row: 1, value: 3 },
+      { col: 4, row: 0, value: 4 },
     ],
-    total: 6,
+    total: 12,
   },
   // symbols kept; two persistent rings
   {
@@ -96,6 +98,15 @@ const AFTER = [
   ['4', '5', '4'],
   ['5', '2', '2'],
   ['5', '2', '2'],
+];
+
+/** Each cell's `multiplier` after `FEATURES`, `[col][row]`: `dropWilds`' 2 and `multipliers`' 3 and 4; `null` everywhere else. */
+const MULTIPLIERS = [
+  [null, 3, null],
+  [null, null, null],
+  [null, null, null],
+  [2, null, null],
+  [4, null, null],
 ];
 
 /** The fixture plugin's entry: fixed plans, a module-level spin counter. */
@@ -184,6 +195,12 @@ test('all nine feature steps play from a mechanic’s plan: the board, a sticky 
   const spin = () => page.evaluate(() => (window as any).__e8.spin());
   const symbols = () => page.evaluate(() => (window as any).__e8.symbols());
   const overlays = () => page.evaluate(() => (window as any).__e8.featureOverlays());
+  const multipliers = () =>
+    page.evaluate(() =>
+      [0, 1, 2, 3, 4].map((col) =>
+        [0, 1, 2].map((row) => (window as any).__e8.cellMultiplier(col, row)),
+      ),
+    );
   const errors = () =>
     page.evaluate(() =>
       ((window as any).__e8.liveDiagnostics() as { severity: string; message: string }[])
@@ -196,6 +213,7 @@ test('all nine feature steps play from a mechanic’s plan: the board, a sticky 
   expect(await errors()).toEqual([]);
   expect(first).toEqual({ out: 'next' });
   expect(await symbols()).toEqual(AFTER);
+  expect(await multipliers()).toEqual(MULTIPLIERS);
   expect(await overlays()).toEqual({ sticky: 2, giant: 1 });
 
   // ── spin 2: BOARD alone — the rings stay until a `sticky { on: false }`, the giant goes at spin start
@@ -203,5 +221,7 @@ test('all nine feature steps play from a mechanic’s plan: the board, a sticky 
   expect(await errors()).toEqual([]);
   expect(second).toEqual({ out: 'next' });
   expect(await symbols()).toEqual(BOARD.map((col) => col.map(String)));
+  // a fresh board: no cell keeps the last spin's multiplier
+  expect(await multipliers()).toEqual(BOARD.map((col) => col.map(() => null)));
   expect(await overlays()).toEqual({ sticky: 2, giant: 0 });
 });

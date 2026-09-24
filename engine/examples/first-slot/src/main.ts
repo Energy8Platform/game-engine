@@ -865,6 +865,17 @@ let nextViewId = 0;
     await board.refill({ kind: 'refill', board: next as unknown as RefillStep['board'] });
   },
   /**
+   * The `multiplier` the cell at `(col, row)` carries in its DATA — what a
+   * `multipliers` or `dropWilds` step leaves on it, which `symbols()` cannot
+   * show (the symbol stays). A read of `getCell(col, row).data`, the same
+   * data `symbols()` reads `symbol` off; `null` with no grid/cell, or a cell
+   * whose data carries no number there.
+   */
+  cellMultiplier(col: number, row: number): number | null {
+    const multiplier = liveGrid()?.getCell(col, row)?.data.multiplier;
+    return typeof multiplier === 'number' ? multiplier : null;
+  },
+  /**
    * What the cell at `(col, row)` actually drew — the constructor name of
    * the deepest first descendant of its `SymbolView` (`Sprite` for a
    * `symbols.yml` `image` state, `AnimatedSprite` for a `spritesheet` win,
@@ -1086,7 +1097,7 @@ function liveGrid():
       getCell(
         col: number,
         row: number,
-      ): { data: { symbol: string | null }; view: ViewNode | null } | undefined;
+      ): { data: { symbol: string | null; multiplier?: unknown }; view: ViewNode | null } | undefined;
     }
   | undefined {
   return currentBoard()?.grid as unknown as ReturnType<typeof liveGrid>;
