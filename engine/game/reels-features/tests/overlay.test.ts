@@ -297,4 +297,32 @@ describe('giant', () => {
     expect(half / full).toBeGreaterThan(0.4);
     expect(half / full).toBeLessThan(0.6);
   });
+
+  describe('clear: true', () => {
+    it('clears the giant, re-shows its cells, no re-seat', async () => {
+      const { reels, board, refills, layer, handler } = giantSetup();
+      await pump(run(handler, step, board));
+
+      await pump(run(handler, { kind: 'giant', clear: true }, board));
+      expect(childrenLabelled(layer, 'giant')).toHaveLength(0);
+      expect(hidden(reels)).toEqual([]);
+      // only the area step re-seated the board — the clear step changed no cell
+      expect(refills).toEqual([after]);
+    });
+
+    it('with no giant up: no error, no-op', async () => {
+      const { board, refills, layer, handler } = giantSetup();
+      await pump(run(handler, { kind: 'giant', clear: true }, board));
+      expect(childrenLabelled(layer, 'giant')).toHaveLength(0);
+      expect(refills).toEqual([]);
+    });
+
+    it('with an area field: refused', async () => {
+      const { board, refills, handler } = giantSetup();
+      await expect(run(handler, { kind: 'giant', clear: true, width: 2 }, board)).rejects.toThrow(
+        'giant: clear takes no area',
+      );
+      expect(refills).toEqual([]);
+    });
+  });
 });

@@ -1,8 +1,11 @@
 /**
  * `giant { col, row, width, height, symbol }` — one view of `symbol` spanning the `width×height`
  * cells from `(col, row)`, scaling in over them while they hide. It lives on the row's overlay
- * layer until the next spin starts (the row calls `layer.clearGiants()` then); a second giant
- * before that replaces it. The board takes `symbol` on every covered cell. Ported from the legacy
+ * layer until the next spin starts (the row calls `layer.clearGiants()` then) OR a
+ * `giant { clear: true }` step names it explicitly — the form a mechanic plays before a
+ * `tumble`/`reelStep`/`refill` touches the giant's area in the same plan, so the screen never
+ * disagrees with the board mid-plan. A second area giant before either replaces the first. The
+ * board takes `symbol` on every covered cell; `clear` changes no cell. Ported from the legacy
  * `GiantSymbol` demo (its footprint: `cellSize × width/height`, gaps ignored), minus its choice of
  * area and symbol and its hold-then-vanish.
  */
@@ -15,14 +18,19 @@ import { createFeatureHandler, needLayer, type Change, type FeatureDeps } from '
 
 export interface GiantStep {
   kind: 'giant';
+  /** Clears every giant on the row's layer and re-shows the cells it hid; carries no area field. */
+  clear?: true;
   /** The area's top-left cell. */
-  col: number;
-  row: number;
+  col?: number;
+  row?: number;
   /** In cells. */
-  width: number;
-  height: number;
-  symbol: number | string | BoardCell;
+  width?: number;
+  height?: number;
+  symbol?: number | string | BoardCell;
 }
+
+/** `GiantStep`'s area fields, once `changes` below has confirmed every one of them is there and fits. */
+type GiantArea = Required<Pick<GiantStep, 'col' | 'row' | 'width' | 'height' | 'symbol'>>;
 
 export interface GiantConfig {
   /** The scale-in. */
@@ -32,33 +40,51 @@ export interface GiantConfig {
 
 export function createGiantHandler(deps: FeatureDeps<GiantConfig>): StepHandler {
   return createFeatureHandler<GiantStep, GiantConfig>('giant', deps, {
-    changes({ col, row, width, height, symbol }, grid) {
+    changes({ clear, col, row, width, height, symbol }, grid) {
       needLayer('giant', deps);
+      if (clear === true) {
+        if ([col, row, width, height, symbol].some((v) => v !== undefined)) {
+          throw new Error('giant: clear takes no area');
+        }
+        // no cell changes — nothing to re-seat; a no-op if no giant is up
+        return [];
+      }
+      // `every(Number.isInteger)` short-circuits the rest when any of the four is undefined —
+      // the `!`s below only assert what that guard already guarantees by the time they run.
       const fits =
         [col, row, width, height].every(Number.isInteger) &&
-        col >= 0 &&
-        row >= 0 &&
-        width >= 1 &&
-        height >= 1 &&
-        col + width <= grid.cols &&
+        col! >= 0 &&
+        row! >= 0 &&
+        width! >= 1 &&
+        height! >= 1 &&
+        col! + width! <= grid.cols &&
         // every covered reel tall enough (a ragged grid's short reel ends early)
-        Array.from({ length: width }, (_, i) => col + i).every(
-          (c) => row + height <= grid.rowsOf(c),
+        Array.from({ length: width! }, (_, i) => col! + i).every(
+          (c) => row! + height! <= grid.rowsOf(c),
         );
       if (!fits) {
         throw new Error(
           `giant: the ${width}×${height} area at (${col}, ${row}) does not fit the grid`,
         );
       }
-      const data = cellData(symbol) as CellData;
+      // `fits` confirmed every field above is an integer in range — the area form proper
+      const area = { col, row, width, height, symbol } as GiantArea;
+      const data = cellData(area.symbol) as CellData;
       const changes: Change[] = [];
-      for (let c = col; c < col + width; c++)
-        for (let r = row; r < row + height; r++) changes.push({ col: c, row: r, data });
+      for (let c = area.col; c < area.col + area.width; c++)
+        for (let r = area.row; r < area.row + area.height; r++)
+          changes.push({ col: c, row: r, data });
       return changes;
     },
 
-    async animate({ col, row, width, height }, changes, { kit, pace, track }, cfg) {
+    async animate(step, changes, { kit, pace, track }, cfg) {
       const layer = needLayer('giant', deps);
+      if (step.clear === true) {
+        layer.clearGiants();
+        return;
+      }
+      // `changes` above already confirmed this is the area form
+      const { col, row, width, height } = step as GiantArea;
       const { symbol } = changes[0].data;
       const view = symbol == null ? null : kit.resolve(symbol);
       // no art for it: no overlay, the covered cells just show `symbol` once re-seated

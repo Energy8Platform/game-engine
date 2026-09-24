@@ -18,11 +18,15 @@ overlay layer for what outlives a run (sticky rings, giant symbols).
 | `transform` | `cells`, `to` | those cells = `to` |
 | `multipliers` | `cells: {col,row,value}[]`, `total?` | those cells carry `multiplier: value` |
 | `sticky` | `cells`, `on` | unchanged (rings on the overlay layer until `on: false`) |
-| `giant` | `col`, `row`, `width`, `height`, `symbol` | covered cells = `symbol` (the overlay stays until the next spin) |
+| `giant` | `col`, `row`, `width`, `height`, `symbol` — or `clear: true` alone | covered cells = `symbol` (the overlay stays until the next spin, or until a `giant { clear: true }` step) |
 | `nudge` | `reel`, `by` (± rows), `settled` | that reel = `settled` |
 
-The `features1` row that registers them — `src/runtime.ts` / `src/schema.ts`, where the `e8` block
-points — is still to come.
+The `features1` row (`src/runtime.ts` / `src/schema.ts`, where the `e8` block points) registers all
+nine kinds into `playloop1`'s `steps` — composed in `e8-base` right after `cascade1`. One config
+section per kind, each with its own `enabled` (default `true`), so a game can drop just `giant`
+without dropping the row; a disabled kind's handler is not registered at all. The row also owns
+the overlay layer above the cells (`src/layer.ts`) that `sticky` rings and the `giant` view live
+on, cleared of any leftover giant at the start of every spin.
 See `docs/superpowers/specs/2026-09-24-reel-features-design.md`.
 
 **Build first on a fresh clone** — like reel-core, this imports `@energy8platform/game-engine/animation`,

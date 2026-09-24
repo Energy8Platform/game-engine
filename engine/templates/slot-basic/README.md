@@ -139,8 +139,8 @@ provides `mount`.
   `@energy8engine/reel-core`). Its config is flat: `grid` (here 5×3), `win`
   (the win highlight) and `board` (the INITIAL board, `board[col][row]`), each
   optional and merged over the defaults. It provides `board` (what the play
-  loop drives) and `reels`, the reel system the next three rows register
-  into. Those three are `e8-base` rows this patch does not configure, so
+  loop drives) and `reels`, the reel system the next four rows register
+  into. Those four are `e8-base` rows this patch does not configure, so
   each runs on its defaults; give one a row here to change it:
   - `motion1` — HOW the reels spin: registers the `swap`, `strip` and
     `cascade-drop` styles and activates `style` (default `swap`). Drop it
@@ -150,6 +150,11 @@ provides `mount`.
   - `cascade1` — the `tumble` controller and the `reelStep` step handler.
     Its config is the timings/easings/multiplier of both; the row being
     composed is the switch, so there is no `enabled`.
+  - `features1` — nine data-driven feature step kinds (`expandWild`,
+    `walkWild`, `dropWilds`, `reveal`, `transform`, `multipliers`, `sticky`,
+    `giant`, `nudge`), each independently switchable via its own config
+    section's `enabled`. Also owns the row's overlay layer (sticky rings,
+    the giant view) above the cells.
 
 ## `editor.html`
 

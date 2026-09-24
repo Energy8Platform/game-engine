@@ -66,7 +66,7 @@ accepts (a number, a name, or a record — extras ride along).
 | `transform` | `cells`, `to` | each cell morphs to `to` with a pulse | those cells = `to` |
 | `multipliers` | `cells: {col,row,value}[]`, `total?: number` | each cell gets its multiplier badge and pulses, a `×value` label floats from it; `total` shown at the grid's centre | those cells carry `multiplier: value` |
 | `sticky` | `cells`, `on: boolean` | `on`: a persistent ring on each cell; `off`: those rings go | unchanged |
-| `giant` | `col`, `row`, `width`, `height`, `symbol` | one symbol view spanning `width×height` cells from `(col,row)`, the covered cells hidden, scale-in | covered cells = `symbol`; the overlay persists until the next spin starts (§4.3) |
+| `giant` | `col`, `row`, `width`, `height`, `symbol` — or `clear: true` alone | one symbol view spanning `width×height` cells from `(col,row)`, the covered cells hidden, scale-in; `clear` re-shows them and drops the view, no animation | covered cells = `symbol`; the overlay persists until the next spin starts, or until a `giant { clear: true }` step (§4.3) |
 | `nudge` | `reel`, `by: number` (±), `settled: Board column` | the reel's cells slide by `by` rows and land on `settled` | that reel = `settled` |
 
 ## 4. Behaviour
@@ -93,9 +93,13 @@ The core's `fx` layer is swept on the first skip of a run, so the rings of
 
 - `sticky` rings persist across spins (free spins, hold-and-spin locks) until
   a `sticky { cells, on: false }` names them.
-- A `giant` overlay persists until the next spin starts: `reel-core`'s
-  `ReelSystem` gains `onSpinStart(fn): () => void`, fired at the start of
-  `spin()`; the row clears every giant on it and re-shows the covered cells.
+- A `giant` overlay persists until the next spin starts, or until a
+  `giant { clear: true }` step names it: `reel-core`'s `ReelSystem` gains
+  `onSpinStart(fn): () => void`, fired at the start of `spin()`; the row
+  clears every giant on it and re-shows the covered cells — the same thing
+  `giant { clear: true }` does mid-plan. A mechanic that plays `tumble`,
+  `reelStep`, or `refill` over a giant's area later in the same plan emits
+  the clear step first, so the screen never disagrees with the board.
 
 ### 4.4 Skip and turbo
 

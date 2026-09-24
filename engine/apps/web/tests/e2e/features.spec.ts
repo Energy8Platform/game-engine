@@ -8,9 +8,11 @@
  * (a project plugin: `e8.runtime.requires: ["mechanics"]`, a mechanic
  * registered through `ctx.inject(['mechanics'])`) — and binds `base_game`
  * to. It ignores the spin's data: its FIRST `present` lands `BOARD` and
- * then runs `FEATURES`, one step of each kind; every later one only lands
- * `BOARD` again. A feature never reads the math (spec §0), so fixed data is
- * exactly what a real mechanic would hand it.
+ * then runs `FEATURES`, one step of each kind; its THIRD lands `BOARD`, a
+ * fresh `giant`, then a `giant { clear: true }` in the same plan (I1: the
+ * explicit clear); every other spin only lands `BOARD` again. A feature
+ * never reads the math (spec §0), so fixed data is exactly what a real
+ * mechanic would hand it.
  *
  * `FEATURES` is ordered so each step's data is valid on the board the
  * earlier ones leave, and so every kind that changes a symbol leaves at
@@ -124,10 +126,18 @@ export function apply(ctx: any): void {
         c.mechanics.register({
           id: 'feature-probe',
           requires: { fields: {} },
-          present: () =>
-            spins++ === 0
-              ? [{ kind: 'spinTo', board: BOARD }, ...FEATURES]
-              : [{ kind: 'spinTo', board: BOARD }],
+          present: () => {
+            const spin = spins++;
+            if (spin === 0) return [{ kind: 'spinTo', board: BOARD }, ...FEATURES];
+            // spin 3: a fresh giant, then an explicit \`clear: true\` in the same plan
+            if (spin === 2)
+              return [
+                { kind: 'spinTo', board: BOARD },
+                { kind: 'giant', col: 3, row: 1, width: 2, height: 2, symbol: 2 },
+                { kind: 'giant', clear: true },
+              ];
+            return [{ kind: 'spinTo', board: BOARD }];
+          },
         }),
       'feature-probe:mechanic',
     );
@@ -223,5 +233,11 @@ test('all nine feature steps play from a mechanic’s plan: the board, a sticky 
   expect(await symbols()).toEqual(BOARD.map((col) => col.map(String)));
   // a fresh board: no cell keeps the last spin's multiplier
   expect(await multipliers()).toEqual(BOARD.map((col) => col.map(() => null)));
+  expect(await overlays()).toEqual({ sticky: 2, giant: 0 });
+
+  // ── spin 3: a fresh giant, then `giant { clear: true }` in the same plan — gone before the spin ends
+  const third = await spin();
+  expect(await errors()).toEqual([]);
+  expect(third).toEqual({ out: 'next' });
   expect(await overlays()).toEqual({ sticky: 2, giant: 0 });
 });
