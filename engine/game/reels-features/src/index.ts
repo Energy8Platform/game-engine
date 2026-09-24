@@ -2,7 +2,11 @@
  * `reels-features`: data-driven reel feature steps. Each kind is a play-loop `StepHandler` that
  * animates an outcome the mechanic put in its plan and re-seats the board where the data says —
  * see `./shared` for the shape they share and `./layer` for the overlays that outlive a run.
+ * `./runtime` is the `features1` row that registers all nine into a composition.
  */
+export { name, apply } from './runtime';
+export type { FeaturesRowConfig } from './runtime';
+export { Config } from './schema';
 export { checkCells, createFeatureHandler, createPace, need, needLayer, reseat } from './shared';
 export type { Cell, Change, Feature, FeatureDeps, FeatureRun, Pace, RefillBoard } from './shared';
 export { createOverlayLayer } from './layer';

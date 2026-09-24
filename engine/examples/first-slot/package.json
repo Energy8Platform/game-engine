@@ -20,6 +20,7 @@
     "@energy8engine/reels": "*",
     "@energy8engine/reels-anticipation": "*",
     "@energy8engine/reels-cascade": "*",
+    "@energy8engine/reels-features": "*",
     "@energy8engine/reels-motion": "*",
     "@energy8engine/scene-edit": "*",
     "@energy8engine/scenes": "*",

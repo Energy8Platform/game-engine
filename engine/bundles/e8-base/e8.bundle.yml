@@ -104,6 +104,14 @@ rows:
   # `playloop1` just as well as after it; list order is not load-bearing.
   - id: cascade1
     name: '@energy8engine/reels-cascade'
+  # The nine feature step kinds (`expandWild`, `walkWild`, `dropWilds`, `reveal`, `transform`,
+  # `multipliers`, `sticky`, `giant`, `nudge`) into `playloop1`'s `steps` — each independently
+  # switchable, unlike `cascade1`'s single on/off. Also owns the row's own overlay layer (`sticky`
+  # rings, the `giant` view) on `reels1`'s grid, cleared of any leftover giant at the start of
+  # every spin. Same `ctx.inject` (`['reels']`, `['steps']`) as `cascade1` above, for the same
+  # reason: it injects `reels` and `steps`, so list order here is not load-bearing.
+  - id: features1
+    name: '@energy8engine/reels-features'
   - id: mechanics1
     name: '@energy8engine/game-runtime'
   - id: playloop1
