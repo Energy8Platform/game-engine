@@ -51,8 +51,6 @@ interface PatchDoc {
     config?: {
       stages?: Record<string, string>;
       tumble?: boolean;
-      /** `reels1`'s inner `ReelSystemConfig` — see `@energy8engine/reels`' own schema doc. */
-      config?: { cascade?: { enabled?: boolean } };
     };
   }[];
 }
@@ -100,15 +98,13 @@ async function readyPage(page: Page): Promise<void> {
  * (there isn't one; that package is a plain library `mechanics1` imports
  * and registers, per Task 2's own report).
  *
- * `animated` also turns the legacy tumble ANIMATION on (`reels1`'s inner
- * `cascade.enabled`, which `ReelSystemConfig`'s defaults leave `false` —
- * keys past `grid` pass through that row's schema untouched). It matters
- * for exactly one case: with it off, `TumbleController.step` short-circuits
- * to `setGrid(settledGrid)` on its first line and returns, so a round is
- * instant and there is nothing for a skip to interrupt. Case 5 needs a
- * round that actually takes time.
+ * The tumble ANIMATION itself is not this fixture's concern: `cascade1` is
+ * composed in `e8-base`, so every tumble round animates regardless of what
+ * this fixture sets — this function only turns the MECHANIC's `tumble` on
+ * (swapping `remove` + `refill` for a `tumble` step per round), which is
+ * what both cases below actually need a round that takes real time for.
  */
-function tumbleFixture(animated = true): void {
+function tumbleFixture(): void {
   const patchFile = join(dir, 'e8.patch.yml');
   const patch = load(readFileSync(patchFile, 'utf8')) as PatchDoc;
   const mechanics = patch.rows.find((r) => r.id === 'mechanics1')!;
@@ -129,9 +125,6 @@ function tumbleFixture(animated = true): void {
 test("mechanics1.config.tumble: true over base_game: cascade — a winning spin's plan carries a tumble step", async ({
   page,
 }) => {
-  // Animated as well: since slice 28 the host warns when `tumble` is on
-  // with `cascade.enabled` off (an instant tumble), and `#status` then
-  // reads "composition has warnings" instead of `ready`.
   tumbleFixture();
 
   host = await startDevHost(dir);
@@ -334,7 +327,7 @@ test('a skip during a held spin request is kept, and the round collapses when it
 test('a skip mid-tumble-chain collapses the rest of it and lands on the last settled grid', async ({
   page,
 }) => {
-  tumbleFixture(true);
+  tumbleFixture();
 
   host = await startDevHost(dir);
   await readyPage(page);

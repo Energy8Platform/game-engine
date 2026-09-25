@@ -227,6 +227,14 @@ describe('sticky', () => {
       );
       expect(refills).toEqual([]);
     });
+
+    it('with on: refused', async () => {
+      const { board, refills, handler } = stickySetup();
+      await expect(
+        run(handler, { kind: 'sticky', clear: true, on: true }, board),
+      ).rejects.toThrow('sticky: clear takes no cells');
+      expect(refills).toEqual([]);
+    });
   });
 });
 
