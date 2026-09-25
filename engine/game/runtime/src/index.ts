@@ -753,7 +753,10 @@ export async function createGame(config: GameConfig = {}): Promise<GameApp> {
 
   // Every row's module graph has loaded by now, so every stateful engine
   // package has marked itself (see contracts' `module-copies.ts`). Outside
-  // the `try`: a second tween registry may be exactly why it threw.
+  // the `try`: a second tween registry may be exactly why it threw. Dev
+  // only, in effect: a built game's engine packages share one chunk url, so
+  // a duplicate there is the host's static check's to report, not this one's
+  // (see `module-copies.ts`).
   for (const [name, urls] of moduleCopies()) {
     if (urls.length < 2) continue;
     diagnostics.push(
@@ -761,7 +764,7 @@ export async function createGame(config: GameConfig = {}): Promise<GameApp> {
         'warning',
         'runtime',
         'modules',
-        `two copies of ${name} are loaded — ${urls.join(', ')}: its module state (tweens, caches, classes) exists twice`,
+        `${urls.length} copies of ${name} are loaded — ${urls.join(', ')}: its module state (tweens, caches, classes) exists more than once`,
         `make the project resolve the engine's copy: declare it "*" or match the engine's version`,
       ),
     );

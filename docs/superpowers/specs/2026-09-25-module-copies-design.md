@@ -30,7 +30,7 @@ visible.
 - `@energy8engine/game-runtime`'s `createGame`, once the composition has
   applied, reads the map: every name with more than one URL is one
   `warning` (plugin `runtime`, where `modules`):
-  `two copies of <name> are loaded — <url1>, <url2>: its module state (tweens, caches, classes) exists twice`
+  `<n> copies of <name> are loaded — <url1>, <url2>, …: its module state (tweens, caches, classes) exists more than once`
   fix: `make the project resolve the engine's copy: declare it "*" or match the engine's version`.
 
 ## 2. Host check (third-party stateful packages)

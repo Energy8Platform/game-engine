@@ -26,9 +26,19 @@ describe('createGame — a second copy of a stateful engine module', () => {
         plugin: 'runtime',
         where: 'modules',
         message:
-          'two copies of @energy8engine/tween are loaded — file:///engine/tween/src/index.ts, file:///project/node_modules/@energy8engine/tween/src/index.ts: its module state (tweens, caches, classes) exists twice',
+          '2 copies of @energy8engine/tween are loaded — file:///engine/tween/src/index.ts, file:///project/node_modules/@energy8engine/tween/src/index.ts: its module state (tweens, caches, classes) exists more than once',
         fix: `make the project resolve the engine's copy: declare it "*" or match the engine's version`,
       },
+    ]);
+  });
+
+  it('three urls are still one warning, and it counts them', async () => {
+    for (const where of ['engine', 'project', 'plugin']) {
+      markModuleCopy('@energy8engine/reel-core', `file:///${where}/reel-core/src/index.ts`);
+    }
+    game = await boot();
+    expect(copyWarnings(game).map((d) => d.message)).toEqual([
+      '3 copies of @energy8engine/reel-core are loaded — file:///engine/reel-core/src/index.ts, file:///project/reel-core/src/index.ts, file:///plugin/reel-core/src/index.ts: its module state (tweens, caches, classes) exists more than once',
     ]);
   });
 

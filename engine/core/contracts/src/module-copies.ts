@@ -8,6 +8,15 @@
  * Kept on `globalThis` under a `Symbol.for` key, never in a module variable:
  * a second copy of THIS file must see the same map, so the shape stored
  * there (name → Set of urls) is shared by every version and never changes.
+ *
+ * The DEV-time net only. Identity is the module url, and `e8 build`'s
+ * `manualChunks` (ide-host `compute/build.ts`) merges every engine package
+ * into one `game` chunk, so a nested duplicate there shares the chunk's url
+ * and counts once — invisible here. A content key instead would misfire on
+ * the other side: vite re-evaluating an edited module is a real second
+ * instance under a new url, and no one scheme sees both. The build-time net
+ * is the IDE host's static check of what the project resolves, whose
+ * composition diagnostics `e8 build` reports.
  */
 const KEY = Symbol.for('energy8engine.moduleCopies');
 
