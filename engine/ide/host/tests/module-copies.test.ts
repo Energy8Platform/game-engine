@@ -23,9 +23,10 @@ function write(path: string, content: unknown): void {
 }
 
 /**
- * A project composing one engine row, `@energy8engine/fake-row`; `installed`
- * also installs it with pixi.js 8.0.0, cordis 4.0.0 and @energy8engine/tween
- * 1.0.0 beside it.
+ * A project composing one engine row, `@energy8engine/fake-row`, which
+ * declares pixi.js, cordis and @energy8engine/tween (only a declaring row's
+ * copy is the engine's); `installed` also installs it with pixi.js 8.0.0,
+ * cordis 4.0.0 and @energy8engine/tween 1.0.0 beside it.
  */
 function project(installed = true): string {
   const dir = realpathSync(mkdtempSync(join(tmpdir(), 'ide-host-module-copies-')));
@@ -39,6 +40,7 @@ function project(installed = true): string {
     write(join(dir, 'node_modules/@energy8engine/fake-row/package.json'), {
       name: '@energy8engine/fake-row',
       version: '1.0.0',
+      peerDependencies: { 'pixi.js': '*', cordis: '*', '@energy8engine/tween': '*' },
     });
     write(join(dir, 'node_modules/pixi.js/package.json'), { name: 'pixi.js', version: '8.0.0' });
     write(join(dir, 'node_modules/cordis/package.json'), { name: 'cordis', version: '4.0.0' });
@@ -79,11 +81,35 @@ describe('module copies (host check)', () => {
           plugin: 'composition',
           where: 'plugins/mine/package.json',
           message: `plugins/mine resolves ${pkg}@7.9.9 (${join(dir, 'plugins/mine/node_modules', pkg)}) but the engine's rows use ${pkg}@${engineVersion} (${join(dir, 'node_modules', pkg)}) — two copies in one page`,
-          fix: `declare ${pkg} the way the engine does (or drop it) so one copy resolves`,
+          fix: `declare ${pkg} as a peerDependency (or a range that includes the engine's ${engineVersion}) and reinstall, so one copy resolves`,
         },
       ]);
     },
   );
+
+  // Review I2: the likeliest trigger — `npm --prefix plugins/<x> install`
+  // adding the plugin's peers — is the same version twice; declaring it
+  // again would change nothing.
+  it('the same version nested again is told to delete that copy, not to declare it', async () => {
+    const dir = project();
+    write(join(dir, 'plugins/mine/package.json'), {
+      name: 'mine',
+      peerDependencies: { cordis: '*' },
+    });
+    write(join(dir, 'plugins/mine/node_modules/cordis/package.json'), {
+      name: 'cordis',
+      version: '4.0.0',
+    });
+    expect(await diagnosticsOf(dir)).toEqual([
+      {
+        severity: 'warning',
+        plugin: 'composition',
+        where: 'plugins/mine/package.json',
+        message: `plugins/mine resolves cordis@4.0.0 (${join(dir, 'plugins/mine/node_modules/cordis')}) but the engine's rows use cordis@4.0.0 (${join(dir, 'node_modules/cordis')}) — two copies in one page`,
+        fix: "the same version is installed twice — delete plugins/mine's copy (a nested install pulled it in; install plugins with --omit=peer) so the engine's resolves",
+      },
+    ]);
+  });
 
   it('a plugin resolving the same pixi.js as the rows is quiet', async () => {
     const dir = project();
@@ -109,7 +135,39 @@ describe('module copies (host check)', () => {
         plugin: 'composition',
         where: 'package.json, plugins/mine/package.json',
         message: `the project resolves pixi.js@8.0.0 (${join(dir, 'node_modules/pixi.js')}) but the engine's rows use pixi.js@8.1.0 (${join(dir, 'node_modules/@energy8engine/fake-row/node_modules/pixi.js')}) — two copies in one page`,
-        fix: 'declare pixi.js the way the engine does (or drop it) so one copy resolves',
+        fix: "declare pixi.js as a peerDependency (or a range that includes the engine's 8.1.0) and reinstall, so one copy resolves",
+      },
+    ]);
+  });
+
+  // Review I1, the spec's opening scenario: the root pins its own pixi.js,
+  // npm nests the engine's under the declaring row. A row that does NOT
+  // declare pixi.js (here, like game-runtime, only as a devDependency — which
+  // an install does not bring) walks up to the root's pin; counting it as the
+  // engine's would make the pin "the engine's copy" and the check silent.
+  it('a project root pin is warned though a non-declaring row walks up to it', async () => {
+    const dir = project();
+    write(join(dir, 'package.json'), { name: 'game', dependencies: { 'pixi.js': '8.0.0' } });
+    write(
+      join(dir, 'bundles/b/e8.bundle.yml'),
+      "name: b\nrows:\n  - id: row1\n    name: '@energy8engine/fake-row'\n  - id: row2\n    name: '@energy8engine/other-row'\n",
+    );
+    write(join(dir, 'node_modules/@energy8engine/other-row/package.json'), {
+      name: '@energy8engine/other-row',
+      version: '1.0.0',
+      devDependencies: { 'pixi.js': '^8.20.1' },
+    });
+    write(join(dir, 'node_modules/@energy8engine/fake-row/node_modules/pixi.js/package.json'), {
+      name: 'pixi.js',
+      version: '8.20.1',
+    });
+    expect(await diagnosticsOf(dir)).toEqual([
+      {
+        severity: 'warning',
+        plugin: 'composition',
+        where: 'package.json',
+        message: `the project resolves pixi.js@8.0.0 (${join(dir, 'node_modules/pixi.js')}) but the engine's rows use pixi.js@8.20.1 (${join(dir, 'node_modules/@energy8engine/fake-row/node_modules/pixi.js')}) — two copies in one page`,
+        fix: "declare pixi.js as a peerDependency (or a range that includes the engine's 8.20.1) and reinstall, so one copy resolves",
       },
     ]);
   });
@@ -163,7 +221,7 @@ describe('module copies (host check)', () => {
         plugin: 'composition',
         where: 'plugins/old/package.json',
         message: `the engine no longer uses ${LEGACY} — a copy here is a second engine`,
-        fix: 'remove it; use @energy8engine/tween for tweens',
+        fix: "remove it from the project's package.json files and node_modules; the engine's own packages (@energy8engine/*) replace it — tweens: @energy8engine/tween",
       },
     ]);
   });

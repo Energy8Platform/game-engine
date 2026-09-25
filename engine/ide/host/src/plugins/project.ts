@@ -167,7 +167,7 @@ async function readProject(
       ...diagnostics,
       ...resolved.diagnostics,
       ...tumblePair(resolved.composition),
-      ...moduleCopies(cwd, resolved.composition),
+      ...foreignCopies(cwd, resolved.composition),
     ],
   };
 }
@@ -182,24 +182,34 @@ async function readProject(
 const STATEFUL_PACKAGES = ['pixi.js', 'cordis', '@energy8engine/tween', '@energy8engine/reel-core'];
 // Built from parts — the ide-host guard (`no-legacy-engine.test.ts`) scans engine/ for the literal.
 const LEGACY_ENGINE = ['@energy8platform', 'game-engine'].join('/');
-const DEPENDENCY_FIELDS = [
-  'dependencies',
-  'devDependencies',
-  'peerDependencies',
-  'optionalDependencies',
-];
+// What an install brings a package — a row's devDependencies are not installed for the game.
+const RUNTIME_FIELDS = ['dependencies', 'peerDependencies', 'optionalDependencies'];
+const DEPENDENCY_FIELDS = [...RUNTIME_FIELDS, 'devDependencies'];
+
+/** Whether `manifest` names `pkg` in any of `fields`. */
+function declares(manifest: unknown, pkg: string, fields: string[]): boolean {
+  return fields.some((field) => {
+    const deps = isRecord(manifest) ? manifest[field] : undefined;
+    return isRecord(deps) && pkg in deps;
+  });
+}
 
 /**
  * paper-duel F14, spec §2: a project that resolves its OWN copy of a
  * stateful package — a plugin pinning another version — talks to a
  * different instance than the engine's rows, silently. Each project
  * location (the root, every `plugins/*` with a package.json) is compared
- * against what the composed `@energy8engine/*` rows resolve, WHEREVER those
- * are installed — a real game's own `node_modules`, or this repo's for the
- * examples; never against a workspace. One warning per foreign copy, every
- * location that resolves it in `where` (a root copy is not repeated for
- * each plugin that walks up to it). A package a location does not resolve
- * is not a finding. And the user's rule: the legacy engine named in a
+ * against what the composed `@energy8engine/*` rows that DECLARE the
+ * package resolve, WHEREVER those are installed — a real game's own
+ * `node_modules`, or this repo's for the examples; never against a
+ * workspace. A row that does not declare it walks up to whatever the
+ * project has — counting it would make a root pin "the engine's copy" and
+ * hide it — and a package no row declares is not checked. One warning per
+ * foreign copy, every location that resolves it in `where` (a root copy is
+ * not repeated for each plugin that walks up to it); the fix says to delete a same-version
+ * copy (a plugin's own install adds its peers) and to declare a
+ * different-version one. A package a location does not resolve is not a
+ * finding. And the user's rule: the legacy engine named in a
  * project manifest, or installed inside the project or a plugin, is a
  * second engine — one warning listing every location. (The copy this repo
  * hoists to its root is found OUTSIDE the example projects, so it is not
@@ -210,7 +220,7 @@ const DEPENDENCY_FIELDS = [
  * from its target's `node_modules` chain, not by walking up the project.
  * A directory that vanishes mid-check is skipped.
  */
-export function moduleCopies(cwd: string, composition: ResolvedComposition): Diagnostic[] {
+function foreignCopies(cwd: string, composition: ResolvedComposition): Diagnostic[] {
   const root = realpath(resolve(cwd));
   if (root === null) return [];
   const locations = [{ label: 'the project', where: 'package.json', dir: root }];
@@ -224,18 +234,18 @@ export function moduleCopies(cwd: string, composition: ResolvedComposition): Dia
   } catch {
     // no plugins/ — the root is the only location
   }
-  const rowDirs = new Set<string>();
+  const rows = new Map<string, unknown>(); // real dir → manifest
   for (const row of composition.rows) {
     const found = row.name.startsWith('@energy8engine/') ? readPackageJson(root, row.name) : null;
     const dir = found ? realpath(found.dir) : null;
-    if (dir !== null) rowDirs.add(dir);
+    if (found && dir !== null) rows.set(dir, found.json);
   }
 
   const out: Diagnostic[] = [];
   for (const pkg of STATEFUL_PACKAGES) {
     const engine = new Map<string, InstalledCopy>();
-    for (const dir of rowDirs) {
-      const copy = locate(dir, pkg);
+    for (const [dir, manifest] of rows) {
+      const copy = declares(manifest, pkg, RUNTIME_FIELDS) ? locate(dir, pkg) : null;
       if (copy) engine.set(copy.path, copy);
     }
     const [used] = engine.values();
@@ -255,18 +265,16 @@ export function moduleCopies(cwd: string, composition: ResolvedComposition): Dia
           'composition',
           at.map((l) => l.where).join(', '),
           `${at[0]!.label} resolves ${pkg}@${copy.version} (${copy.path}) but the engine's rows use ${pkg}@${used.version} (${used.path}) — two copies in one page`,
-          `declare ${pkg} the way the engine does (or drop it) so one copy resolves`,
+          copy.version === used.version
+            ? `the same version is installed twice — delete ${at[0]!.label}'s copy (a nested install pulled it in; install plugins with --omit=peer) so the engine's resolves`
+            : `declare ${pkg} as a peerDependency (or a range that includes the engine's ${used.version}) and reinstall, so one copy resolves`,
         ),
       );
     }
   }
 
   const legacyAt = locations.filter(({ dir }) => {
-    const manifest = readJson(join(dir, 'package.json'));
-    const named = DEPENDENCY_FIELDS.some((field) => {
-      const deps = isRecord(manifest) ? manifest[field] : undefined;
-      return isRecord(deps) && LEGACY_ENGINE in deps;
-    });
+    const named = declares(readJson(join(dir, 'package.json')), LEGACY_ENGINE, DEPENDENCY_FIELDS);
     const found = locate(dir, LEGACY_ENGINE)?.nodeModules;
     return (
       named ||
@@ -280,7 +288,7 @@ export function moduleCopies(cwd: string, composition: ResolvedComposition): Dia
         'composition',
         legacyAt.map((l) => l.where).join(', '),
         `the engine no longer uses ${LEGACY_ENGINE} — a copy here is a second engine`,
-        'remove it; use @energy8engine/tween for tweens',
+        "remove it from the project's package.json files and node_modules; the engine's own packages (@energy8engine/*) replace it — tweens: @energy8engine/tween",
       ),
     );
   }
