@@ -16,8 +16,10 @@
  * already established for `e8.yml` (and, before that, `createIdeHost`'s
  * Slice 0 fix for exactly this class of first-run mistake).
  */
+import { existsSync, readdirSync, readFileSync, realpathSync } from 'node:fs';
 import { readFile, rename, unlink, writeFile } from 'node:fs/promises';
-import { join } from 'node:path';
+import { createRequire } from 'node:module';
+import { dirname, join, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { Context } from 'cordis';
 import {
@@ -29,6 +31,7 @@ import {
 } from '@energy8engine/contracts';
 import { type Bundle, resolveComposition } from '@energy8engine/project';
 import * as yaml from 'js-yaml';
+import { readPackageJson } from '../resolvePackage';
 
 declare module 'cordis' {
   interface Context {
@@ -160,8 +163,143 @@ async function readProject(
 
   return {
     composition: resolved.composition,
-    diagnostics: [...diagnostics, ...resolved.diagnostics, ...tumblePair(resolved.composition)],
+    diagnostics: [
+      ...diagnostics,
+      ...resolved.diagnostics,
+      ...tumblePair(resolved.composition),
+      ...moduleCopies(cwd, resolved.composition),
+    ],
   };
+}
+
+/**
+ * Packages with module state. `pixi.js` (classes) and `cordis` (context)
+ * cannot mark themselves; `tween` (registry) and `reel-core` (classes) do
+ * mark themselves at runtime, but under `e8 build` the engine merges into
+ * one chunk and the marker's `import.meta.url` collapses — a built game's
+ * duplicate is caught here (`e8 build` reads these diagnostics) or nowhere.
+ */
+const STATEFUL_PACKAGES = ['pixi.js', 'cordis', '@energy8engine/tween', '@energy8engine/reel-core'];
+// Built from parts — the ide-host guard (`no-legacy-engine.test.ts`) scans engine/ for the literal.
+const LEGACY_ENGINE = ['@energy8platform', 'game-engine'].join('/');
+const DEPENDENCY_FIELDS = [
+  'dependencies',
+  'devDependencies',
+  'peerDependencies',
+  'optionalDependencies',
+];
+
+/**
+ * paper-duel F14, spec §2: a project that resolves its OWN copy of `pixi.js`
+ * or `cordis` — a plugin pinning another version — talks to a different
+ * instance than the engine's rows, silently. Each project location (the
+ * root, every `plugins/*` with a package.json) is compared against what the
+ * composed `@energy8engine/*` rows resolve, WHEREVER those are installed —
+ * a real game's own `node_modules`, or this repo's for the examples; never
+ * against a workspace. A package a location does not resolve is not a
+ * finding. And the user's rule: the legacy engine named in a project
+ * manifest, or installed inside the project, is a second engine — one
+ * warning listing every location. (The copy this repo hoists to its root
+ * is found OUTSIDE the example projects, so it is not theirs.)
+ */
+export function moduleCopies(cwd: string, composition: ResolvedComposition): Diagnostic[] {
+  const root = resolve(cwd);
+  const locations = [{ label: 'the project', where: 'package.json', dir: root }];
+  try {
+    for (const entry of readdirSync(join(root, 'plugins'))) {
+      const dir = join(root, 'plugins', entry);
+      if (existsSync(join(dir, 'package.json'))) {
+        locations.push({ label: `plugins/${entry}`, where: `plugins/${entry}/package.json`, dir });
+      }
+    }
+  } catch {
+    // no plugins/ — the root is the only location
+  }
+  const rowDirs = new Set<string>();
+  for (const row of composition.rows) {
+    const dir = row.name.startsWith('@energy8engine/')
+      ? readPackageJson(root, row.name)?.dir
+      : undefined;
+    if (dir) rowDirs.add(dir);
+  }
+
+  const out: Diagnostic[] = [];
+  for (const pkg of STATEFUL_PACKAGES) {
+    const engine = new Map<string, InstalledCopy>();
+    for (const dir of rowDirs) {
+      const copy = locate(dir, pkg);
+      if (copy) engine.set(copy.path, copy);
+    }
+    const [used] = engine.values();
+    if (!used) continue;
+    for (const location of locations) {
+      const own = locate(location.dir, pkg);
+      if (!own || engine.has(own.path)) continue;
+      out.push(
+        diagnostic(
+          'warning',
+          'composition',
+          location.where,
+          `${location.label} resolves ${pkg}@${own.version} (${own.path}) but the engine's rows use ${pkg}@${used.version} (${used.path}) — two copies in one page`,
+          `declare ${pkg} the way the engine does (or drop it) so one copy resolves`,
+        ),
+      );
+    }
+  }
+
+  const legacyAt = locations.filter(({ dir }) => {
+    const manifest = readJson(join(dir, 'package.json'));
+    const named = DEPENDENCY_FIELDS.some((field) => {
+      const deps = isRecord(manifest) ? manifest[field] : undefined;
+      return isRecord(deps) && LEGACY_ENGINE in deps;
+    });
+    return named || locate(dir, LEGACY_ENGINE)?.nodeModules.startsWith(root + sep) === true;
+  });
+  if (legacyAt.length > 0) {
+    out.push(
+      diagnostic(
+        'warning',
+        'composition',
+        legacyAt.map((l) => l.where).join(', '),
+        `the engine no longer uses ${LEGACY_ENGINE} — a copy here is a second engine`,
+        'remove it; use @energy8engine/tween for tweens',
+      ),
+    );
+  }
+  return out;
+}
+
+interface InstalledCopy {
+  /** Realpath of the package's directory — two copies are two paths. */
+  path: string;
+  version: string;
+  /** The `node_modules` directory it was found in, unresolved. */
+  nodeModules: string;
+}
+
+/**
+ * Where `pkg` is installed as seen from `dir`: Node's own lookup order
+ * (`require.resolve.paths`), first `<node_modules>/<pkg>/package.json`
+ * that exists. Not `require.resolve('<pkg>/package.json')` — pixi.js's
+ * `exports` does not list `./package.json`, so that throws for it.
+ */
+function locate(dir: string, pkg: string): InstalledCopy | null {
+  for (const nodeModules of createRequire(join(dir, 'package.json')).resolve.paths(pkg) ?? []) {
+    const manifest = join(nodeModules, pkg, 'package.json');
+    if (!existsSync(manifest)) continue;
+    const json = readJson(manifest);
+    const version = isRecord(json) && typeof json.version === 'string' ? json.version : 'unknown';
+    return { path: dirname(realpathSync(manifest)), version, nodeModules };
+  }
+  return null;
+}
+
+function readJson(file: string): unknown {
+  try {
+    return JSON.parse(readFileSync(file, 'utf8'));
+  } catch {
+    return undefined;
+  }
 }
 
 /**
