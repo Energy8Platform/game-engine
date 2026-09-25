@@ -15,8 +15,8 @@ const ROOT = fileURLToPath(new URL('../../../../', import.meta.url));
 const TEMPLATE = join(ROOT, 'engine/templates/slot-basic');
 const EXAMPLE = join(ROOT, 'engine/examples/first-slot');
 
-/** Never descends into `node_modules` — npm hoists one here at install time
- * for the template's own dependencies (`pixi.js` and the rest), and vendor
+/** Never descends into `node_modules` — the template copy resolves packages
+ * from the repo root's `node_modules` (npm puts nothing here), and vendor
  * code is not template content. */
 function walk(dir: string): string[] {
   const out: string[] = [];

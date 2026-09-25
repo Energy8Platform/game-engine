@@ -15,8 +15,9 @@ Only `@energy8platform/game-engine/animation`, and from it two things:
 `@energy8engine/reels-features` and `@energy8engine/flow-fx`. `game-runtime`,
 `first-slot` and the `slot-basic` template declare the dependency and import
 nothing from it. Every other legacy module (scenes, audio, assets, viewport,
-loading, host, slot) already has an engine package. `Timeline`,
-`SpineHelper`, `SpriteAnimation` are used by nobody.
+loading, host, slot) already has an engine package. `Timeline` and
+`SpineHelper` are used by nobody; `SpriteAnimation` is used by
+`@energy8engine/reel-core`'s `AnimatedSymbol`.
 
 Because the dependency is declared `^0.41.0` against a 0.44.1 workspace
 (0.x semver: `<0.42`), npm nested a registry copy of 0.41.0 under `flow-fx`,
@@ -42,7 +43,9 @@ A library package (no cordis, like `reel-core`) at `engine/game/tween`:
   (`packages/game-engine/src/animation/`), `EasingFunction` defined locally
   (`(t: number) => number`); API identical, so moving to it is an
   import-path change. Driven by pixi's `Ticker.shared`, as today.
-- Not forked: `Timeline`, `SpineHelper`, `SpriteAnimation`.
+- Not forked into `@energy8engine/tween`: `Timeline`, `SpineHelper`.
+  `SpriteAnimation` is forked into `reel-core/src/anim/` (its only
+  consumer), not into tween — a sprite-frame helper, not a tween.
 - Tests: the legacy `Easing.test.ts` forked; new `Tween` tests (a `to`
   reaches its target and resolves; `fromTo` starts from its `from`;
   `killTweensOf` resolves the pending promise and stops the target;
