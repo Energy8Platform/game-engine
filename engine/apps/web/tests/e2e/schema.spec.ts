@@ -43,7 +43,7 @@ async function settled(page: Page): Promise<void> {
 /**
  * The BOTTOM ROW of the 5x3 reel grid, in the `board` scene node's OWN
  * local space: cell (0,0)'s centre sits at local (0,0)
- * (`@energy8platform/game-engine`'s `slot/grid/geometry.ts`), cellSize 96,
+ * (`@energy8engine/reel-core`'s `grid/geometry.ts`), cellSize 96,
  * gap 6 — so the full grid's bounding box would be x -48..456, y -48..252
  * around wherever `nodeProps('base_game', 'board')` says the node itself
  * sits, and row 2 (the third and last row) is y 156..252 of that.

@@ -382,12 +382,12 @@ function isRevealedLine(value: unknown): value is RevealedLine {
 }
 
 /**
- * The legacy cell shape `SymbolCell.setData` (`@energy8platform/game-engine`)
- * takes: `symbol` normalized to a string (`String(n)` for a number, `null`
+ * The cell shape `@energy8engine/reel-core`'s `SymbolCell.setData` takes:
+ * `symbol` normalized to a string (`String(n)` for a number, `null`
  * stays `null`), whatever else a `BoardCell` carried spread through
  * untyped — a project's own extra fields (a multiplier, a sticky counter)
  * are this function's to pass along, not to know the shape of. Every
- * consumer that turns a `Board` cell into the legacy shape (`@energy8engine/
+ * consumer that turns a `Board` cell into that shape (`@energy8engine/
  * reels`' `toCellBoard`, a project plugin's own) goes through this one
  * function, so "how a cell becomes `CellData`" has exactly one definition.
  */

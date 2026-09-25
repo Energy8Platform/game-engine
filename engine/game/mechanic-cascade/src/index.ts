@@ -79,7 +79,7 @@ export const expects: SpinShapeRequirement = {
 /**
  * `TumbleStep.fresh` for one round: what drops in from above, per column.
  * Gravity drops survivors to the bottom and fills the vacated rows from the
- * top — `deriveDrops` in `@energy8platform/game-engine`'s `TumbleController`
+ * top — `deriveDrops` in `@energy8engine/reel-core`'s `TumbleController`
  * is the animation built on exactly that assumption (row 0 is the top of a
  * `Board` column) — so the fresh symbols for a column are the top *k* cells
  * of `round.grid` (the round's own post-collapse board), where *k* is how

@@ -16,8 +16,7 @@ const TEMPLATE = join(ROOT, 'engine/templates/slot-basic');
 const EXAMPLE = join(ROOT, 'engine/examples/first-slot');
 
 /** Never descends into `node_modules` — npm hoists one here at install time
- * (the template pins `@energy8platform/game-engine@^0.41.0` against the
- * monorepo's newer version, same as `first-slot` itself does), and vendor
+ * for the template's own dependencies (`pixi.js` and the rest), and vendor
  * code is not template content. */
 function walk(dir: string): string[] {
   const out: string[] = [];

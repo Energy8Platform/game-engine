@@ -1,8 +1,7 @@
 /**
  * `tween`: moves a scene node's `x`/`y`/`alpha`/`rotation`/`scale` through
- * the legacy `Tween` (`@energy8platform/game-engine/animation`) — the same
- * promise-based, PixiJS-ticker-driven engine the rest of the engine
- * animates with, no GSAP.
+ * `@energy8engine/tween`'s `Tween` — the same promise-based, PixiJS-ticker-
+ * driven engine the rest of the engine animates with, no GSAP.
  *
  * `target` is `<scene>/<node>` (a `SceneRef` packed into one string, the
  * way a flow prop has to be) — parsed by `@energy8engine/flow`'s

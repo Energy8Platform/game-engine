@@ -161,7 +161,7 @@ test("mechanics1.config.tumble: true over base_game: cascade — a winning spin'
  * is the one step every mechanic's plan opens with, and — after a fix this
  * task made alongside it (see the report) — the only one whose OWN
  * duration is turbo-scaled top to bottom under `first-slot`'s default
- * `reel-step` binding: `@energy8platform/game-engine`'s `SpinEngine`
+ * `reel-step` binding: `@energy8engine/reel-core`'s `SpinEngine`
  * halves it (`turboFactor: 0.5`), while `revealWins` never reads `opts` at
  * all (`@energy8engine/reels`' own comment: no artificial hold to halve)
  * and a `reelStep` round's own duration is turbo-scaled only as far as

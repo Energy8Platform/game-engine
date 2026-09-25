@@ -28,10 +28,3 @@ without dropping the row; a disabled kind's handler is not registered at all. Th
 the overlay layer above the cells (`src/layer.ts`) that `sticky` rings and the `giant` view live
 on, cleared of any leftover giant at the start of every spin.
 See `docs/superpowers/specs/2026-09-24-reel-features-design.md`.
-
-**Build first on a fresh clone** — like reel-core, this imports `@energy8platform/game-engine/animation`,
-which resolves to the BUILT `packages/game-engine/dist`:
-
-```bash
-npm run build --workspace @energy8platform/game-engine
-```
