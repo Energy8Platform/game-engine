@@ -5,7 +5,7 @@
  * is a tmp project laid out the way a real game outside this repo is: the
  * engine rows installed under the project's own `node_modules`.
  */
-import { mkdirSync, mkdtempSync, realpathSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, realpathSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import type { Context } from 'cordis';
@@ -94,19 +94,57 @@ describe('module copies (host check)', () => {
     expect(await diagnosticsOf(dir)).toEqual([]);
   });
 
-  it('compares against the rows, wherever they are installed — not against the project root', async () => {
+  it('compares against the rows, wherever they are installed — one warning per foreign copy, every location that resolves it in `where`', async () => {
     const dir = project();
-    // The engine row carries its own pixi.js; the project root's is another copy.
+    write(join(dir, 'plugins/mine/package.json'), { name: 'mine' });
+    // The engine row carries its own pixi.js; the project root's is another
+    // copy, and plugins/mine walks up to the same root copy.
     write(join(dir, 'node_modules/@energy8engine/fake-row/node_modules/pixi.js/package.json'), {
       name: 'pixi.js',
       version: '8.1.0',
     });
-    const [only, ...rest] = await diagnosticsOf(dir);
-    expect(rest).toEqual([]);
-    expect(only.where).toBe('package.json');
-    expect(only.message).toBe(
-      `the project resolves pixi.js@8.0.0 (${join(dir, 'node_modules/pixi.js')}) but the engine's rows use pixi.js@8.1.0 (${join(dir, 'node_modules/@energy8engine/fake-row/node_modules/pixi.js')}) — two copies in one page`,
-    );
+    expect(await diagnosticsOf(dir)).toEqual([
+      {
+        severity: 'warning',
+        plugin: 'composition',
+        where: 'package.json, plugins/mine/package.json',
+        message: `the project resolves pixi.js@8.0.0 (${join(dir, 'node_modules/pixi.js')}) but the engine's rows use pixi.js@8.1.0 (${join(dir, 'node_modules/@energy8engine/fake-row/node_modules/pixi.js')}) — two copies in one page`,
+        fix: 'declare pixi.js the way the engine does (or drop it) so one copy resolves',
+      },
+    ]);
+  });
+
+  // A symlinked `plugins/<name>` (npm link, a local workspace plugin) resolves
+  // from its TARGET, as Node and vite do — not by walking up the project.
+  // Here the target sits in an outer workspace that hoists its own pixi.js.
+  it('a symlinked plugin is resolved from its target — its outer workspace’s pixi.js is warned', async () => {
+    const dir = project();
+    const outside = realpathSync(mkdtempSync(join(tmpdir(), 'ide-host-module-copies-outside-')));
+    write(join(outside, 'pkgs/foo/package.json'), { name: 'foo' });
+    write(join(outside, 'node_modules/pixi.js/package.json'), {
+      name: 'pixi.js',
+      version: '7.9.9',
+    });
+    mkdirSync(join(dir, 'plugins'));
+    symlinkSync(join(outside, 'pkgs/foo'), join(dir, 'plugins/foo'));
+    const found = await diagnosticsOf(dir);
+    expect(found.map((d) => [d.where, d.message])).toEqual([
+      [
+        'plugins/foo/package.json',
+        `plugins/foo resolves pixi.js@7.9.9 (${join(outside, 'node_modules/pixi.js')}) but the engine's rows use pixi.js@8.0.0 (${join(dir, 'node_modules/pixi.js')}) — two copies in one page`,
+      ],
+    ]);
+  });
+
+  it('a symlinked plugin whose target resolves the rows’ copy is quiet', async () => {
+    const dir = project();
+    const outside = realpathSync(mkdtempSync(join(tmpdir(), 'ide-host-module-copies-outside-')));
+    write(join(outside, 'pkgs/foo/package.json'), { name: 'foo' });
+    mkdirSync(join(outside, 'node_modules'));
+    symlinkSync(join(dir, 'node_modules/pixi.js'), join(outside, 'node_modules/pixi.js'));
+    mkdirSync(join(dir, 'plugins'));
+    symlinkSync(join(outside, 'pkgs/foo'), join(dir, 'plugins/foo'));
+    expect(await diagnosticsOf(dir)).toEqual([]);
   });
 
   it('no node_modules and no plugins/ — no error, no warning', async () => {

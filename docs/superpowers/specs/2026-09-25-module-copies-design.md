@@ -33,20 +33,37 @@ visible.
   `<n> copies of <name> are loaded — <url1>, <url2>, …: its module state (tweens, caches, classes) exists more than once`
   fix: `make the project resolve the engine's copy: declare it "*" or match the engine's version`.
 
-## 2. Host check (third-party stateful packages)
+## 2. Host check (stateful packages, resolved)
 
-`pixi.js` and `cordis` cannot be marked, so the IDE host checks resolution:
-for each project plugin directory (`<project>/plugins/*` with a
-`package.json`) and the project root, resolve `<pkg>/package.json` from that
-directory; resolve it from each composed engine row's package directory;
-different realpaths → one `warning` per project location:
+Checked packages: `pixi.js` and `cordis` (they cannot be marked), plus
+`@energy8engine/tween` and `@energy8engine/reel-core`: the build-time net.
+`e8 build` merges the engine into one chunk, so the §1 marker's
+`import.meta.url` collapses and cannot see a duplicate there. `e8 build`
+reads the host's composition diagnostics.
+
+For each project location (the root and every `<project>/plugins/*` with a
+`package.json`), the IDE host finds the package with Node's own lookup order
+(`require.resolve.paths`, first `node_modules/<pkg>/package.json` that
+exists). It does not use `require.resolve('<pkg>/package.json')`, because
+pixi.js's `exports` does not list it. It does the same from each composed
+`@energy8engine/*` row's package directory. Every directory is realpath'd
+first, as Node and vite resolve, so a symlinked `plugins/<name>` resolves
+from its target. A path that vanishes mid-check is skipped. A copy whose
+realpath is not among the rows' copies gets **one `warning` per foreign
+copy**, with `where` listing every location that resolves it. A root copy
+is not repeated for each plugin that walks up to it. The message names the
+first such location:
 `plugins/<name> resolves pixi.js@<v1> (<path>) but the engine's rows use pixi.js@<v2> (<path>) — two copies in one page`
+(`the project resolves …` for the root)
 fix: `declare pixi.js the way the engine does (or drop it) so one copy resolves`.
 Not monorepo-specific: it compares the project against the engine rows,
 wherever those are installed.
 
 Plus the user's rule: a project whose root or plugin `package.json` names
-`@energy8platform/game-engine`, or that resolves it, gets a `warning`:
+`@energy8platform/game-engine`, or that resolves it from a `node_modules`
+inside the project (or inside that plugin), gets one `warning`, with `where`
+listing every such location. A copy hoisted above the project, like this
+repo's own root, is not the project's:
 `the engine no longer uses @energy8platform/game-engine — a copy here is a second engine`
 fix: `remove it; use @energy8engine/tween for tweens`.
 

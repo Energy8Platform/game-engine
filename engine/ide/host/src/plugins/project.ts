@@ -190,25 +190,34 @@ const DEPENDENCY_FIELDS = [
 ];
 
 /**
- * paper-duel F14, spec §2: a project that resolves its OWN copy of `pixi.js`
- * or `cordis` — a plugin pinning another version — talks to a different
- * instance than the engine's rows, silently. Each project location (the
- * root, every `plugins/*` with a package.json) is compared against what the
- * composed `@energy8engine/*` rows resolve, WHEREVER those are installed —
- * a real game's own `node_modules`, or this repo's for the examples; never
- * against a workspace. A package a location does not resolve is not a
- * finding. And the user's rule: the legacy engine named in a project
- * manifest, or installed inside the project, is a second engine — one
- * warning listing every location. (The copy this repo hoists to its root
- * is found OUTSIDE the example projects, so it is not theirs.)
+ * paper-duel F14, spec §2: a project that resolves its OWN copy of a
+ * stateful package — a plugin pinning another version — talks to a
+ * different instance than the engine's rows, silently. Each project
+ * location (the root, every `plugins/*` with a package.json) is compared
+ * against what the composed `@energy8engine/*` rows resolve, WHEREVER those
+ * are installed — a real game's own `node_modules`, or this repo's for the
+ * examples; never against a workspace. One warning per foreign copy, every
+ * location that resolves it in `where` (a root copy is not repeated for
+ * each plugin that walks up to it). A package a location does not resolve
+ * is not a finding. And the user's rule: the legacy engine named in a
+ * project manifest, or installed inside the project or a plugin, is a
+ * second engine — one warning listing every location. (The copy this repo
+ * hoists to its root is found OUTSIDE the example projects, so it is not
+ * theirs.)
+ *
+ * Every directory is realpath'd first, as Node and vite resolve: a
+ * symlinked `plugins/<name>` (npm link, a local workspace plugin) resolves
+ * from its target's `node_modules` chain, not by walking up the project.
+ * A directory that vanishes mid-check is skipped.
  */
 export function moduleCopies(cwd: string, composition: ResolvedComposition): Diagnostic[] {
-  const root = resolve(cwd);
+  const root = realpath(resolve(cwd));
+  if (root === null) return [];
   const locations = [{ label: 'the project', where: 'package.json', dir: root }];
   try {
     for (const entry of readdirSync(join(root, 'plugins'))) {
-      const dir = join(root, 'plugins', entry);
-      if (existsSync(join(dir, 'package.json'))) {
+      const dir = realpath(join(root, 'plugins', entry));
+      if (dir !== null && existsSync(join(dir, 'package.json'))) {
         locations.push({ label: `plugins/${entry}`, where: `plugins/${entry}/package.json`, dir });
       }
     }
@@ -217,10 +226,9 @@ export function moduleCopies(cwd: string, composition: ResolvedComposition): Dia
   }
   const rowDirs = new Set<string>();
   for (const row of composition.rows) {
-    const dir = row.name.startsWith('@energy8engine/')
-      ? readPackageJson(root, row.name)?.dir
-      : undefined;
-    if (dir) rowDirs.add(dir);
+    const found = row.name.startsWith('@energy8engine/') ? readPackageJson(root, row.name) : null;
+    const dir = found ? realpath(found.dir) : null;
+    if (dir !== null) rowDirs.add(dir);
   }
 
   const out: Diagnostic[] = [];
@@ -232,15 +240,21 @@ export function moduleCopies(cwd: string, composition: ResolvedComposition): Dia
     }
     const [used] = engine.values();
     if (!used) continue;
+    const foreign = new Map<string, { copy: InstalledCopy; at: typeof locations }>();
     for (const location of locations) {
       const own = locate(location.dir, pkg);
       if (!own || engine.has(own.path)) continue;
+      const entry = foreign.get(own.path) ?? { copy: own, at: [] };
+      entry.at.push(location);
+      foreign.set(own.path, entry);
+    }
+    for (const { copy, at } of foreign.values()) {
       out.push(
         diagnostic(
           'warning',
           'composition',
-          location.where,
-          `${location.label} resolves ${pkg}@${own.version} (${own.path}) but the engine's rows use ${pkg}@${used.version} (${used.path}) — two copies in one page`,
+          at.map((l) => l.where).join(', '),
+          `${at[0]!.label} resolves ${pkg}@${copy.version} (${copy.path}) but the engine's rows use ${pkg}@${used.version} (${used.path}) — two copies in one page`,
           `declare ${pkg} the way the engine does (or drop it) so one copy resolves`,
         ),
       );
@@ -253,7 +267,11 @@ export function moduleCopies(cwd: string, composition: ResolvedComposition): Dia
       const deps = isRecord(manifest) ? manifest[field] : undefined;
       return isRecord(deps) && LEGACY_ENGINE in deps;
     });
-    return named || locate(dir, LEGACY_ENGINE)?.nodeModules.startsWith(root + sep) === true;
+    const found = locate(dir, LEGACY_ENGINE)?.nodeModules;
+    return (
+      named ||
+      (found !== undefined && (found.startsWith(root + sep) || found.startsWith(dir + sep)))
+    );
   });
   if (legacyAt.length > 0) {
     out.push(
@@ -273,25 +291,36 @@ interface InstalledCopy {
   /** Realpath of the package's directory — two copies are two paths. */
   path: string;
   version: string;
-  /** The `node_modules` directory it was found in, unresolved. */
+  /** The `node_modules` directory it was found in, on the (real) walk up from the location. */
   nodeModules: string;
 }
 
 /**
- * Where `pkg` is installed as seen from `dir`: Node's own lookup order
- * (`require.resolve.paths`), first `<node_modules>/<pkg>/package.json`
- * that exists. Not `require.resolve('<pkg>/package.json')` — pixi.js's
- * `exports` does not list `./package.json`, so that throws for it.
+ * Where `pkg` is installed as seen from the REAL directory `dir`: Node's
+ * own lookup order (`require.resolve.paths`), first
+ * `<node_modules>/<pkg>/package.json` that exists. Not
+ * `require.resolve('<pkg>/package.json')` — pixi.js's `exports` does not
+ * list `./package.json`, so that throws for it.
  */
 function locate(dir: string, pkg: string): InstalledCopy | null {
   for (const nodeModules of createRequire(join(dir, 'package.json')).resolve.paths(pkg) ?? []) {
     const manifest = join(nodeModules, pkg, 'package.json');
-    if (!existsSync(manifest)) continue;
+    const real = existsSync(manifest) ? realpath(manifest) : null;
+    if (real === null) continue; // absent, or gone since — Node would look further up too
     const json = readJson(manifest);
     const version = isRecord(json) && typeof json.version === 'string' ? json.version : 'unknown';
-    return { path: dirname(realpathSync(manifest)), version, nodeModules };
+    return { path: dirname(real), version, nodeModules };
   }
   return null;
+}
+
+/** `realpathSync`, or `null` for a path that is not there (or vanished a moment ago). */
+function realpath(path: string): string | null {
+  try {
+    return realpathSync(path);
+  } catch {
+    return null;
+  }
 }
 
 function readJson(file: string): unknown {
