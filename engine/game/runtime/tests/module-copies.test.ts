@@ -18,7 +18,10 @@ const copyWarnings = (app: GameApp) => app.diagnostics.filter((d) => d.where ===
 describe('createGame — a second copy of a stateful engine module', () => {
   it('is one warning naming both urls', async () => {
     markModuleCopy('@energy8engine/tween', 'file:///engine/tween/src/index.ts');
-    markModuleCopy('@energy8engine/tween', 'file:///project/node_modules/@energy8engine/tween/src/index.ts');
+    markModuleCopy(
+      '@energy8engine/tween',
+      'file:///project/node_modules/@energy8engine/tween/src/index.ts',
+    );
     game = await boot();
     expect(copyWarnings(game)).toEqual([
       {
@@ -27,7 +30,7 @@ describe('createGame — a second copy of a stateful engine module', () => {
         where: 'modules',
         message:
           '2 copies of @energy8engine/tween are loaded — file:///engine/tween/src/index.ts, file:///project/node_modules/@energy8engine/tween/src/index.ts: its module state (tweens, caches, classes) exists more than once',
-        fix: `make the project resolve the engine's copy: declare it "*" or match the engine's version`,
+        fix: "the IDE host's diagnostics name which project location resolves its own copy; declare the package the way the engine does, or remove the project's copy",
       },
     ]);
   });

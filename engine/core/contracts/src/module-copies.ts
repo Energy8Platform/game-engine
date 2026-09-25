@@ -9,14 +9,16 @@
  * a second copy of THIS file must see the same map, so the shape stored
  * there (name → Set of urls) is shared by every version and never changes.
  *
- * The DEV-time net only. Identity is the module url, and `e8 build`'s
+ * Not the main net: the IDE host's static check of what the project
+ * resolves is (its composition diagnostics reach the IDE and `e8 build`).
+ * Identity is the module url, so this catches a second copy loaded under a
+ * different URL — a different specifier or path — and nothing else. In dev,
+ * vite pre-bundles a dependency by its bare name, so a nested copy is
+ * usually served as the same file and this map cannot see it; `e8 build`'s
  * `manualChunks` (ide-host `compute/build.ts`) merges every engine package
- * into one `game` chunk, so a nested duplicate there shares the chunk's url
- * and counts once — invisible here. A content key instead would misfire on
- * the other side: vite re-evaluating an edited module is a real second
- * instance under a new url, and no one scheme sees both. The build-time net
- * is the IDE host's static check of what the project resolves, whose
- * composition diagnostics `e8 build` reports.
+ * into one `game` chunk, so a duplicate there shares the chunk's url too. A
+ * content key instead would misfire the other way: vite re-evaluating an
+ * edited module is a real second instance under a new url.
  */
 const KEY = Symbol.for('energy8engine.moduleCopies');
 
