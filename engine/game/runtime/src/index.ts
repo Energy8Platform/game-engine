@@ -63,6 +63,7 @@ import {
   type E8SeamDeclaration,
   type GameCompositionRow,
   isSpinSchema,
+  moduleCopies,
   type SpinSchema,
 } from '@energy8engine/contracts';
 import { composeFromProject, type LoadOptions, type RowPlan } from '@energy8engine/loader';
@@ -746,6 +747,22 @@ export async function createGame(config: GameConfig = {}): Promise<GameApp> {
         'game-runtime',
         'compose',
         `composition failed: ${error instanceof Error ? error.message : String(error)}`,
+      ),
+    );
+  }
+
+  // Every row's module graph has loaded by now, so every stateful engine
+  // package has marked itself (see contracts' `module-copies.ts`). Outside
+  // the `try`: a second tween registry may be exactly why it threw.
+  for (const [name, urls] of moduleCopies()) {
+    if (urls.length < 2) continue;
+    diagnostics.push(
+      diagnostic(
+        'warning',
+        'runtime',
+        'modules',
+        `two copies of ${name} are loaded — ${urls.join(', ')}: its module state (tweens, caches, classes) exists twice`,
+        `make the project resolve the engine's copy: declare it "*" or match the engine's version`,
       ),
     );
   }

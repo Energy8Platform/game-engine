@@ -1,4 +1,9 @@
 // Forked from packages/game-engine/src/slot/index.ts (slice 35).
+import { markModuleCopy } from '@energy8engine/contracts';
+
+// Its classes cross the plugin boundary — a second copy is reported at boot (contracts' module-copies.ts).
+markModuleCopy('@energy8engine/reel-core', import.meta.url);
+
 export type { SymbolView, SymbolResolver } from './grid/SymbolView';
 export { AnimatedSymbol } from './grid/AnimatedSymbol';
 export { SymbolCell } from './grid/SymbolCell';

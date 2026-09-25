@@ -11,3 +11,4 @@ export * from './spin-schema';
 export * from './project';
 export * from './layout';
 export * from './scene-rounding';
+export * from './module-copies';

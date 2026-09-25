@@ -12,6 +12,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@energy8engine/contracts": "*",
     "@energy8engine/tween": "*",
     "pixi.js": "^8.20.1"
   },
