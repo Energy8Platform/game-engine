@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { Context } from 'cordis';
-import { Tween } from '@energy8platform/game-engine/animation';
+import { Tween } from '@energy8engine/tween';
 import type { RunCtx } from '@energy8engine/flow';
 import { createTween } from '../src/tween';
 

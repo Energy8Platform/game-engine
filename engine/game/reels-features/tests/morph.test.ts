@@ -3,7 +3,7 @@
  * reel system and recording board, the ticker pumped by hand.
  */
 import { describe, expect, it } from 'vitest';
-import { Tween } from '@energy8platform/game-engine/animation';
+import { Tween } from '@energy8engine/tween';
 import type { CellData, ReelSystem } from '@energy8engine/reel-core';
 import type { StepHandler } from '@energy8engine/play-loop';
 import { createExpandWildHandler } from '../src/handlers/expandWild';

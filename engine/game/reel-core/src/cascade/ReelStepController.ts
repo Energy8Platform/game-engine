@@ -10,7 +10,7 @@
 // board. Fits classic fixed-line grids (5×3, 5×4, 5×5, …), not ways/cluster.
 
 import { Container } from 'pixi.js';
-import { Tween } from '@energy8platform/game-engine/animation';
+import { Tween } from '@energy8engine/tween';
 import { easingByName } from '../anim/easing-map';
 import type { ReelGrid } from '../grid/ReelGrid';
 import { SymbolCell, type CellData } from '../grid/SymbolCell';

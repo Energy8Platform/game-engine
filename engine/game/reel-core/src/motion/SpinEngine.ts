@@ -9,7 +9,7 @@
 // never re-rolls a result.
 
 import { BlurFilter, Container } from 'pixi.js';
-import { Tween } from '@energy8platform/game-engine/animation';
+import { Tween } from '@energy8engine/tween';
 import { EASING_BY_NAME, easingByName } from '../anim/easing-map';
 import type { ReelGrid } from '../grid/ReelGrid';
 import { SymbolCell, type CellData } from '../grid/SymbolCell';

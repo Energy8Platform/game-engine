@@ -3,7 +3,7 @@
 // Decides which trailing reels get the "anticipation" slow-down treatment, based purely on
 // the already-resolved landing grid (presentation only — never a secondary outcome decision).
 
-import { Tween } from '@energy8platform/game-engine/animation';
+import { Tween } from '@energy8engine/tween';
 import { easingByName } from '../anim/easing-map';
 import type { ReelGrid } from '../grid/ReelGrid';
 import type { CellData } from '../grid/SymbolCell';

@@ -1,6 +1,6 @@
 // Forked from packages/game-engine/src/slot/grid/SymbolCell.ts (slice 35).
 import { Container, Graphics, Text } from 'pixi.js';
-import { Tween, Easing } from '@energy8platform/game-engine/animation';
+import { Tween, Easing } from '@energy8engine/tween';
 import type { SymbolResolver, SymbolView } from './SymbolView';
 
 export interface CellFrameStyle {

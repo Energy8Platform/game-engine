@@ -3,7 +3,7 @@
  * started `staggerMs` apart. Ported from the legacy `RandomWild` demo, minus its choice of cells.
  */
 import { dropCell, type CellData } from '@energy8engine/reel-core';
-import { Tween } from '@energy8platform/game-engine/animation';
+import { Tween } from '@energy8engine/tween';
 import { cellData, type BoardCell } from '@energy8engine/contracts';
 import type { StepHandler } from '@energy8engine/play-loop';
 import { checkCells, createFeatureHandler, type Cell, type FeatureDeps } from '../shared';

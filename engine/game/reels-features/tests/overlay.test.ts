@@ -4,7 +4,7 @@
  */
 import { describe, expect, it, vi } from 'vitest';
 import { Container, Text } from 'pixi.js';
-import { Tween } from '@energy8platform/game-engine/animation';
+import { Tween } from '@energy8engine/tween';
 import type { ReelSystem } from '@energy8engine/reel-core';
 import { createOverlayLayer, type OverlayLayer } from '../src/layer';
 import { createMultipliersHandler } from '../src/handlers/multipliers';

@@ -6,7 +6,7 @@
 // (that's a later slice); this is only the presentation toolkit a facade would call into.
 
 import { Container, Graphics, Text } from 'pixi.js';
-import { Tween } from '@energy8platform/game-engine/animation';
+import { Tween } from '@energy8engine/tween';
 import { easingByName } from '../anim/easing-map';
 import type { ReelGrid } from '../grid/ReelGrid';
 import type { SymbolCell, CellData } from '../grid/SymbolCell';

@@ -6,7 +6,7 @@
 //
 // Presentation only — the settled board is provided by the caller.
 
-import { Tween } from '@energy8platform/game-engine/animation';
+import { Tween } from '@energy8engine/tween';
 import { easingByName } from '../anim/easing-map';
 import type { ReelGrid } from '../grid/ReelGrid';
 import type { CellData } from '../grid/SymbolCell';

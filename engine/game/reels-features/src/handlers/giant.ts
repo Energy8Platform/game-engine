@@ -11,7 +11,7 @@
  */
 import { Container } from 'pixi.js';
 import { easingByName, type CellData, type EasingName } from '@energy8engine/reel-core';
-import { Tween } from '@energy8platform/game-engine/animation';
+import { Tween } from '@energy8engine/tween';
 import { cellData, type BoardCell } from '@energy8engine/contracts';
 import type { StepHandler } from '@energy8engine/play-loop';
 import { createFeatureHandler, needLayer, type Change, type FeatureDeps } from '../shared';

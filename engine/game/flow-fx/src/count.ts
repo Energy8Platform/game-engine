@@ -29,7 +29,7 @@
  * abort signal (`stop()`/`replace()`) stops the loop where it is without
  * writing anything further.
  */
-import { Easing } from '@energy8platform/game-engine/animation';
+import { Easing } from '@energy8engine/tween';
 import Schema from 'schemastery';
 import type { ScenesService } from '@energy8engine/scenes';
 import {

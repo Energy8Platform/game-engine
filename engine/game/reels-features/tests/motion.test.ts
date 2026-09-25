@@ -3,7 +3,7 @@
  * by whole rows) — on `./harness`'s reel system. Both end with every cell back home.
  */
 import { describe, expect, it } from 'vitest';
-import { Tween } from '@energy8platform/game-engine/animation';
+import { Tween } from '@energy8engine/tween';
 import type { ReelSystem } from '@energy8engine/reel-core';
 import type { StepHandler } from '@energy8engine/play-loop';
 import { createWalkWildHandler } from '../src/handlers/walkWild';

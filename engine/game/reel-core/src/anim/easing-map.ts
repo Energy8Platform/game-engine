@@ -1,7 +1,5 @@
 // Forked from packages/game-engine/src/slot/anim/easing-map.ts (slice 35).
-import { Easing } from '@energy8platform/game-engine/animation';
-
-type EasingFunction = (t: number) => number;
+import { Easing, type EasingFunction } from '@energy8engine/tween';
 
 /** Resolve a descriptor's string easing name to the engine's easing function. */
 export const EASING_BY_NAME: Record<string, EasingFunction> = {

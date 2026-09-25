@@ -22,7 +22,7 @@
   "dependencies": {
     "@energy8engine/flow": "*",
     "@energy8engine/scenes": "*",
-    "@energy8platform/game-engine": "^0.41.0",
+    "@energy8engine/tween": "*",
     "@pixi/sound": "^6.0.1",
     "cordis": "4.0.0-rc.8",
     "schemastery": "3.18.0"

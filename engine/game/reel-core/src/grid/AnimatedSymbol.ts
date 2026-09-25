@@ -1,6 +1,6 @@
 // Forked from packages/game-engine/src/slot/grid/AnimatedSymbol.ts (slice 35).
 import { Container, Sprite, AnimatedSprite, type Texture } from 'pixi.js';
-import { SpriteAnimation } from '@energy8platform/game-engine/animation';
+import { SpriteAnimation } from '../anim/SpriteAnimation';
 import type { SymbolView } from './SymbolView';
 
 export interface SymbolTextures { base: Texture; idle?: Texture[]; win?: Texture[]; }

@@ -4,7 +4,7 @@
  * from the legacy `ExpandingWild` demo, minus its choice of reel — the mechanic makes that one.
  */
 import { morphSymbol, type CellData } from '@energy8engine/reel-core';
-import { Tween } from '@energy8platform/game-engine/animation';
+import { Tween } from '@energy8engine/tween';
 import { cellData, type BoardCell } from '@energy8engine/contracts';
 import type { StepHandler } from '@energy8engine/play-loop';
 import { checkCells, createFeatureHandler, type FeatureDeps } from '../shared';

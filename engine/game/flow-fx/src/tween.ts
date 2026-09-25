@@ -13,7 +13,7 @@
  * currently on stage is not thrown — it is a diagnostic on the node
  * (`report`), same as a flow that names a service nothing provides.
  */
-import { Easing, Tween } from '@energy8platform/game-engine/animation';
+import { Easing, Tween } from '@energy8engine/tween';
 import Schema from 'schemastery';
 import type { ScenesService } from '@energy8engine/scenes';
 import { parseTarget, type FlowNodeKind } from '@energy8engine/flow';

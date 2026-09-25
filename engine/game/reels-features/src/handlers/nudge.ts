@@ -5,7 +5,7 @@
  * fill (a `settled` column of wilds is that).
  */
 import { easingByName, rowStepOf, type CellData, type EasingName } from '@energy8engine/reel-core';
-import { Tween } from '@energy8platform/game-engine/animation';
+import { Tween } from '@energy8engine/tween';
 import { cellData, type BoardCell } from '@energy8engine/contracts';
 import type { StepHandler } from '@energy8engine/play-loop';
 import { createFeatureHandler, type FeatureDeps } from '../shared';

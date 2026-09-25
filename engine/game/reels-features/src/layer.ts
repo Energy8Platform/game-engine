@@ -9,7 +9,7 @@
  * view with it; `destroy()` is safe after that.
  */
 import { Container } from 'pixi.js';
-import { Tween } from '@energy8platform/game-engine/animation';
+import { Tween } from '@energy8engine/tween';
 import { glowRing, type ReelKit, type SymbolCell } from '@energy8engine/reel-core';
 import type { Cell } from './shared';
 

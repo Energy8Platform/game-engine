@@ -22,7 +22,7 @@ import {
   type ReelSystem,
   type SymbolCell,
 } from '@energy8engine/reel-core';
-import { Tween } from '@energy8platform/game-engine/animation';
+import { Tween } from '@energy8engine/tween';
 import type { Board, PresentationStep, StepOpts } from '@energy8engine/contracts';
 import type { StepHandler } from '@energy8engine/play-loop';
 import type { OverlayLayer } from './layer';

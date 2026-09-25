@@ -7,7 +7,7 @@
 // REGISTERED into it (see ./contracts.ts) — the rows that provide them do the registering.
 
 import { Container } from 'pixi.js';
-import { Tween } from '@energy8platform/game-engine/animation';
+import { Tween } from '@energy8engine/tween';
 import { ReelGrid } from '../grid/ReelGrid';
 import type { CellData } from '../grid/SymbolCell';
 import type { SymbolResolver } from '../grid/SymbolView';
