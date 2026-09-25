@@ -65,7 +65,7 @@ accepts (a number, a name, or a record — extras ride along).
 | `reveal` | `cells`, `symbol` | each cell flips/morphs to `symbol` together (mystery) | those cells = `symbol` |
 | `transform` | `cells`, `to` | each cell morphs to `to` with a pulse | those cells = `to` |
 | `multipliers` | `cells: {col,row,value}[]`, `total?: number` | each cell gets its multiplier badge and pulses, a `×value` label floats from it; `total` shown at the grid's centre | those cells carry `multiplier: value` |
-| `sticky` | `cells`, `on: boolean` | `on`: a persistent ring on each cell; `off`: those rings go | unchanged |
+| `sticky` | `cells`, `on: boolean` — or `clear: true` alone | `on`: a persistent ring on each cell; `off`: those rings go; `clear`: every ring on the layer goes at once, no animation | unchanged |
 | `giant` | `col`, `row`, `width`, `height`, `symbol` — or `clear: true` alone | one symbol view spanning `width×height` cells from `(col,row)`, the covered cells hidden, scale-in; `clear` re-shows them and drops the view, no animation | covered cells = `symbol`; the overlay persists until the next spin starts, or until a `giant { clear: true }` step (§4.3) |
 | `nudge` | `reel`, `by: number` (±), `settled: Board column` | the reel's cells slide by `by` rows and land on `settled` | that reel = `settled` |
 
@@ -92,7 +92,9 @@ The core's `fx` layer is swept on the first skip of a run, so the rings of
 `sticky` and the `giant` overlay live on the row's own layer above the cells.
 
 - `sticky` rings persist across spins (free spins, hold-and-spin locks) until
-  a `sticky { cells, on: false }` names them.
+  a `sticky { cells, on: false }` names them, or a `sticky { clear: true }`
+  step takes every ring off the layer at once — a mechanic can clear at the
+  top of a segment without remembering which cells it locked.
 - A `giant` overlay persists until the next spin starts, or until a
   `giant { clear: true }` step names it: `reel-core`'s `ReelSystem` gains
   `onSpinStart(fn): () => void`, fired at the start of `spin()`; the row

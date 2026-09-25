@@ -17,7 +17,7 @@ overlay layer for what outlives a run (sticky rings, giant symbols).
 | `reveal` | `cells`, `symbol` | those cells = `symbol` |
 | `transform` | `cells`, `to` | those cells = `to` |
 | `multipliers` | `cells: {col,row,value}[]`, `total?` | those cells carry `multiplier: value` |
-| `sticky` | `cells`, `on` | unchanged (rings on the overlay layer until `on: false`) |
+| `sticky` | `cells`, `on` — or `clear: true` alone | unchanged (rings on the overlay layer until `on: false`, or until a `sticky { clear: true }` step) |
 | `giant` | `col`, `row`, `width`, `height`, `symbol` — or `clear: true` alone | covered cells = `symbol` (the overlay stays until the next spin, or until a `giant { clear: true }` step) |
 | `nudge` | `reel`, `by` (± rows), `settled` | that reel = `settled` |
 
@@ -27,4 +27,18 @@ section per kind, each with its own `enabled` (default `true`), so a game can dr
 without dropping the row; a disabled kind's handler is not registered at all. The row also owns
 the overlay layer above the cells (`src/layer.ts`) that `sticky` rings and the `giant` view live
 on, cleared of any leftover giant at the start of every spin.
+
+The nine kinds are a library to pick from, not a checklist every game exercises. They animate
+state that lives on a CELL — a symbol at `(col, row)`. State a game keeps on the SYMBOL itself (a
+value-carrying orb, a per-symbol celebration) belongs to the symbol's own document — its `$cell`
+data, a `playState` — not to a feature step.
+
+`giant` persists until the next spin starts, or until a `giant { clear: true }` step names it; a
+mechanic that plays `tumble`/`reelStep`/`refill` over a giant's area emits the clear first, so the
+screen never disagrees with the board mid-plan.
+
+`sticky` rings persist across spins until `sticky { on: false }` names the cells, or
+`sticky { clear: true }` takes every ring off the layer at once — a mechanic can clear at the top
+of each segment without remembering which cells it locked.
+
 See `docs/superpowers/specs/2026-09-24-reel-features-design.md`.

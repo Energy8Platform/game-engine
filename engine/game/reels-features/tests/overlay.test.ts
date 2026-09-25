@@ -201,6 +201,33 @@ describe('sticky', () => {
     expect(childrenLabelled(layer, 'sticky')).toHaveLength(2);
     expect(refills).toEqual([]);
   });
+
+  describe('clear: true', () => {
+    it('clears every ring, no re-seat', async () => {
+      const { board, refills, layer, handler } = stickySetup();
+      await pump(run(handler, { kind: 'sticky', cells, on: true }, board));
+      expect(childrenLabelled(layer, 'sticky')).toHaveLength(2);
+
+      await pump(run(handler, { kind: 'sticky', clear: true }, board));
+      expect(childrenLabelled(layer, 'sticky')).toHaveLength(0);
+      expect(refills).toEqual([]);
+    });
+
+    it('with no ring up: no error, no-op', async () => {
+      const { board, refills, layer, handler } = stickySetup();
+      await pump(run(handler, { kind: 'sticky', clear: true }, board));
+      expect(childrenLabelled(layer, 'sticky')).toHaveLength(0);
+      expect(refills).toEqual([]);
+    });
+
+    it('with cells: refused', async () => {
+      const { board, refills, handler } = stickySetup();
+      await expect(run(handler, { kind: 'sticky', clear: true, cells }, board)).rejects.toThrow(
+        'sticky: clear takes no cells',
+      );
+      expect(refills).toEqual([]);
+    });
+  });
 });
 
 describe('giant', () => {

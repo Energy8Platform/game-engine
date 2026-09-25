@@ -19,6 +19,8 @@ export interface OverlayLayer {
   /** Idempotent per cell; child label 'sticky'. */
   ringOn(cell: Cell, color: number): void;
   ringOff(cell: Cell): void;
+  /** Takes every ring off the layer at once; a no-op when none are up. */
+  clearRings(): void;
   /** Replaces any current giant (clearing it, so call this BEFORE `hideForGiant`); label 'giant'. */
   showGiant(view: Container): void;
   /** Destroys giants, re-shows the cells they hid. */
@@ -45,6 +47,11 @@ export function createOverlayLayer(kit: ReelKit): OverlayLayer {
     hidden = [];
   };
 
+  const clearRings = () => {
+    rings.forEach((off) => off());
+    rings.clear();
+  };
+
   return {
     view,
 
@@ -61,6 +68,8 @@ export function createOverlayLayer(kit: ReelKit): OverlayLayer {
       rings.get(key)?.();
       rings.delete(key);
     },
+
+    clearRings,
 
     showGiant(next) {
       clearGiants();
@@ -81,7 +90,7 @@ export function createOverlayLayer(kit: ReelKit): OverlayLayer {
 
     destroy() {
       clearGiants();
-      rings.clear();
+      clearRings();
       view.destroy({ children: true });
     },
   };

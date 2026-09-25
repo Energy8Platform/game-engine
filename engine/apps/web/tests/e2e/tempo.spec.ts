@@ -117,13 +117,6 @@ function tumbleFixture(animated = true): void {
     stages: { ...mechanics.config?.stages, base_game: 'cascade' },
     tumble: true,
   };
-  if (animated) {
-    const reels = patch.rows.find((r) => r.id === 'reels1')!;
-    reels.config = {
-      ...reels.config,
-      config: { ...reels.config?.config, cascade: { enabled: true } },
-    };
-  }
   writeFileSync(patchFile, dump(patch, { noRefs: true }));
 }
 
