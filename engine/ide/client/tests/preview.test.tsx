@@ -281,25 +281,52 @@ describe('Preview', () => {
     expect(screen.getByTitle('game preview')).toBe(before);
   });
 
-  it('Rotate swaps the iframe width/height', async () => {
+  /**
+   * Ruling: a screen/rotate change is a live RESIZE of the running game —
+   * the legacy harness's `applyScreen` only ever sets the iframe's own
+   * width/height — so it must NOT relaunch. Only a change to what the
+   * game is actually TOLD (lang/currency/balance/social/device, i.e. the
+   * address `previewAddress` builds) is a relaunch. Rotate and a
+   * same-device-class preset switch (Desktop→Laptop: neither name starts
+   * with `Mobile`) leave the address, and so the iframe's key, untouched
+   * — same element, new `width`/`height` props. Desktop→Mobile S changes
+   * `device` in the address, so it IS a relaunch — a new element.
+   */
+  it('Rotate keeps the same iframe element (a resize, not a relaunch) and swaps width/height', async () => {
     localStorage.clear();
     const { ctx } = await harness();
     render(<Preview ctx={ctx} />);
+    const before = screen.getByTitle('game preview') as HTMLIFrameElement;
     await userEvent.click(screen.getByTestId('preview-rotate'));
-    const iframe = screen.getByTitle('game preview') as HTMLIFrameElement;
-    expect(iframe.width).toBe('675');
-    expect(iframe.height).toBe('1200');
+    const after = screen.getByTitle('game preview') as HTMLIFrameElement;
+    expect(after).toBe(before);
+    expect(after.width).toBe('675');
+    expect(after.height).toBe('1200');
   });
 
-  it('choosing Mobile S sizes the iframe to 320×568 and addresses it with device=mobile', async () => {
+  it('Desktop→Laptop keeps the same iframe element (same device class, address unchanged) and resizes to 1024×576', async () => {
     localStorage.clear();
     const { ctx } = await harness();
     render(<Preview ctx={ctx} />);
+    const before = screen.getByTitle('game preview') as HTMLIFrameElement;
+    await userEvent.selectOptions(screen.getByTestId('preview-preset'), 'Laptop');
+    const after = screen.getByTitle('game preview') as HTMLIFrameElement;
+    expect(after).toBe(before);
+    expect(after.width).toBe('1024');
+    expect(after.height).toBe('576');
+  });
+
+  it('choosing Mobile S is a relaunch (device=mobile changes the address) with a NEW element, sized 320×568', async () => {
+    localStorage.clear();
+    const { ctx } = await harness();
+    render(<Preview ctx={ctx} />);
+    const before = screen.getByTitle('game preview') as HTMLIFrameElement;
     await userEvent.selectOptions(screen.getByTestId('preview-preset'), 'Mobile S');
-    const iframe = screen.getByTitle('game preview') as HTMLIFrameElement;
-    expect(iframe.width).toBe('320');
-    expect(iframe.height).toBe('568');
-    expect(new URL(iframe.src).searchParams.get('device')).toBe('mobile');
+    const after = screen.getByTitle('game preview') as HTMLIFrameElement;
+    expect(after).not.toBe(before);
+    expect(after.width).toBe('320');
+    expect(after.height).toBe('568');
+    expect(new URL(after.src).searchParams.get('device')).toBe('mobile');
   });
 
   it('changing currency remounts the iframe (a new element) with the new currency in its address', async () => {
@@ -359,5 +386,14 @@ describe('Preview', () => {
     render(<Preview ctx={ctx} />);
     const iframe = screen.getByTitle('game preview') as HTMLIFrameElement;
     expect(new URL(iframe.src).searchParams.get('currency')).toBe('EUR');
+  });
+
+  it('the preset, language, currency and balance controls each have an accessible name', async () => {
+    const { ctx } = await harness();
+    render(<Preview ctx={ctx} />);
+    expect(screen.getByLabelText('screen')).toBe(screen.getByTestId('preview-preset'));
+    expect(screen.getByLabelText('language')).toBe(screen.getByTestId('preview-lang'));
+    expect(screen.getByLabelText('currency')).toBe(screen.getByTestId('preview-currency'));
+    expect(screen.getByLabelText('balance')).toBe(screen.getByTestId('preview-balance'));
   });
 });

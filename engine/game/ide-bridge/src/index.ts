@@ -53,7 +53,7 @@
  * Whether an edit needs the iframe reloaded instead is the HOST's verdict,
  * not this module's: `game-composition.reload` is `true` for a `hot:false`
  * row and for a changed field the row's schema marks `applies: 'restart'`,
- * and the IDE (`engine/ide/client/src/screens/PreviewWall.tsx`'s `Preview`)
+ * and the IDE (`engine/ide/client/src/screens/Preview.tsx`'s `Preview`)
  * reloads the frame on it — this module does nothing with such a frame,
  * since any re-apply would be thrown away with the page. This package
  * declares `"e8": { "hot": true }` in its own package.json — a config

@@ -1,7 +1,7 @@
 /**
  * `first-slot`'s browser entry — what `e8 dev`'s `dev-game` plugin serves
  * through vite, and what Task 12's preview iframe points at (same server,
- * see `engine/ide/client/src/screens/PreviewWall.tsx`'s `Preview`).
+ * see `engine/ide/client/src/screens/Preview.tsx`'s `Preview`).
  * This is the minimal "open, click spin" harness, not a finished game
  * shell.
  *

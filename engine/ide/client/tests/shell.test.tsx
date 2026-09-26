@@ -656,7 +656,7 @@ describe('Shell', () => {
   });
 
   it('leaves the main landmark to the document that owns one', () => {
-    // Ported from `layout.test.tsx`: `CompositionScreen` and `PreviewWall`
+    // Ported from `layout.test.tsx`: `CompositionScreen` and `Preview`
     // both open with a `<main>`, so the shell's own body must not be one —
     // a landmark inside a landmark on every shipped document.
     const ctx = harness();

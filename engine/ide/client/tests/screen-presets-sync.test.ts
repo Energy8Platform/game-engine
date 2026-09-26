@@ -7,7 +7,7 @@ import { LANGS } from '../src/screens/langs';
 import { SCREEN_PRESETS } from '../src/screens/screenPresets';
 
 /**
- * `PreviewWall` reads `./screenPresets`/`./langs` — pinned COPIES of
+ * `Preview` reads `./screenPresets`/`./langs` — pinned COPIES of
  * `@energy8platform/harness`'s `SCREEN_PRESETS`/`LANGS`, not that package
  * itself (see `screenPresets.ts`'s own doc for why: its only public entry
  * welds this data to a Node-only dev plugin at the module boundary, which
@@ -22,11 +22,11 @@ import { SCREEN_PRESETS } from '../src/screens/screenPresets';
  * discipline already leans on, rather than only a real build or a real
  * browser ever finding out.
  *
- * Compared on exactly the fields `PreviewWall` actually reads —
+ * Compared on exactly the fields `Preview` actually reads —
  * `name`/`w`/`h` for a preset, `code`/`label` for a language — not the
- * whole object, so a field the upstream package adds tomorrow that the
- * wall never looks at cannot fail this test for a reason nobody here can
- * act on.
+ * whole object, so a field the upstream package adds tomorrow that
+ * `Preview` never looks at cannot fail this test for a reason nobody here
+ * can act on.
  */
 describe('the local preset/language copy stays in sync with @energy8platform/harness', () => {
   it('SCREEN_PRESETS matches on name/w/h', () => {

@@ -1,6 +1,6 @@
 /**
  * A pinned COPY of `@energy8platform/harness`'s `SCREEN_PRESETS` — not a
- * re-export, and not read from that package at all. `PreviewWall.tsx`
+ * re-export, and not read from that package at all. `Preview.tsx`
  * imports THIS file.
  *
  * The ruling this reverses: importing the data directly from
@@ -15,7 +15,7 @@
  * 'node:fs'` and `import { fileURLToPath } from 'node:url'`, unconditional,
  * before any of the data: the Node half (`createHarness`, a dev-only vite
  * plugin) and the browser-safe half are welded together at the package
- * boundary. Importing that entry from `PreviewWall.tsx` — code this app
+ * boundary. Importing that entry from `Preview.tsx` — code this app
  * actually bundles for a browser — took the WHOLE app down at boot in a
  * real browser (confirmed with Playwright) and broke `vite build`, because
  * Vite's stand-in for a node builtin in browser code THROWS the instant
@@ -27,7 +27,7 @@
  * test.ts` imports the REAL `@energy8platform/harness` — safe there, since
  * vitest runs on real Node and the `node:fs`/`node:url` imports simply
  * resolve — and asserts this array still matches it on exactly the fields
- * `PreviewWall` reads (`name`/`w`/`h`). Drift becomes possible, but it is
+ * `Preview` reads (`name`/`w`/`h`). Drift becomes possible, but it is
  * caught by `npm test`, not only by a real build or a real browser.
  */
 

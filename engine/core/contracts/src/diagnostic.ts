@@ -49,8 +49,11 @@ export interface Diagnostic {
    *      - a document key (`shell.tsx`, reporting a key nothing answers
    *        to, and `Shell.tsx`'s `DocumentBoundary`, reporting a document
    *        that crashed);
-   *      - a screen-preset name (`PreviewWall`, reporting a preset the
-   *        wall was asked for and `SCREEN_PRESETS` does not define);
+   *      - a screen-preset name (the now-removed `PreviewWall`, reporting
+   *        a preset the wall was asked for and `SCREEN_PRESETS` did not
+   *        define — its successor, `Preview`, never holds an unknown
+   *        preset in the first place, so nothing reports through this
+   *        address kind any more);
    *      - and, widest of all, a raw address fragment a human typed —
    *        `shell.tsx` passes the hash's key straight in when it names
    *        no document. That one is not a registry key at all, and cannot

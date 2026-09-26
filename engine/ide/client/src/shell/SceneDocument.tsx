@@ -39,7 +39,7 @@ import { CanvasToolbar, clampZoom, type GridState, type Viewport } from './Canva
  * (`replace` — the canvas has no other way to learn of an edit).
  * Selection stays one fact — `ctx.scenes.selected()` — so a pick the
  * service already holds is not re-told. The iframe is remounted on the
- * same rule `PreviewWall` uses: a host `reload` verdict, or another
+ * same rule `Preview` uses: a host `reload` verdict, or another
  * project on the same address.
  *
  * The viewport preset decides the EDIT TARGET (spec §7), but the PAGE says

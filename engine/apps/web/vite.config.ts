@@ -22,9 +22,9 @@ export default defineConfig({
   build: { target: 'es2022' },
   // This config used to carry a `resolve.alias` standing in for
   // `node:fs`/`node:url`, worked around a Node-only half of
-  // `@energy8platform/harness` that `PreviewWall` (Task 6) briefly imported
-  // directly for `SCREEN_PRESETS`/`LANGS`. Withdrawn: `PreviewWall` now
-  // reads a pinned, checked COPY of that data instead
+  // `@energy8platform/harness` that `Preview` (née `PreviewWall`, Task 6)
+  // briefly imported directly for `SCREEN_PRESETS`/`LANGS`. Withdrawn:
+  // `Preview` now reads a pinned, checked COPY of that data instead
   // (`@energy8engine/ide-client/src/screens/screenPresets.ts`/`langs.ts`),
   // so this app's build never touches the package at all any more, and the
   // alias — which fixed the symptom in exactly one app's config, not the

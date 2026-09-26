@@ -164,6 +164,19 @@ function writePreviewState(s: PreviewState): void {
  * toolbar choice that changes what the game is told (currency, balance,
  * …) is as much a new game as a different `previewUrl` is — reassigning
  * `src` on the same node would leave the OLD session running underneath.
+ *
+ * RESIZE, not relaunch: the preset and `rotated` are deliberately NOT part
+ * of the key, only `previewAddress`'s output is (via `src`, and only for
+ * `device`, which `previewAddress` sets from the preset's name). Rotate
+ * and a preset switch within the same device class (Desktop→Laptop: no
+ * name starts with `Mobile`) leave the address untouched, so the iframe
+ * keeps its identity and only its `width`/`height` props change — a live
+ * resize of the running game, the same thing the legacy harness's
+ * `applyScreen` ever did (it only ever set the iframe's own width/height,
+ * never re-pointed its `src`). A preset whose name starts with `Mobile`
+ * changes `device` in the address, which IS as much a new game as a
+ * `previewUrl`/`reload` change — so that one relaunches like any other
+ * address change (currency, lang, balance, social).
  */
 export function Preview({ ctx }: PreviewProps) {
   const { reloads } = useGameComposition(ctx);
@@ -172,11 +185,9 @@ export function Preview({ ctx }: PreviewProps) {
   const [invalid, setInvalid] = useState(false);
 
   function update(patch: Partial<PreviewState>) {
-    setState((prev) => {
-      const next = { ...prev, ...patch };
-      writePreviewState(next);
-      return next;
-    });
+    const next = { ...state, ...patch };
+    writePreviewState(next);
+    setState(next);
   }
 
   function commitBalance() {
@@ -195,7 +206,9 @@ export function Preview({ ctx }: PreviewProps) {
   return (
     <main className="e8-preview-doc">
       <div className="e8-preview-toolbar">
+        <label htmlFor="preview-preset">screen</label>
         <select
+          id="preview-preset"
           data-testid="preview-preset"
           value={state.preset}
           onChange={(event) => update({ preset: event.target.value })}
@@ -211,7 +224,9 @@ export function Preview({ ctx }: PreviewProps) {
           Rotate
         </button>
 
+        <label htmlFor="preview-lang">language</label>
         <select
+          id="preview-lang"
           data-testid="preview-lang"
           value={state.lang}
           onChange={(event) => update({ lang: event.target.value })}
@@ -223,7 +238,9 @@ export function Preview({ ctx }: PreviewProps) {
           ))}
         </select>
 
+        <label htmlFor="preview-currency">currency</label>
         <select
+          id="preview-currency"
           data-testid="preview-currency"
           value={state.currency}
           onChange={(event) => update({ currency: event.target.value })}
@@ -235,7 +252,9 @@ export function Preview({ ctx }: PreviewProps) {
           ))}
         </select>
 
+        <label htmlFor="preview-balance">balance</label>
         <input
+          id="preview-balance"
           data-testid="preview-balance"
           inputMode="decimal"
           placeholder="1000"

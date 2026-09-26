@@ -5,7 +5,7 @@
  * Node-only dev plugin at the module boundary, which is fatal to a browser
  * bundle, and `packages/*` is read-only so that boundary cannot be fixed
  * from here. `tests/screen-presets-sync.test.ts` checks this array against
- * the real package on exactly the fields `PreviewWall` reads
+ * the real package on exactly the fields `Preview` reads
  * (`code`/`label`), so drift is caught by `npm test` rather than trusted.
  */
 
