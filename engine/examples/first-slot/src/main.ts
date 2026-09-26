@@ -108,6 +108,7 @@ import {
   type Diagnostic,
   type FlowTraceEntry,
   type RefillStep,
+  type SessionInit,
   type StepOpts,
 } from '@energy8engine/contracts';
 import type { EventsService, FlowService } from '@energy8engine/flow';
@@ -551,6 +552,18 @@ let nextViewId = 0;
     const shell = currentShell();
     if (!shell) return null;
     return JSON.parse(JSON.stringify({ state: shell.state })) as { state: Record<string, unknown> };
+  },
+  /**
+   * What the session provider opened with — `session.init`, a plain copy
+   * like `shell()`'s. Under `e8 dev` that is `/api/session`'s answer to the
+   * address `session-host` forwarded, so it is where the Preview toolbar's
+   * currency, balance, social and device choices can be read back off the
+   * game itself (the shell's state keeps only the balance). `null` with no
+   * `session` row.
+   */
+  session(): SessionInit | null {
+    const session = ctx.reflect.get('session', false) as { init: SessionInit } | undefined;
+    return session ? (JSON.parse(JSON.stringify(session.init)) as SessionInit) : null;
   },
   /**
    * Presses one of the shell's own controls — `shell.actions[name](...args)`:
