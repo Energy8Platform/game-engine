@@ -102,6 +102,13 @@ describe('CompositionScreen', () => {
     expect(JSON.parse(sent[0])).toEqual({ type: 'update', id: 'a:probe1', config: { speed: 3 } });
   });
 
+  it('renders no iframe — the game lives in the Preview document now, not here', async () => {
+    const { ctx } = await harness();
+    render(<CompositionScreen ctx={ctx} />);
+    expect(screen.queryByTitle('game preview')).toBeNull();
+    expect(document.querySelector('iframe')).toBeNull();
+  });
+
   it('renders cards plugins contributed to composition.card', async () => {
     const { ctx, push } = await harness();
     ctx.slots.register({ name: 'composition.card', key: 'extra' }, () => <span>extra card</span>);

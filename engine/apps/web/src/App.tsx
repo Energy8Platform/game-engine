@@ -6,7 +6,7 @@ import {
   DirtyStatus,
   Explorer,
   GameStatus,
-  PreviewWall,
+  Preview,
   ProjectStatus,
   Projects,
   SessionStatus,
@@ -154,7 +154,7 @@ export function App({ ctx }: { ctx: Context }) {
   useEffect(() => {
     return ctx.slots.register(
       { name: 'shell.document', key: 'preview', title: 'Preview', closable: false },
-      PreviewWall,
+      Preview,
     );
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [ctx]);

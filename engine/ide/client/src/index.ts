@@ -63,7 +63,14 @@ export { type CheckService, type CheckConfig } from './plugins/check';
 export * from './schema-form/SchemaForm';
 export * from './schema-form/fields';
 export { CompositionScreen, useEditorDiagnostics } from './screens/CompositionScreen';
-export { Preview, PreviewWall, type PreviewWallProps } from './screens/PreviewWall';
+export {
+  Preview,
+  DEFAULT_PREVIEW_STATE,
+  previewAddress,
+  readPreviewState,
+  validBalance,
+  type PreviewState,
+} from './screens/Preview';
 export { DiagnosticsPanel, type DiagnosticsPanelProps } from './screens/DiagnosticsPanel';
 export { Shell } from './shell/Shell';
 export {

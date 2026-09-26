@@ -4,7 +4,6 @@ import type { Context } from 'cordis';
 import { diagnostic, type Diagnostic, type GameCompositionRow } from '@energy8engine/contracts';
 import { SchemaForm } from '../schema-form/SchemaForm';
 import { useSlot } from '../plugins/slots';
-import { Preview } from './PreviewWall';
 
 /**
  * The EDITOR's own diagnostics — its plugin graph, namespace 1 of
@@ -123,8 +122,6 @@ function EditorComposition({ ctx }: { ctx: Context }) {
 
   return (
     <>
-      <Preview ctx={ctx} />
-
       {snapshot === null ? (
         <p className="e8-empty">connecting…</p>
       ) : rows.length === 0 ? (

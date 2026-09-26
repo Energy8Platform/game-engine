@@ -1,14 +1,28 @@
 import { act, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import type { CompositionRow, ServerMessage, WorkspaceState } from '@energy8engine/contracts';
-import { Preview, PreviewWall, createIdeClient } from '../src/index';
+import {
+  DEFAULT_PREVIEW_STATE,
+  Preview,
+  createIdeClient,
+  previewAddress,
+  readPreviewState,
+  type PreviewState,
+} from '../src/index';
 
 /**
  * Falling tests for Task 12, step 1: the preview panel draws an iframe at
  * `dev-game`'s address, and reloads it when — and only when — the host's
  * `game-composition` frame says `reload: true` (see the block of four
  * below for what that replaced).
+ *
+ * Task 6 replaces the wall (§5's device presets, orientations and
+ * languages open at once — one whole game per tile) with the one frame
+ * the user actually asked for: a harness-like toolbar over a single
+ * iframe, 1:1, the stage scrolling rather than fitting. The reload cases
+ * below are unchanged from before the wall existed; what is new is
+ * `previewAddress`/`readPreviewState` and the toolbar itself.
  */
 
 const PREVIEW_URL = 'http://game.test:5679';
@@ -81,13 +95,77 @@ function row(overrides: Partial<CompositionRow>): CompositionRow {
   };
 }
 
+describe('previewAddress', () => {
+  const base = 'http://127.0.0.1:5679/';
+  it('carries lang and currency always, and nothing else by default', () => {
+    expect(previewAddress(base, DEFAULT_PREVIEW_STATE)).toBe(
+      'http://127.0.0.1:5679/?lang=en&currency=USD',
+    );
+  });
+  it('adds balance when set, social=1 when on, device=mobile for a Mobile preset', () => {
+    const url = new URL(
+      previewAddress(base, {
+        ...DEFAULT_PREVIEW_STATE,
+        preset: 'Mobile S',
+        balance: '50',
+        social: true,
+      }),
+    );
+    expect(url.searchParams.get('balance')).toBe('50');
+    expect(url.searchParams.get('social')).toBe('1');
+    expect(url.searchParams.get('device')).toBe('mobile');
+    expect(url.searchParams.has('game')).toBe(false);
+  });
+  it('keeps what the base address already carries', () => {
+    expect(new URL(previewAddress('http://h/?x=1', DEFAULT_PREVIEW_STATE)).searchParams.get('x')).toBe(
+      '1',
+    );
+  });
+});
+
+describe('readPreviewState', () => {
+  it('nothing stored: defaults', () => {
+    localStorage.clear();
+    expect(readPreviewState()).toEqual(DEFAULT_PREVIEW_STATE);
+  });
+
+  it('junk JSON: defaults', () => {
+    localStorage.setItem('e8.preview', 'not json{{{');
+    expect(readPreviewState()).toEqual(DEFAULT_PREVIEW_STATE);
+  });
+
+  it('an unknown preset/currency/lang, a non-numeric balance and a non-boolean rotated each fall back to their own default', () => {
+    localStorage.setItem(
+      'e8.preview',
+      JSON.stringify({ preset: 'Gone', currency: 'XXX', lang: 'zz', balance: 'abc', rotated: 'yes' }),
+    );
+    expect(readPreviewState()).toEqual(DEFAULT_PREVIEW_STATE);
+  });
+
+  it('a localStorage that throws: defaults', () => {
+    const spy = vi
+      .spyOn(Storage.prototype, 'getItem')
+      .mockImplementation(() => {
+        throw new Error('denied');
+      });
+    try {
+      expect(readPreviewState()).toEqual(DEFAULT_PREVIEW_STATE);
+    } finally {
+      spy.mockRestore();
+    }
+  });
+});
+
 describe('Preview', () => {
-  it('renders an iframe pointed where the host says the game is served', async () => {
+  it('renders an iframe pointed where the host says the game is served, addressed with the default toolbar state', async () => {
+    localStorage.clear();
     const { ctx } = await harness();
     render(<Preview ctx={ctx} />);
     const iframe = screen.getByTitle('game preview') as HTMLIFrameElement;
     expect(iframe.tagName).toBe('IFRAME');
-    expect(iframe.src).toBe(`${PREVIEW_URL}/`);
+    expect(iframe.src).toBe(previewAddress(PREVIEW_URL, DEFAULT_PREVIEW_STATE));
+    expect(iframe.width).toBe('1200');
+    expect(iframe.height).toBe('675');
   });
 
   it('with no project open there is no iframe, only the note', async () => {
@@ -106,6 +184,7 @@ describe('Preview', () => {
   });
 
   it('a workspace change to a different previewUrl remounts the iframe — a real navigation', async () => {
+    localStorage.clear();
     const { ctx, push } = await harness();
     render(<Preview ctx={ctx} />);
     const before = screen.getByTitle('game preview');
@@ -115,17 +194,18 @@ describe('Preview', () => {
     });
     const after = screen.getByTitle('game preview') as HTMLIFrameElement;
     expect(after).not.toBe(before);
-    expect(after.src).toBe('http://other.test:5679/');
+    expect(after.src).toBe(previewAddress('http://other.test:5679', DEFAULT_PREVIEW_STATE));
   });
 
   it('a different active project on the SAME previewUrl remounts the iframe — same port, different game', async () => {
+    localStorage.clear();
     const { ctx, push } = await harness();
     render(<Preview ctx={ctx} />);
     const before = screen.getByTitle('game preview');
     push({ type: 'workspace', workspace: workspace({ active: 'b' }) });
     const after = screen.getByTitle('game preview') as HTMLIFrameElement;
     expect(after).not.toBe(before);
-    expect(after.src).toBe(`${PREVIEW_URL}/`);
+    expect(after.src).toBe(previewAddress(PREVIEW_URL, DEFAULT_PREVIEW_STATE));
   });
 
   it('a workspace change that keeps the same previewUrl does not reload', async () => {
@@ -149,6 +229,7 @@ describe('Preview', () => {
    * it follows `reload`.
    */
   it('a game-composition frame with reload: true remounts the iframe — a real navigation', async () => {
+    localStorage.clear();
     const { ctx, push } = await harness();
     render(<Preview ctx={ctx} />);
     const before = screen.getByTitle('game preview');
@@ -157,7 +238,7 @@ describe('Preview', () => {
 
     const after = screen.getByTitle('game preview') as HTMLIFrameElement;
     expect(after).not.toBe(before);
-    expect(after.src).toBe(`${PREVIEW_URL}/`);
+    expect(after.src).toBe(previewAddress(PREVIEW_URL, DEFAULT_PREVIEW_STATE));
   });
 
   it('a game-composition frame with reload: false keeps the same iframe — the game re-applied the row itself', async () => {
@@ -199,135 +280,84 @@ describe('Preview', () => {
     });
     expect(screen.getByTitle('game preview')).toBe(before);
   });
-});
 
-/**
- * Falling tests for Task 6: the wall §5 of the design spec asks for —
- * device presets, orientations and languages open at once, not the single
- * zoomed frame `Preview` (above) already covered under Task 3.
- *
- * Every `it` below calls `await harness()` where the plan's own brief
- * writes the synchronous `harness()` — this file's `harness()` goes through
- * the real `createIdeClient`, which is async (see `context.ts`'s own doc:
- * cordis defers a plugin's `apply()` to the microtask after `ctx.plugin()`
- * returns, so `ctx.connection` would not exist yet without the await). The
- * plan's pseudocode elides that; the assertions themselves are unchanged.
- */
-describe('PreviewWall', () => {
-  it('draws one frame per chosen preset, at that preset’s size', async () => {
+  it('Rotate swaps the iframe width/height', async () => {
+    localStorage.clear();
     const { ctx } = await harness();
-    render(<PreviewWall ctx={ctx} />);
-    const tiles = screen.getAllByTestId(/^tile-/);
-    expect(tiles.length).toBeGreaterThan(1); // a wall, not one frame
-    expect(tiles[0].getAttribute('width')).toBe('1200');
+    render(<Preview ctx={ctx} />);
+    await userEvent.click(screen.getByTestId('preview-rotate'));
+    const iframe = screen.getByTitle('game preview') as HTMLIFrameElement;
+    expect(iframe.width).toBe('675');
+    expect(iframe.height).toBe('1200');
   });
 
-  it('starts with a few tiles, not all seven', async () => {
-    // Every tile is a whole game booting Pixi and opening a socket. The
-    // wall is worth having because you can see several at once, not
-    // because it opens every size anyone ever defined.
+  it('choosing Mobile S sizes the iframe to 320×568 and addresses it with device=mobile', async () => {
+    localStorage.clear();
     const { ctx } = await harness();
-    render(<PreviewWall ctx={ctx} />);
-    expect(screen.getAllByTestId(/^tile-/).length).toBeLessThanOrEqual(3);
+    render(<Preview ctx={ctx} />);
+    await userEvent.selectOptions(screen.getByTestId('preview-preset'), 'Mobile S');
+    const iframe = screen.getByTitle('game preview') as HTMLIFrameElement;
+    expect(iframe.width).toBe('320');
+    expect(iframe.height).toBe('568');
+    expect(new URL(iframe.src).searchParams.get('device')).toBe('mobile');
   });
 
-  it('turning a preset on adds its tile, turning it off removes it', async () => {
+  it('changing currency remounts the iframe (a new element) with the new currency in its address', async () => {
+    localStorage.clear();
     const { ctx } = await harness();
-    render(<PreviewWall ctx={ctx} />);
-    const before = screen.getAllByTestId(/^tile-/).length;
-    await userEvent.click(screen.getByRole('checkbox', { name: 'Mobile S' }));
-    expect(screen.getAllByTestId(/^tile-/)).toHaveLength(before + 1);
-    await userEvent.click(screen.getByRole('checkbox', { name: 'Mobile S' }));
-    expect(screen.getAllByTestId(/^tile-/)).toHaveLength(before);
+    render(<Preview ctx={ctx} />);
+    const before = screen.getByTitle('game preview');
+    await userEvent.selectOptions(screen.getByTestId('preview-currency'), 'EUR');
+    const after = screen.getByTitle('game preview') as HTMLIFrameElement;
+    expect(after).not.toBe(before);
+    expect(new URL(after.src).searchParams.get('currency')).toBe('EUR');
   });
 
-  it('each tile carries its own game identity, so the panel can tell them apart', async () => {
+  it('an invalid balance marks the field invalid on blur and sends nothing', async () => {
+    localStorage.clear();
     const { ctx } = await harness();
-    render(<PreviewWall ctx={ctx} />);
-    const urls = screen.getAllByTestId(/^tile-/).map((t) => t.getAttribute('src'));
-    expect(new Set(urls).size).toBe(urls.length);
+    render(<Preview ctx={ctx} />);
+    const before = screen.getByTitle('game preview') as HTMLIFrameElement;
+    const balance = screen.getByTestId('preview-balance');
+    await userEvent.type(balance, 'abc');
+    await userEvent.tab();
+    expect(balance).toHaveAttribute('aria-invalid', 'true');
+    const after = screen.getByTitle('game preview') as HTMLIFrameElement;
+    expect(after).toBe(before);
+    expect(new URL(after.src).searchParams.has('balance')).toBe(false);
   });
 
-  it('every tile is addressed where the host says the game is served', async () => {
+  it('a valid balance committed with Enter reaches the address', async () => {
+    localStorage.clear();
     const { ctx } = await harness();
-    render(<PreviewWall ctx={ctx} />);
-    for (const tile of screen.getAllByTestId(/^tile-/)) {
-      expect(new URL(tile.getAttribute('src')!).origin).toBe(new URL(PREVIEW_URL).origin);
-    }
+    render(<Preview ctx={ctx} />);
+    const balance = screen.getByTestId('preview-balance');
+    await userEvent.type(balance, '250{Enter}');
+    const iframe = screen.getByTitle('game preview') as HTMLIFrameElement;
+    expect(new URL(iframe.src).searchParams.get('balance')).toBe('250');
   });
 
-  it('a different active project on the SAME previewUrl gives every tile a new frame', async () => {
-    const { ctx, push } = await harness();
-    render(<PreviewWall ctx={ctx} />);
-    const before = screen.getAllByTestId(/^tile-/);
-    push({ type: 'workspace', workspace: workspace({ active: 'b' }) });
-    const after = screen.getAllByTestId(/^tile-/);
-    expect(after).toHaveLength(before.length);
-    for (const tile of after) expect(before).not.toContain(tile);
-  });
-
-  it('a reload: true frame gives every tile a new frame; reload: false leaves them', async () => {
-    const { ctx, push } = await harness();
-    render(<PreviewWall ctx={ctx} />);
-    const before = screen.getAllByTestId(/^tile-/);
-    push({ type: 'game-composition', rows: [], reload: false, changed: ['reels1'] });
-    expect(screen.getAllByTestId(/^tile-/)).toEqual(before);
-    push({ type: 'game-composition', rows: [], reload: true, changed: ['renderer1'] });
-    const after = screen.getAllByTestId(/^tile-/);
-    expect(after).toHaveLength(before.length);
-    for (const tile of after) expect(before).not.toContain(tile);
-  });
-
-  it('with no project open the wall draws no tiles, only the note', async () => {
-    const { ctx } = await harness(NO_PROJECT);
-    render(<PreviewWall ctx={ctx} />);
-    expect(screen.queryAllByTestId(/^tile-/)).toHaveLength(0);
-    expect(screen.getByTestId('preview-unavailable')).toHaveTextContent(/no project open/);
-  });
-
-  it('before the workspace has answered the wall is loading, not unavailable', async () => {
-    const { ctx } = await harness(null);
-    render(<PreviewWall ctx={ctx} />);
-    expect(screen.queryAllByTestId(/^tile-/)).toHaveLength(0);
-    expect(screen.getByTestId('preview-loading')).toBeInTheDocument();
-    expect(screen.queryByTestId('preview-unavailable')).toBeNull();
-  });
-
-  it('a project opening after the wall did brings the tiles', async () => {
-    const { ctx, push } = await harness(NO_PROJECT);
-    render(<PreviewWall ctx={ctx} />);
-    push({ type: 'workspace', workspace: workspace() });
-    expect(screen.queryByTestId('preview-unavailable')).toBeNull();
-    expect(screen.getAllByTestId(/^tile-/).length).toBeGreaterThan(1);
-  });
-
-  it('rotating a tile swaps its width and height', async () => {
+  it('the social checkbox toggles social=1 in the address', async () => {
+    localStorage.clear();
     const { ctx } = await harness();
-    render(<PreviewWall ctx={ctx} />);
-    const tile = screen.getAllByTestId(/^tile-/)[0];
-    const [w, h] = [tile.getAttribute('width'), tile.getAttribute('height')];
-    await userEvent.click(screen.getByRole('button', { name: /rotate/i }));
-    const rotated = screen.getAllByTestId(/^tile-/)[0];
-    expect([rotated.getAttribute('width'), rotated.getAttribute('height')]).toEqual([h, w]);
+    render(<Preview ctx={ctx} />);
+    await userEvent.click(screen.getByTestId('preview-social'));
+    const iframe = screen.getByTitle('game preview') as HTMLIFrameElement;
+    expect(new URL(iframe.src).searchParams.get('social')).toBe('1');
   });
 
-  it('a language choice reaches the tile’s address', async () => {
+  it('the toolbar choice is remembered across a remount', async () => {
+    localStorage.clear();
     const { ctx } = await harness();
-    render(<PreviewWall ctx={ctx} />);
-    await userEvent.selectOptions(screen.getByRole('combobox', { name: /lang/i }), 'de');
-    for (const tile of screen.getAllByTestId(/^tile-/)) {
-      expect(new URL(tile.getAttribute('src')!, 'http://x').searchParams.get('lang')).toBe('de');
-    }
-  });
+    const { unmount } = render(<Preview ctx={ctx} />);
+    await userEvent.selectOptions(screen.getByTestId('preview-currency'), 'EUR');
+    unmount();
 
-  it('the wall survives a preset the harness does not know', async () => {
-    // Failures are data: an unknown preset name is a diagnostic and a
-    // skipped tile, not a crashed screen.
-    const { ctx } = await harness();
-    render(<PreviewWall ctx={ctx} chosen={['Desktop', 'Hologram']} />);
-    expect(screen.getAllByTestId(/^tile-/)).toHaveLength(1);
-    expect(ctx.connection.diagnostics.map((x) => x.message)).toEqual([
-      expect.stringContaining('Hologram'),
-    ]);
+    const stored: PreviewState = JSON.parse(localStorage.getItem('e8.preview')!);
+    expect(stored.currency).toBe('EUR');
+
+    render(<Preview ctx={ctx} />);
+    const iframe = screen.getByTitle('game preview') as HTMLIFrameElement;
+    expect(new URL(iframe.src).searchParams.get('currency')).toBe('EUR');
   });
 });

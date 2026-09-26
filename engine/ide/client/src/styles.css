@@ -718,7 +718,8 @@ label {
 }
 .e8-doc-pane:has(> .e8-code-editor),
 .e8-doc-pane:has(> .e8-canvas),
-.e8-doc-pane:has(> .e8-flow-doc) {
+.e8-doc-pane:has(> .e8-flow-doc),
+.e8-doc-pane:has(> .e8-preview-doc) {
   padding: 0;
   overflow: hidden;
 }
@@ -943,19 +944,37 @@ button.e8-status-item {
   font-size: var(--e8-size-label);
 }
 
-/* Preview iframe. */
-.e8-preview,
-.e8-preview-tile {
+/* Preview: one frame with a harness-like toolbar. 1:1 at the preset's
+   size — the user chose scrolling over fitting the pane, so the stage
+   scrolls and the frame never shrinks. */
+.e8-preview-doc {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+}
+.e8-preview-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+  padding: 16px 16px 0;
+}
+.e8-preview-stage {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  display: flex;
+}
+.e8-preview {
+  /* `margin: auto` centres the frame inside the scroll box without
+     clipping its top/left edge when the box is smaller than the frame. */
+  flex: none;
+  margin: auto;
   display: block;
   border: 1px solid var(--e8-border);
   border-radius: var(--e8-radius-sm);
   background: var(--e8-editor-bg);
-  max-width: 100%;
-}
-.e8-preview {
-  width: 100%;
-  height: 420px;
-  margin-bottom: 24px;
 }
 
 /* Scenes: one sidebar column in the Explorer's idiom — its header, rows,
@@ -1212,44 +1231,6 @@ button.e8-status-item {
 .e8-array-tools {
   display: flex;
   gap: 2px;
-}
-
-/* Preview wall: controls in one row, tiles wrapping beneath. */
-.e8-preview-wall-controls {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 12px;
-  margin-bottom: 24px;
-}
-.e8-preview-wall-presets {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 12px;
-  margin: 0;
-  padding: 0 10px;
-  height: 32px;
-  align-items: center;
-  border: 1px solid var(--e8-border);
-  border-radius: var(--e8-radius-sm);
-}
-.e8-preview-wall-presets legend {
-  padding: 0 4px;
-  color: var(--e8-fg-muted);
-  font-size: var(--e8-size-label);
-  font-weight: 500;
-}
-.e8-preview-wall-preset-toggle,
-.e8-preview-wall-lang {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-}
-.e8-preview-wall-tiles {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 16px;
-  align-items: flex-start;
 }
 
 /* The editor document: a thin toolbar (save, and any words the host or the
