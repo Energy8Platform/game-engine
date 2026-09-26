@@ -49,7 +49,15 @@ import { createRequire } from 'node:module';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { expect, test, type Frame, type Page } from '@playwright/test';
-import { FIXTURE, projectCopy, startDevHost } from './project-fixture';
+import {
+  FIXTURE,
+  bootStatus,
+  gameBooted,
+  gameLog,
+  previewFrame,
+  projectCopy,
+  startDevHost,
+} from './project-fixture';
 // The band rule is imported, not restated: it is demo data the mechanic
 // invents (a `6` gets its row's band), not the math's, so the plugin's own
 // function is the only ground truth there is for it.
@@ -94,15 +102,14 @@ interface Step {
 }
 
 /**
- * The game itself, inside the IDE's preview iframe. Same accessor
- * `runtime.spec.ts` uses, and for the same reason: `Locator.contentFrame()`
- * hands back a `FrameLocator` with no `.evaluate()`, while
- * `ElementHandle.contentFrame()` hands back the real `Frame`.
+ * The game itself, in the IDE's Preview document, booted to `ready` —
+ * `previewFrame` brings that document in front (a hidden frame's ticker
+ * never finishes a spin) and hands back the real `Frame`.
  */
-async function gameFrame(page: Page): Promise<Frame> {
-  const handle = await page.locator('iframe[title="game preview"]').elementHandle();
-  const frame = await handle?.contentFrame();
-  if (!frame) throw new Error('preview iframe has no content frame');
+async function readyFrame(page: Page): Promise<Frame> {
+  const frame = await previewFrame(page);
+  await gameBooted(frame);
+  expect(await bootStatus(frame)).toBe('ready');
   return frame;
 }
 
@@ -135,11 +142,19 @@ async function winUnder(
 ): Promise<{ spin: Spin; board: Board }> {
   const bound = () => frame.evaluate(() => (window as any).__e8.bound('base_game'));
   if ((await bound()) !== mechanic) {
+    // The field is on the Composition document; the spins below need the
+    // Preview back in front. The frame itself stays the same one: a
+    // rebind is applied in place (`runtime.spec.ts` proves no reload).
+    await page.getByTestId('activity-composition').click();
     await page.getByLabel('stage mechanic').fill(mechanic);
+    await previewFrame(page);
     await expect.poll(bound, { timeout: 25_000 }).toBe(mechanic);
   }
   for (let attempt = 0; attempt < 40; attempt += 1) {
-    expect(await frame.evaluate(() => (window as any).__e8.spin())).toEqual({ out: 'next' });
+    expect(await frame.evaluate(() => (window as any).__e8.spin())).toEqual({
+      out: 'next',
+      kind: 'present',
+    });
     const all = (await frame.evaluate(() => (window as any).__e8.spins())) as Spin[];
     const spin = all[all.length - 1];
     if (spin.result.win > 0 && usable(spin.result.data)) {
@@ -163,16 +178,12 @@ test('a winning spin under each of three bindings leaves the board where that me
   const host = await startDevHost(dir);
   try {
     await page.goto('/');
-    const frame = await gameFrame(page);
-    await expect
-      .poll(() => frame.locator('#status').textContent(), { timeout: 20_000 })
-      .toBe('ready');
-
     // The composition screen, with this project's `ide-bridge` row on it.
     // The stage field beside the mechanic one is left empty throughout:
     // this project's composition binds exactly one stage, and `ide-bridge`
     // resolves an unnamed stage to that one (see `IdeBridgeSettableConfig.stage`).
     await expect(page.getByText('@energy8engine/ide-bridge')).toBeVisible();
+    const frame = await readyFrame(page);
 
     // The game boots on `reel-step` — its own `e8.patch.yml` binds it — so
     // the project's plugin goes first, on the binding it booted with, and
@@ -206,7 +217,7 @@ test('a winning spin under each of three bindings leaves the board where that me
     // whose handler never reached the registry would leave the board
     // sitting on the grid and this word in the game's own log.
     expect(
-      await frame.locator('#log').textContent(),
+      await gameLog(frame),
       '"reel-step" left a problem in the game\'s own log — the plan was produced but not played',
     ).not.toContain('play-loop');
 
@@ -226,7 +237,7 @@ test('a winning spin under each of three bindings leaves the board where that me
     const cData = cascade.spin.result.data;
     expect(cascade.board).toEqual(strings(cData.cascade_history.at(-1)!.grid));
     expect(cascade.board).not.toEqual(strings(cData.grid));
-    expect(await frame.locator('#log').textContent()).not.toContain('play-loop');
+    expect(await gameLog(frame)).not.toContain('play-loop');
   } finally {
     await host.stop();
     rmSync(dir, { recursive: true, force: true });
@@ -248,11 +259,8 @@ test("the plan under each binding, step by step, against the spin's own data", a
   const host = await startDevHost(dir);
   try {
     await page.goto('/');
-    const frame = await gameFrame(page);
-    await expect
-      .poll(() => frame.locator('#status').textContent(), { timeout: 20_000 })
-      .toBe('ready');
     await expect(page.getByText('@energy8engine/ide-bridge')).toBeVisible();
+    const frame = await readyFrame(page);
 
     const classic = await winUnder(page, frame, 'classic', () => true);
     const cascade = await winUnder(page, frame, 'cascade', () => true);
@@ -450,12 +458,12 @@ test('a refill that changes one cell rebuilds only that cell’s view', async ({
   const host = await startDevHost(dir);
   try {
     await page.goto('/');
-    const frame = await gameFrame(page);
-    await expect
-      .poll(() => frame.locator('#status').textContent(), { timeout: 20_000 })
-      .toBe('ready');
+    const frame = await readyFrame(page);
     // A seated board: every cell holds a symbol, so every cell has a view.
-    expect(await frame.evaluate(() => (window as any).__e8.spin())).toEqual({ out: 'next' });
+    expect(await frame.evaluate(() => (window as any).__e8.spin())).toEqual({
+      out: 'next',
+      kind: 'present',
+    });
     const board = (await frame.evaluate(() => (window as any).__e8.symbols())) as Board;
     const before = (await frame.evaluate(() => (window as any).__e8.viewIds())) as number[][];
     expect(before.flat().every((id) => typeof id === 'number')).toBe(true);

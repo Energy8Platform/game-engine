@@ -24,7 +24,7 @@
  *
  * Same fixture and idioms as `contract.spec.ts`/`flow.spec.ts`: a private
  * `projectCopy()`, its files edited BEFORE `startDevHost` (the running host
- * reads them once, at boot), the composition document's `Preview`
+ * reads them once, at boot), the Preview document's game frame
  * (`iframe[title="game preview"]`) and the game's own `window.__e8`.
  */
 import { cpSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
@@ -33,11 +33,17 @@ import { fileURLToPath } from 'node:url';
 import { dump, load } from 'js-yaml';
 import { expect, test, type Frame, type Page } from '@playwright/test';
 import { IDE_WEB_PORT } from '../../e2e-ports';
-import { projectCopy, startDevHost, type DevHost } from './project-fixture';
+import {
+  bootStatus,
+  gameBooted,
+  previewFrame,
+  projectCopy,
+  startDevHost,
+  type DevHost,
+} from './project-fixture';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const IDE_URL = `http://127.0.0.1:${IDE_WEB_PORT}/`;
-const PREVIEW = 'iframe[title="game preview"]';
 
 /** `engine/game/session-dev/tests/fixtures/session` — id `session-fixture`. */
 const SESSION_FIXTURE = join(
@@ -61,19 +67,11 @@ test.afterEach(async () => {
   if (dir) rmSync(dir, { recursive: true, force: true });
 });
 
-async function gameFrame(page: Page): Promise<Frame> {
-  const handle = await page.locator(PREVIEW).elementHandle();
-  const frame = await handle?.contentFrame();
-  if (!frame) throw new Error('preview iframe has no content frame');
-  return frame;
-}
-
-/** The composition's preview, booted to `ready` — same reader as `contract.spec.ts`. */
+/** The Preview's game, booted to `ready` — same reader as `contract.spec.ts`. */
 async function readyFrame(page: Page): Promise<Frame> {
-  const frame = await gameFrame(page);
-  await expect
-    .poll(() => frame.locator('#status').textContent(), { timeout: 20_000 })
-    .toBe('ready');
+  const frame = await previewFrame(page);
+  await gameBooted(frame);
+  expect(await bootStatus(frame)).toBe('ready');
   return frame;
 }
 
@@ -96,7 +94,7 @@ test('a session opens on the first spin, and Step finishes the round — three s
   writeFileSync(patchFile, dump(patch, { noRefs: true }));
 
   host = await startDevHost(dir);
-  await page.goto(`${IDE_URL}#/doc/composition`);
+  await page.goto(IDE_URL);
   const frame = await readyFrame(page);
 
   // The shell's Spin in, the FIRST `present` node's exit out — the round is still
@@ -105,7 +103,7 @@ test('a session opens on the first spin, and Step finishes the round — three s
   // `done → step → draw → done` loop keeps running past this resolve with
   // no further input, so everything below is polled rather than read once.
   const outcome = await frame.evaluate(() => (window as any).__e8.spin());
-  expect(outcome).toEqual({ out: 'next' });
+  expect(outcome).toEqual({ out: 'next', kind: 'present' });
 
   await expect
     .poll(() => frame.evaluate(() => (window as any).__e8.spins().length), { timeout: 20_000 })

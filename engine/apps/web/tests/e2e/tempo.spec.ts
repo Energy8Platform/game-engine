@@ -1,11 +1,13 @@
 /**
- * Slice 25 ("tempo"), the last task: the page's turbo checkbox and its
- * skip-on-second-click, proven end to end in a real browser. Spec
+ * Slice 25 ("tempo"), the last task: turbo and the skip, proven end to end
+ * in a real browser — what the page's own turbo checkbox and a second
+ * click on its Spin button used to drive; the page has neither any more,
+ * and `__e8.spin({ turbo })`/`__e8.skip()` press the same things. Spec
  * `docs/superpowers/specs/2026-09-20-tempo-design.md` §8's four e2e cases:
  *
  *  1. `mechanics1.config.tumble: true` over `base_game: cascade` — a
  *     winning spin's plan carries at least one `tumble` step.
- *  2. The turbo checkbox: `__e8.spin({ turbo: true })` reaches the board
+ *  2. Turbo: `__e8.spin({ turbo: true })` reaches the board
  *     (`lastStepOpts()`) and the run is measurably faster than a plain one.
  *  3. `skip()` 100 ms into a spin collapses the presentation — the spin
  *     resolves within 1 s of the skip.
@@ -33,15 +35,14 @@
  * UI skips it the same way `runtime.spec.ts`'s own first test does. Case 4
  * is the one exception: the palette is IDE chrome, so it visits the game
  * once (to let `flow1`/`fx1` report their node kinds to the host) and then
- * the IDE's composition document, exactly like `fx.spec.ts`'s own palette
- * case.
+ * the IDE, exactly like `fx.spec.ts`'s own palette case.
  */
 import { readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { dump, load } from 'js-yaml';
 import { expect, test, type Page } from '@playwright/test';
 import { IDE_WEB_PORT } from '../../e2e-ports';
-import { projectCopy, startDevHost, type DevHost } from './project-fixture';
+import { bootStatus, gameBooted, projectCopy, startDevHost, type DevHost } from './project-fixture';
 
 const IDE_URL = `http://127.0.0.1:${IDE_WEB_PORT}/`;
 
@@ -82,7 +83,8 @@ test.afterEach(async () => {
 /** The game's own page, booted to `ready` — no IDE, no iframe; `runtime.spec.ts`'s own first test reads it the same way. */
 async function readyPage(page: Page): Promise<void> {
   await page.goto(host.gameUrl);
-  await expect.poll(() => page.locator('#status').textContent(), { timeout: 20_000 }).toBe('ready');
+  await gameBooted(page);
+  expect(await bootStatus(page)).toBe('ready');
 }
 
 /**
@@ -133,7 +135,7 @@ test("mechanics1.config.tumble: true over base_game: cascade — a winning spin'
   let plan: Step[] | undefined;
   for (let attempt = 0; attempt < 40 && !plan; attempt += 1) {
     const outcome = await page.evaluate(() => (window as any).__e8.spin());
-    expect(outcome).toEqual({ out: 'next' });
+    expect(outcome).toEqual({ out: 'next', kind: 'present' });
     const spins = (await page.evaluate(() => (window as any).__e8.spins())) as { plan: Step[] }[];
     const candidate = spins[spins.length - 1].plan;
     if (candidate.some((s) => s.kind === 'tumble')) plan = candidate;
@@ -169,7 +171,7 @@ test("mechanics1.config.tumble: true over base_game: cascade — a winning spin'
  * gap between them for one run number, the same shape `flow.spec.ts`'s own
  * trace test pins for every node kind.
  */
-test('the turbo checkbox: lastStepOpts reflects it, and the run is measurably faster than a plain one', async ({
+test('turbo: lastStepOpts reflects it, and the run is measurably faster than a plain one', async ({
   page,
 }) => {
   host = await startDevHost(dir);
@@ -199,7 +201,7 @@ test('the turbo checkbox: lastStepOpts reflects it, and the run is measurably fa
         (t) => (window as any).__e8.spin({ turbo: t }),
         turbo,
       );
-      expect(outcome).toEqual({ out: 'next' });
+      expect(outcome).toEqual({ out: 'next', kind: 'present' });
       const spins = (await page.evaluate(() => (window as any).__e8.spins())) as { plan: Step[] }[];
       if (spins[spins.length - 1].plan.length === 1) {
         const trace = (await page.evaluate(() => (window as any).__e8.flowTrace())) as FlowTraceEntry[];
@@ -224,8 +226,9 @@ test('the turbo checkbox: lastStepOpts reflects it, and the run is measurably fa
  * under way — a skip that lands before the plan — the POST still in
  * flight — is kept by the armed play row since slice 34 (case 3b proves
  * that window on purpose), so the 100 ms is no longer a race with the
- * network), then `skip()` — the same bus event the button's own second
- * click emits, caught by `play-loop`'s subscription, never a flow node.
+ * network), then `skip()` — the same bus event the removed Spin button's
+ * second click emitted, caught by `play-loop`'s subscription, never a flow
+ * node.
  * The still-pending `spin()` promise is the proof: it resolves by `next`
  * (the `draw` node's own exit) within 1 s of the skip landing, not merely
  * "eventually".
@@ -243,7 +246,7 @@ test('skip, 100 ms into a spin, collapses the presentation — it resolves withi
   const outcome = await spinPromise;
   const elapsedMs = Date.now() - skipAt;
 
-  expect(outcome).toEqual({ out: 'next' });
+  expect(outcome).toEqual({ out: 'next', kind: 'present' });
   expect(elapsedMs).toBeLessThan(1000);
 });
 
@@ -278,7 +281,7 @@ test('a skip during a held spin request is kept, and the round collapses when it
   const outcome = await spinPromise;
   const elapsedMs = Date.now() - skipAt;
 
-  expect(outcome).toEqual({ out: 'next' });
+  expect(outcome).toEqual({ out: 'next', kind: 'present' });
   expect(elapsedMs, `held ${HOLD_MS} ms`).toBeLessThan(HOLD_MS + 1000);
 });
 
@@ -343,7 +346,7 @@ test('a skip mid-tumble-chain collapses the rest of it and lands on the last set
     await page.evaluate(() => (window as any).__e8.skip());
     const outcome = await spinning;
     const elapsedMs = Date.now() - skipAt;
-    expect(outcome).toEqual({ out: 'next' });
+    expect(outcome).toEqual({ out: 'next', kind: 'present' });
 
     const spins = (await page.evaluate(() => (window as any).__e8.spins())) as { plan: Step[] }[];
     const plan = spins[spins.length - 1].plan;
@@ -372,12 +375,12 @@ test('a skip mid-tumble-chain collapses the rest of it and lands on the last set
  * Case 4. Same idiom as `fx.spec.ts`'s own palette case (`tween`/`sound`):
  * a direct visit to the game first, so `flow1`/`fx1` report their node
  * kinds to the host before the IDE's boot `GET /api/flow` asks for them,
- * then the palette on the composition document's Flow tab.
+ * then the palette on the IDE's Flow tab.
  */
 test('the flow palette lists audio', async ({ page }) => {
   host = await startDevHost(dir);
   await readyPage(page);
-  await page.goto(`${IDE_URL}#/doc/composition`);
+  await page.goto(IDE_URL);
 
   await page.getByTestId('activity-flow').click();
   await expect(page.getByTestId('flow-screen')).toBeVisible();

@@ -33,12 +33,17 @@ import { createHash } from 'node:crypto';
 import { readFileSync, rmSync, unlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { expect, test, type Page } from '@playwright/test';
-import { projectCopy, startDevHost } from './project-fixture';
+import {
+  bootStatus,
+  gameBooted,
+  gameLog,
+  projectCopy,
+  spinOnce,
+  startDevHost,
+} from './project-fixture';
 
-/** Same wait `composition.spec.ts` uses: `#status` is written exactly once `createGame` resolves. */
-async function settled(page: Page): Promise<void> {
-  await expect(page.locator('#status')).not.toHaveText('', { timeout: 20_000 });
-}
+/** Same wait `composition.spec.ts` uses: `window.__e8` is installed exactly once `createGame` resolves. */
+const settled = (page: Page) => gameBooted(page);
 
 /**
  * The BOTTOM ROW of the 5x3 reel grid, in the `board` scene node's OWN
@@ -48,18 +53,15 @@ async function settled(page: Page): Promise<void> {
  * around wherever `nodeProps('base_game', 'board')` says the node itself
  * sits, and row 2 (the third and last row) is y 156..252 of that.
  *
- * Only row 2, not the whole grid — measured, not guessed. `first-slot`'s
- * own `index.html` floats the dev toolbar and the diagnostics log over the
- * TOP of the canvas (`#controls` then `#log`, `top: 3.75rem` + `max-height:
- * 6rem` — up to 156 screen px of chrome, however little or much is
- * logged), and row 0 sits right under it: `board`'s own y is 0, so row 0's
- * local -48..48 is the first 48 design px of the scene, no safe-area inset
- * carves any of that out for the toolbar. Two `base_game.scene.yml` nodes
- * — `logo` (a static image, harmless) and `coin` (an 8fps spritesheet that
- * keeps looping with no spin at all — confirmed by diffing two idle
- * screenshots 300ms apart) — sit in that same band too. Row 2 is clear of
- * all three, so a hash of just it can only differ between two shots if a
- * spin drew something there.
+ * Only row 2, not the whole grid — measured, not guessed. `board`'s own y
+ * is 0, so row 0's local -48..48 is the first 48 design px of the scene,
+ * and two `base_game.scene.yml` nodes sit in that same band: `logo` (a
+ * static image, harmless) and `coin` (an 8fps spritesheet that keeps
+ * looping with no spin at all — confirmed by diffing two idle screenshots
+ * 300ms apart). (The page used to float a dev toolbar and log over that
+ * band too; it draws nothing over the game any more.) Row 2 is clear of
+ * both, so a hash of just it can only differ between two shots if a spin
+ * drew something there.
  */
 const BOARD_LOCAL = { left: -48, top: 156, right: 456, bottom: 252 };
 
@@ -67,8 +69,8 @@ const BOARD_LOCAL = { left: -48, top: 156, right: 456, bottom: 252 };
  * A hash of a REGION OF THE BOARD on the game canvas — the honest
  * replacement for comparing quadrants of the whole canvas (see the module
  * doc): those also differ on an EMPTY board, because the in-canvas chrome
- * (the shell's bar, the floating dev toolbar) is outside this clip but
- * inside a quadrant.
+ * (the shell's bar, the looping coin) is outside this clip but inside a
+ * quadrant.
  *
  * The clip is built from the game page's own hooks: the canvas's
  * page-relative box (`page.locator('canvas').boundingBox()`) plus the
@@ -107,8 +109,8 @@ async function boardRegionHash(page: Page): Promise<string> {
 }
 
 /**
- * Clicks Spin, waits for the spin to finish, and requires that nothing was
- * thrown on the page along the way.
+ * Clicks the canvas, spins, waits for the spin to finish, and requires
+ * that nothing was thrown on the page along the way.
  *
  * The last part used to be missing, and its absence hid a real fault for a
  * whole slice: clicking Spin raised two `TypeError: currentTarget.
@@ -118,7 +120,12 @@ async function boardRegionHash(page: Page): Promise<string> {
  * re-optimizing dependencies mid-load on a cold cache, leaving the page
  * with two generations of `pixi.js`. It is fixed at the cause (see
  * `dev-game.ts`'s `warmupEntries`), so the assertion belongs here, where a
- * regression would be caught by the tests that actually click.
+ * regression would be caught by the tests that actually click. The page
+ * has no Spin button of its own any more, so — as `composition.spec.ts`'s
+ * control test does — the pointer event lands on the canvas itself (its
+ * top-left corner: with nothing in flight, the stage's `ui.tap` has
+ * nothing to skip), and the spin goes through `__e8.spin()`, the shell's
+ * own Spin pressed.
  *
  * `errors` is the caller's own array, still collecting: a `pageerror`
  * raised by the click lands in it before this returns.
@@ -130,8 +137,8 @@ async function expectSpinRuns(page: Page, errors: string[]): Promise<void> {
   // measured here rather than assumed, so the "after" comparison below
   // means something.
   const beforeSpin = await boardRegionHash(page);
-  await page.locator('#spin').click();
-  await expect(page.locator('#status')).toHaveText('done', { timeout: 20_000 });
+  await page.locator('canvas').click({ position: { x: 5, y: 5 } });
+  expect(await spinOnce(page)).toBe('done');
   expect(errors, 'a spin should raise nothing on the page').toEqual([]);
   // The board CHANGED — the spin filled cells the boot left empty, and
   // the region's hash after it can only equal the one before if nothing
@@ -140,10 +147,10 @@ async function expectSpinRuns(page: Page, errors: string[]): Promise<void> {
   expect(afterSpin, 'the board should change on the canvas after a spin').not.toBe(beforeSpin);
 }
 
-/** The game is on screen and playable — a canvas, Spin live, no failure text. (The board itself: `expectSpinRuns`.) */
+/** The game is on screen and playable — a canvas, the shell's Spin live (a shell, not busy), no failure text. (The board itself: `expectSpinRuns`.) */
 async function expectPlayable(page: Page): Promise<void> {
   await expect(page.locator('canvas')).toBeVisible();
-  await expect(page.locator('#spin')).toBeEnabled();
+  expect(await page.evaluate(() => (window as any).__e8.shell()?.state.busy)).toBe(false);
   await expect(page.locator('#mount')).not.toContainText('This game could not start');
 }
 
@@ -166,9 +173,9 @@ test('a project with no game/script.spin still plays, and says why there is no s
     // What the person is told: a warning, naming the file, in the log —
     // and a status line that does not call it an error, because the game
     // it would be describing is running in front of them.
-    await expect(page.locator('#status')).toHaveText('composition has warnings — see log');
-    await expect(page.locator('#log')).toContainText('[warning]');
-    await expect(page.locator('#log')).toContainText('script.spin');
+    expect(await bootStatus(page)).toBe('composition has warnings — see log');
+    await expect.poll(() => gameLog(page)).toContain('[warning]');
+    await expect.poll(() => gameLog(page)).toContain('script.spin');
 
     // Nothing escaped as an uncaught error while composing over a `.spin`
     // that is not there. Asserted before the click as well as after it
@@ -216,9 +223,9 @@ test('a .spin the parser can only half-read still plays, with the dropped declar
     await expectPlayable(page);
 
     // The loss is named, not silent — and it degrades rather than stops.
-    await expect(page.locator('#status')).toHaveText('composition has warnings — see log');
-    await expect(page.locator('#log')).toContainText('[warning]');
-    await expect(page.locator('#log')).toContainText('CellPos');
+    expect(await bootStatus(page)).toBe('composition has warnings — see log');
+    await expect.poll(() => gameLog(page)).toContain('[warning]');
+    await expect.poll(() => gameLog(page)).toContain('CellPos');
 
     expect(pageErrors, 'the page should degrade, not throw').toEqual([]);
 
@@ -271,15 +278,16 @@ test('a parse loss on the very field the bound mechanic needs still plays, and m
     await expectPlayable(page);
 
     // The loss is named — by the party that actually saw it.
-    await expect(page.locator('#status')).toHaveText('composition has warnings — see log');
-    await expect(page.locator('#log')).toContainText('[warning]');
-    await expect(page.locator('#log')).toContainText('lines');
+    expect(await bootStatus(page)).toBe('composition has warnings — see log');
+    await expect.poll(() => gameLog(page)).toContain('[warning]');
+    await expect.poll(() => gameLog(page)).toContain('lines');
 
-    // And the false sentence is nowhere on the page. Asserted against the
-    // words `checkAgainstSchema` actually emits, not against a severity
-    // count: the math DOES declare `lines`, and nothing may say otherwise.
-    await expect(page.locator('#log')).not.toContainText('does not declare');
-    await expect(page.locator('#log')).not.toContainText('[error]');
+    // And the false sentence is nowhere in the game's own list. Asserted
+    // against the words `checkAgainstSchema` actually emits, not against a
+    // severity count: the math DOES declare `lines`, and nothing may say
+    // otherwise.
+    expect(await gameLog(page)).not.toContain('does not declare');
+    expect(await gameLog(page)).not.toContain('[error]');
     await expect(page.locator('#mount')).not.toContainText('This game could not start');
 
     expect(pageErrors, 'the page should degrade, not throw').toEqual([]);

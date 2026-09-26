@@ -38,11 +38,18 @@ import { readFileSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { expect, test, type Frame, type Page } from '@playwright/test';
 import { IDE_WEB_PORT } from '../../e2e-ports';
-import { projectCopy, startDevHost, type DevHost } from './project-fixture';
+import {
+  bootStatus,
+  gameBooted,
+  previewFrame,
+  projectCopy,
+  spinOnce,
+  startDevHost,
+  type DevHost,
+} from './project-fixture';
 
 const IDE_URL = `http://127.0.0.1:${IDE_WEB_PORT}/`;
 const SYMBOL_CANVAS = 'iframe[title="symbol canvas"]';
-const PREVIEW = 'iframe[title="game preview"]';
 
 let dir: string;
 let host: DevHost;
@@ -87,11 +94,11 @@ async function readyCanvas(page: Page, selector: string): Promise<Frame> {
 /**
  * The running game reports its node types to the host over `/ide` only
  * once `main.ts`'s deferred `import('@energy8engine/ide-bridge')` lands
- * and applies — AFTER `#status` already reads `ready`, so a `#status`
- * wait proves nothing about the report (measured under load: navigating
- * away on `ready` left the host with no types, and the drop below found
- * `no node type for .json`). The host keeps the types after the game
- * disconnects (`nodeTypes` on every later `GET /api/scenes`, `scenes.ts`),
+ * and applies — AFTER `window.__e8` is already installed (`ready`), so a
+ * readiness wait proves nothing about the report (measured under load:
+ * navigating away on `ready` left the host with no types, and the drop
+ * below found `no node type for .json`). The host keeps the types after
+ * the game disconnects (`nodeTypes` on every later `GET /api/scenes`, `scenes.ts`),
  * so this polls that field until it is non-empty; one direct visit is
  * then enough for every later `assetNodeTypes.pick` this file makes —
  * `#/doc/symbols`'s own canvas (`editor.ts`) never applies the bridge.
@@ -181,14 +188,9 @@ test('the Preview draws a symbol sprite after a spin, and Properties shows src a
   page,
 }) => {
   await reportNodeTypes(page);
-  await page.goto(`${IDE_URL}#/doc/composition`);
-  const frame = await frameOf(page, PREVIEW);
-  await expect
-    .poll(() => frame.locator('#status').textContent(), { timeout: 20_000 })
-    .toBe('ready');
+  const frame = await readyPreview(page);
   // The board is empty at boot — nothing to check `cellArt` about until a spin lands.
-  const outcome = (await frame.evaluate(() => (window as any).__e8.spin())) as { out: string };
-  expect(outcome.out).toBe('next');
+  expect(await spinOnce(frame)).toBe('done');
   // Exactly `'Sprite'` in source (`pixi.js`'s `Sprite` class) — vite's dev
   // bundler can deconflict same-named top-level bindings with a leading
   // underscore, so this matches on the class name rather than pinning the
@@ -216,7 +218,10 @@ type Board = (string | null)[][];
  */
 async function boardShowing(frame: Frame, id: string): Promise<Board> {
   for (let attempt = 0; attempt < 5; attempt += 1) {
-    expect(await frame.evaluate(() => (window as any).__e8.spin())).toEqual({ out: 'next' });
+    expect(await frame.evaluate(() => (window as any).__e8.spin())).toEqual({
+      out: 'next',
+      kind: 'present',
+    });
     const board = (await frame.evaluate(() => (window as any).__e8.symbols())) as Board;
     if (board.some((col) => col.includes(id))) return board;
   }
@@ -238,13 +243,12 @@ function cellOf(board: Board, id: string, match = true): [number, number] {
   throw new Error(`no cell ${match ? 'showing' : 'other than'} "${id}" on this board`);
 }
 
-/** The composition screen's preview, booted to `ready` — `text.spec.ts`'s `readyFrame`. */
+/** The IDE's Preview, in front and booted to `ready` — `text.spec.ts`'s `readyFrame`. */
 async function readyPreview(page: Page): Promise<Frame> {
-  await page.goto(`${IDE_URL}#/doc/composition`);
-  const frame = await frameOf(page, PREVIEW);
-  await expect
-    .poll(() => frame.locator('#status').textContent(), { timeout: 20_000 })
-    .toBe('ready');
+  await page.goto(IDE_URL);
+  const frame = await previewFrame(page);
+  await gameBooted(frame);
+  expect(await bootStatus(frame)).toBe('ready');
   return frame;
 }
 
@@ -338,7 +342,7 @@ test("a row's own art loads: the reel-step plugin requires a path no document na
   // loader is the `scenes.require(['assets/coin.png'])` the `reel-step`
   // plugin makes from its own `apply` (`plugins/reel-step/src/index.ts`).
   //
-  // Polled rather than read once: `#status` reads `ready` as soon as the
+  // Polled rather than read once: the game reads `ready` as soon as the
   // flow is armed, which is before — or during — the boot batch this claim
   // folded itself into.
   await expect
@@ -349,7 +353,7 @@ test("a row's own art loads: the reel-step plugin requires a path no document na
 
   // The control, so the line above is not a hook that answers `true` to
   // anything: a path in no document AND in no `require` is not in the
-  // loader. (It costs one `assetLoader` warning in that page's `#log` —
+  // loader. (It costs one `assetLoader` warning in that page's own list —
   // the loader reports a `get` for a path no batch asked for, which is
   // exactly the diagnostic the `require` above exists to avoid.)
   expect(
@@ -384,7 +388,10 @@ test("a mechanic names a symbol's own state, and the plan the game ran carries i
     // The spin completing at all is half the case: `wait: true` means the
     // plan is held while every named cell plays its state, so a state that
     // never resolved would hang `present` and fail here rather than later.
-    expect(await frame.evaluate(() => (window as any).__e8.spin())).toEqual({ out: 'next' });
+    expect(await frame.evaluate(() => (window as any).__e8.spin())).toEqual({
+      out: 'next',
+      kind: 'present',
+    });
     const spins = (await frame.evaluate(() => (window as any).__e8.spins())) as {
       plan: { kind: string; state?: string; cells?: unknown[]; wait?: boolean }[];
       result: { winAmount: number };

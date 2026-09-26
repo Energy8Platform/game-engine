@@ -32,7 +32,7 @@ import { join } from 'node:path';
 import { expect, test, type Frame, type Locator, type Page } from '@playwright/test';
 import { IDE_WEB_PORT } from '../../e2e-ports';
 import { load } from 'js-yaml';
-import { projectCopy, startDevHost, type DevHost } from './project-fixture';
+import { bootStatus, gameBooted, projectCopy, startDevHost, type DevHost } from './project-fixture';
 
 const IDE_URL = `http://127.0.0.1:${IDE_WEB_PORT}/`;
 const CANVAS = 'iframe[title="scene canvas"]';
@@ -65,7 +65,8 @@ test.afterEach(async () => {
 /** The game page at `ready`, hooks installed and `base_game` shown (the boot GET) — `game-shell.spec.ts`'s `readyPage` plus the scene. */
 async function readyGame(page: Page): Promise<void> {
   await page.goto(host.gameUrl);
-  await expect.poll(() => page.locator('#status').textContent(), { timeout: 20_000 }).toBe('ready');
+  await gameBooted(page);
+  expect(await bootStatus(page)).toBe('ready');
   await expect
     .poll(() => page.evaluate(() => (window as any).__e8?.scenesVisible() ?? []), {
       timeout: 20_000,
@@ -183,7 +184,10 @@ test('turned to portrait the board and the logo pin to the top, the coin hides, 
 
   // The board still PLAYS after the flip: a spin presents on the same
   // reels (the shell's Spin, the `present` node's exit, the grid read back).
-  expect(await page.evaluate(() => (window as any).__e8.spin())).toEqual({ out: 'next' });
+  expect(await page.evaluate(() => (window as any).__e8.spin())).toEqual({
+    out: 'next',
+    kind: 'present',
+  });
   const symbols = (await page.evaluate(() => (window as any).__e8.symbols())) as string[][];
   expect(symbols).toHaveLength(5);
   expect(symbols.flat()).toHaveLength(15);
@@ -203,8 +207,14 @@ const sceneFile = () => readFileSync(join(dir, 'scenes', 'base_game.scene.yml'),
 const sceneDoc = () => load(sceneFile()) as SceneDoc;
 const nodeProps = (doc: SceneDoc, id: string) => doc.nodes.find((n) => n.id === id)?.props;
 
+/**
+ * The IDE on its default — the composition, with the project's game
+ * running in the Preview behind it, as the composition's own embedded
+ * preview used to run one — the Scenes sidebar shown, `base_game` opened
+ * as a tab.
+ */
 async function openSceneTab(page: Page): Promise<void> {
-  await page.goto(`${IDE_URL}#/doc/composition`);
+  await page.goto(IDE_URL);
   await page.getByTestId('activity-scenes').click();
   await expect(page.getByTestId('scene-base_game')).toBeVisible();
   await page.getByTestId('scene-base_game').dblclick();

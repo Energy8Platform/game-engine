@@ -19,7 +19,15 @@ import { readdirSync, readFileSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { expect, test } from '@playwright/test';
 import { IDE_WEB_PORT } from '../../e2e-ports';
-import { EXAMPLES, projectCopy, startDevHost, startHost, workspaceCopy } from './project-fixture';
+import {
+  EXAMPLES,
+  gameBooted,
+  previewFrame,
+  projectCopy,
+  startDevHost,
+  startHost,
+  workspaceCopy,
+} from './project-fixture';
 
 /** The IDE app — vite on 5680, proxying to the host on 5679. */
 const IDE_URL = `http://127.0.0.1:${IDE_WEB_PORT}/`;
@@ -72,14 +80,13 @@ test('Create over two projects: the third is born, opened, and spins; then refus
     expect(body.projects.map((p) => p.id)).toEqual(['slot-1', 'slot-2', 'third-slot']);
     expect(body.active).toBe('third-slot');
 
-    // The browser's view: its tree, and its game booted in the frame — a
-    // fresh vite root optimizes deps on first boot, hence the longer budget.
+    // The browser's view: its tree, and its game booted in the Preview's
+    // frame — a fresh vite root optimizes deps on first boot, hence the
+    // longer budget.
     await page.getByTestId('activity-explorer').click();
     await expect(page.getByTestId('explorer-game/script.spin')).toBeVisible();
     const bootStart = Date.now();
-    await expect(page.frameLocator('iframe').first().locator('#status')).not.toHaveText('', {
-      timeout: 40_000,
-    });
+    await gameBooted(await previewFrame(page), 40_000);
     test.info().annotations.push({
       type: 'first-boot-ms',
       description: String(Date.now() - bootStart),

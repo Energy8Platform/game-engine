@@ -23,7 +23,7 @@
 import { rmSync } from 'node:fs';
 import { expect, test } from '@playwright/test';
 import { IDE_WEB_PORT } from '../../e2e-ports';
-import { projectCopy, startDevHost } from './project-fixture';
+import { gameBooted, projectCopy, startDevHost } from './project-fixture';
 
 /** The IDE app — vite on 5680, proxying `/api`, `/plugin-client` and `/ide` to the host on 5679. */
 const IDE_URL = `http://127.0.0.1:${IDE_WEB_PORT}/`;
@@ -41,7 +41,7 @@ test('a project plugin brings its own screen, no engine change required', async 
     // measured as an occasional 30s timeout on `activity-demo` under the full
     // suite, the IDE's own vite instance racing the same re-optimize.
     await page.goto(host.gameUrl);
-    await expect(page.locator('#status')).not.toHaveText('', { timeout: 20_000 });
+    await gameBooted(page);
 
     await page.goto(IDE_URL);
 
@@ -99,7 +99,7 @@ test('the demo screen can be made to fail as data, on request, without taking th
   try {
     // Same settle-visit as the test above, and the same reason.
     await page.goto(host.gameUrl);
-    await expect(page.locator('#status')).not.toHaveText('', { timeout: 20_000 });
+    await gameBooted(page);
 
     // The crash toggle lives entirely in the URL — see `client.js`'s own
     // `shouldCrash()` — because this plugin has no runtime half and no

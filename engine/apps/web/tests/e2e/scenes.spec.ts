@@ -7,14 +7,14 @@
  * presents — through `flow.yml` now (`on shell.spin → spin → present`), on
  * the `base_game` its `show` node put up at boot.
  *
- * Same iframe, same readers as `hot-fork.spec.ts`: the composition
- * document's `Preview` (`iframe[title="game preview"]`) and the game's own
+ * Same iframe, same readers as `hot-fork.spec.ts`: the Preview
+ * document's game frame (`iframe[title="game preview"]`) and the game's own
  * `window.__e8` — here `scenesVisible()` (the top-level scenes shown, in
  * show order) and `nodeVisible(scene, node)` (a top-level node of a
  * mounted scene; `big_win` is nested INTO `base_game` as a `scene` node,
  * so "showing big_win" is that node flipping visible, not a second
- * top-level scene). The Scenes view is a sidebar beside the composition
- * document, which stays in front the whole time.
+ * top-level scene). The Scenes view is a sidebar beside that document,
+ * which stays in front the whole time.
  *
  * What lands in the game arrives asynchronously (a PUT → the host's
  * `scenes` frame → `ide-bridge`; a click → `POST /api/scenes/preview` →
@@ -24,10 +24,17 @@ import { existsSync, readFileSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { expect, test, type Frame, type Page } from '@playwright/test';
 import { IDE_WEB_PORT } from '../../e2e-ports';
-import { projectCopy, startDevHost, type DevHost } from './project-fixture';
+import {
+  bootStatus,
+  gameBooted,
+  previewFrame,
+  projectCopy,
+  spinOnce,
+  startDevHost,
+  type DevHost,
+} from './project-fixture';
 
 const IDE_URL = `http://127.0.0.1:${IDE_WEB_PORT}/`;
-const PREVIEW = 'iframe[title="game preview"]';
 
 let dir: string;
 let host: DevHost;
@@ -43,30 +50,23 @@ test.afterEach(async () => {
 });
 
 /**
- * The game up once on its own URL, then the IDE on its composition document
- * (as `hot-fork.spec.ts`). The first visit is what registers the game's
- * node types with the host, so the IDE's boot `GET /api/scenes` already
- * carries them.
+ * The game up once on its own URL, then the IDE, which opens on its
+ * composition document with the project's game running in the Preview
+ * behind it (as `hot-fork.spec.ts`). The first visit is what registers the
+ * game's node types with the host, so the IDE's boot `GET /api/scenes`
+ * already carries them.
  */
 async function openComposition(page: Page): Promise<void> {
   await page.goto(host.gameUrl);
-  await expect(page.locator('#status')).not.toHaveText('', { timeout: 20_000 });
-  await page.goto(`${IDE_URL}#/doc/composition`);
+  await gameBooted(page);
+  await page.goto(IDE_URL);
 }
 
-async function gameFrame(page: Page): Promise<Frame> {
-  const handle = await page.locator(PREVIEW).elementHandle();
-  const frame = await handle?.contentFrame();
-  if (!frame) throw new Error('preview iframe has no content frame');
-  return frame;
-}
-
-/** The composition's preview, booted to `ready`. */
+/** The Preview's game, in front and booted to `ready`. */
 async function readyFrame(page: Page): Promise<Frame> {
-  const frame = await gameFrame(page);
-  await expect
-    .poll(() => frame.locator('#status').textContent(), { timeout: 20_000 })
-    .toBe('ready');
+  const frame = await previewFrame(page);
+  await gameBooted(frame);
+  expect(await bootStatus(frame)).toBe('ready');
   return frame;
 }
 
@@ -91,7 +91,11 @@ const sceneFile = (id: string) => join(dir, 'scenes', `${id}.scene.yml`);
 test('the Scenes sidebar adds a scene, the Explorer shows the file, a double-click opens the tree', async ({
   page,
 }) => {
-  await page.goto(`${IDE_URL}#/doc/composition`);
+  // The IDE's own default (the composition, with the game running in the
+  // Preview behind it) rather than a deep link to the composition alone,
+  // which would run no game at all — what the composition's own preview
+  // used to guarantee (see `openComposition`).
+  await page.goto(IDE_URL);
   await showScenes(page);
   await expect(page.getByTestId('scene-big_win')).toBeVisible();
 
@@ -198,8 +202,7 @@ test('a spin still presents, through the flow, on the scene shown at boot', asyn
 
   // The shell's Spin in, the `present` node's exit out; the scene list is unchanged
   // — presenting draws on the board `base_game` already holds.
-  expect(await frame.evaluate(() => (window as any).__e8.spin())).toEqual({ out: 'next' });
+  expect(await spinOnce(frame)).toBe('done');
   expect(await scenesVisible(frame)).toEqual(['base_game']);
   expect(await frame.evaluate(() => (window as any).__e8.spins().length)).toBe(1);
-  await expect(frame.locator('#status')).toHaveText('done');
 });

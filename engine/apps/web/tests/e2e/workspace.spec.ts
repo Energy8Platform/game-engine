@@ -14,6 +14,8 @@ import { IDE_WEB_PORT } from '../../e2e-ports';
 import {
   IDE_HOST_PORT,
   SECOND_NAME,
+  gameBooted,
+  previewFrame,
   serverPids,
   startHost,
   workspaceCopy,
@@ -36,9 +38,11 @@ test.beforeEach(async ({ page }) => {
 /**
  * Opens `id` from the «Projects» sidebar and waits until its game is really
  * up: `status-project` carries the name (the host answered `open`), the
- * preview iframe points where `/api/workspace` says, and `#status` inside
- * it is non-empty (the game booted — which is also what makes `stop()`
- * safe: `startDevHost`'s doc on tearing vite down mid-bundle).
+ * Preview's iframe points where `/api/workspace` says, and the game inside
+ * it booted (`window.__e8` installed — which is also what makes `stop()`
+ * safe: `startDevHost`'s doc on tearing vite down mid-bundle). The Preview
+ * is brought in front to read it; its activity is a document, so the
+ * sidebar stays as it was.
  */
 async function openProject(page: Page, host: WorkspaceHost, id: string, name: string) {
   await page.getByTestId(`project-${id}`).click();
@@ -57,9 +61,7 @@ async function openProject(page: Page, host: WorkspaceHost, id: string, name: st
     'src',
     new RegExp(`^${previewUrl!.replace(/[./]/g, '\\$&')}`),
   );
-  await expect(page.frameLocator('iframe').first().locator('#status')).not.toHaveText('', {
-    timeout: 20_000,
-  });
+  await gameBooted(await previewFrame(page));
 }
 
 test('two projects: both listed, none open, the projects sidebar first', async ({ page }) => {
@@ -76,7 +78,9 @@ test('two projects: both listed, none open, the projects sidebar first', async (
     // Spec §5 (4): with no project open the document group is empty and
     // points at Projects — not a composition saying «connecting…».
     await expect(page.getByTestId('doc-none')).toContainText('open a project from Projects');
-    await expect(page.locator('[role="tab"]')).toHaveCount(0);
+    // Document tabs only: the panel's tab strip (Diagnostics) is chrome,
+    // there with or without a project.
+    await expect(page.getByTestId('doc-tabs').getByRole('tab')).toHaveCount(0);
     expect(host.previewUrl()).toBeNull();
   } finally {
     await host.stop();
@@ -144,7 +148,7 @@ test('on a fixed preview port the switch still shows the second game — same ur
   // `previewPort: 0` above gives every project a fresh port, so a new
   // `previewUrl` alone remounts the iframe. In production the port is
   // FIXED (5681): the url does not change across a switch, and only the
-  // active project's id in the frame's key (PreviewWall) makes the iframe
+  // active project's id in the frame's key (`Preview`) makes the iframe
   // a new element showing the new game rather than the old one, kept.
   const root = workspaceCopy(2);
   const host = await startHost(root, { previewPort: 5683 });
@@ -203,9 +207,7 @@ test('an unsaved file makes the switch ask; No keeps everything, Yes discards an
     await expect(page.getByTestId('diagnostics-panel')).toContainText(
       'unsaved changes discarded on project switch: game/script.spin',
     );
-    await expect(page.frameLocator('iframe').first().locator('#status')).not.toHaveText('', {
-      timeout: 20_000,
-    });
+    await gameBooted(await previewFrame(page));
   } finally {
     await host.stop();
     rmSync(root, { recursive: true, force: true });

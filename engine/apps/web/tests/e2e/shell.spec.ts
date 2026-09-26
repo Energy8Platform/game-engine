@@ -45,6 +45,9 @@ import { PNG_BYTES, gameBooted, projectCopy, startDevHost, type DevHost } from '
 /** The IDE app — vite on 5680, proxying `/api`, `/plugin-client` and `/ide` to the host on 5679. */
 const IDE_URL = `http://127.0.0.1:${IDE_WEB_PORT}/`;
 
+/** The Preview document's own content: its one game frame. */
+const PREVIEW = 'iframe[title="game preview"]';
+
 /** Every editor test needs Monaco on its textarea input — see `code.spec.ts`'s module doc for the `EditContext` trap this sidesteps. */
 test.beforeEach(async ({ page }) => {
   await page.addInitScript(() => {
@@ -140,8 +143,10 @@ test('Explorer opens .spin as an editor, PNG as a viewer, a binary as an explana
     await expect(bin).toBeVisible();
     await expect(bin).toContainText(/doesn't look like text/);
 
-    // All three are open at once, and only the last one shows.
-    await expect(page.getByTestId('doc-tabs').getByRole('tab')).toHaveCount(4); // + composition
+    // All three are open at once, and only the last one shows. (+ the
+    // composition, and the Preview the IDE opens behind it so the
+    // project's game runs.)
+    await expect(page.getByTestId('doc-tabs').getByRole('tab')).toHaveCount(5);
     await expect(png).toBeHidden();
     await expect(page.getByTestId('doc-pane-f:game/script.spin')).toBeHidden();
   } finally {
@@ -169,7 +174,7 @@ test('typed text survives a tab switch, and the console stays clean', async ({ p
     await page.keyboard.type('-- typed before the switch');
 
     await page.getByTestId('activity-preview').click();
-    await expect(page.getByTestId(/^tile-/).first()).toBeVisible();
+    await expect(page.locator(PREVIEW)).toBeVisible();
     await expect(page.getByTestId('doc-pane-f:game/script.spin')).toBeHidden();
 
     await page.getByTestId('doc-f:game/script.spin').click();
@@ -290,7 +295,7 @@ test('a deep link to the preview opens it with no false warning', async ({ page 
     await expect(page.getByTestId('doc-preview')).toHaveAttribute('aria-selected', 'true', {
       timeout: 20_000,
     });
-    await expect(page.getByTestId(/^tile-/).first()).toBeVisible({ timeout: 20_000 });
+    await expect(page.locator(PREVIEW)).toBeVisible({ timeout: 20_000 });
     await expect(page.getByTestId('diagnostics-panel')).not.toContainText(/not registered/);
   } finally {
     await host.stop();
@@ -371,7 +376,7 @@ test('the sidebar can be dragged wider, and stays so after a reload', async ({ p
   const host = await startDevHost(dir);
   try {
     await openIde(page, host, '#/doc/preview');
-    await expect(page.getByTestId(/^tile-/).first()).toBeVisible({ timeout: 20_000 });
+    await expect(page.locator(PREVIEW)).toBeVisible({ timeout: 20_000 });
     const sidebar = page.getByTestId('sidebar');
     const before = (await sidebar.boundingBox())!.width;
 

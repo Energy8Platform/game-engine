@@ -31,7 +31,7 @@
  * `projectCopy()`, its `flow.yml`/`scenes/base_game.scene.yml` rewritten
  * BEFORE `startDevHost` for cases 2/3 (the running host reads them once,
  * at boot; case 4 edits `flow.yml` through the host instead, once the
- * game is up), the composition document's `Preview`
+ * game is up), the Preview document's game frame
  * (`iframe[title="game preview"]`) and the game's own `window.__e8` — here
  * `nodeText(scene, node)` (Task 4's own hook), `spin()`, `spins()` and
  * `flowTrace()`.
@@ -40,10 +40,16 @@ import { rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { expect, test, type Frame, type Page } from '@playwright/test';
 import { IDE_WEB_PORT } from '../../e2e-ports';
-import { projectCopy, startDevHost, type DevHost } from './project-fixture';
+import {
+  bootStatus,
+  gameBooted,
+  previewFrame,
+  projectCopy,
+  startDevHost,
+  type DevHost,
+} from './project-fixture';
 
 const IDE_URL = `http://127.0.0.1:${IDE_WEB_PORT}/`;
-const PREVIEW = 'iframe[title="game preview"]';
 
 /**
  * `start(boot) → base(show base_game) → hold(wait ui.tap) → mark(prop
@@ -109,19 +115,11 @@ test.afterEach(async () => {
   if (dir) rmSync(dir, { recursive: true, force: true });
 });
 
-async function gameFrame(page: Page): Promise<Frame> {
-  const handle = await page.locator(PREVIEW).elementHandle();
-  const frame = await handle?.contentFrame();
-  if (!frame) throw new Error('preview iframe has no content frame');
-  return frame;
-}
-
-/** The composition's preview, booted to `ready` — same reader as `fx.spec.ts`/`scenes.spec.ts`. */
+/** The Preview's game, booted to `ready` — same reader as `fx.spec.ts`/`scenes.spec.ts`. */
 async function readyFrame(page: Page): Promise<Frame> {
-  const frame = await gameFrame(page);
-  await expect
-    .poll(() => frame.locator('#status').textContent(), { timeout: 20_000 })
-    .toBe('ready');
+  const frame = await previewFrame(page);
+  await gameBooted(frame);
+  expect(await bootStatus(frame)).toBe('ready');
   return frame;
 }
 
@@ -130,9 +128,9 @@ test("the example's win text is empty at boot and the last spin's credited amoun
 }) => {
   host = await startDevHost(dir);
 
-  await page.goto(`${IDE_URL}#/doc/composition`);
+  await page.goto(IDE_URL);
   const frame = await readyFrame(page);
-  // `#status` reads `ready` before the boot GET (`scenes.ready`) has
+  // The game reads `ready` before the boot GET (`scenes.ready`) has
   // necessarily answered — same race `flow.spec.ts`'s `scenesVisible()`
   // poll guards against right after `readyFrame` — so this is a poll, not
   // a single read, even though the awaited value never changes once
@@ -143,7 +141,10 @@ test("the example's win text is empty at boot and the last spin's credited amoun
     })
     .toBe('');
 
-  expect(await frame.evaluate(() => (window as any).__e8.spin())).toEqual({ out: 'next' });
+  expect(await frame.evaluate(() => (window as any).__e8.spin())).toEqual({
+    out: 'next',
+    kind: 'present',
+  });
 
   const spins = (await frame.evaluate(() => (window as any).__e8.spins())) as {
     result: { winAmount: number };
@@ -161,7 +162,7 @@ test('a tap on the stage reaches a wait node, and a prop node after it sets the 
   writeFileSync(join(dir, 'flow.yml'), TAP_FLOW);
   host = await startDevHost(dir);
 
-  await page.goto(`${IDE_URL}#/doc/composition`);
+  await page.goto(IDE_URL);
   const frame = await readyFrame(page);
 
   // `hold` is a `wait` node with no `ms` — it does not settle on its own,
@@ -220,11 +221,11 @@ nodes:
   );
   host = await startDevHost(dir);
 
-  await page.goto(`${IDE_URL}#/doc/composition`);
+  await page.goto(IDE_URL);
   const frame = await readyFrame(page);
 
   // Same boot-GET race `readyFrame` never waits out (case 1's own poll,
-  // above): `#status` reads `ready` before `scenes.ready` (the boot GET)
+  // above): the game reads `ready` before `scenes.ready` (the boot GET)
   // has necessarily answered, so `hello` may not be mounted yet.
   await expect
     .poll(() => frame.evaluate(() => (window as any).__e8.nodeText('base_game', 'hello')), {
@@ -248,7 +249,7 @@ test('an emit with wait holds the main branch until a parallel on-branch ends; t
 }) => {
   host = await startDevHost(dir);
 
-  await page.goto(`${IDE_URL}#/doc/composition`);
+  await page.goto(IDE_URL);
   const frame = await readyFrame(page);
 
   // `inner`'s write and `after`'s are one macrotask apart from nothing:

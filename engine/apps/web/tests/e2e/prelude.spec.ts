@@ -60,20 +60,25 @@
  * comment is the record.
  *
  * Same fixture and idioms as `contract.spec.ts`: a private `projectCopy()`,
- * its files edited BEFORE `startDevHost`, the composition document's
- * `Preview` (`iframe[title="game preview"]`) and the game's own
- * `window.__e8`.
+ * its files edited BEFORE `startDevHost`, the Preview document's game frame
+ * (`iframe[title="game preview"]`) and the game's own `window.__e8`.
  */
 import { cpSync, rmSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { expect, test, type Frame, type Page } from '@playwright/test';
 import { IDE_WEB_PORT } from '../../e2e-ports';
-import { projectCopy, startDevHost, type DevHost } from './project-fixture';
+import {
+  bootStatus,
+  gameBooted,
+  previewFrame,
+  projectCopy,
+  startDevHost,
+  type DevHost,
+} from './project-fixture';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const IDE_URL = `http://127.0.0.1:${IDE_WEB_PORT}/`;
-const PREVIEW = 'iframe[title="game preview"]';
 
 /** `engine/ide/host/tests/fixtures/project-spec/game` — a GameSpec `spec.json` plus logic-only `script.spin`. */
 const PROJECT_SPEC_GAME = join(
@@ -98,19 +103,11 @@ test.afterEach(async () => {
   if (dir) rmSync(dir, { recursive: true, force: true });
 });
 
-async function gameFrame(page: Page): Promise<Frame> {
-  const handle = await page.locator(PREVIEW).elementHandle();
-  const frame = await handle?.contentFrame();
-  if (!frame) throw new Error('preview iframe has no content frame');
-  return frame;
-}
-
-/** The composition's preview, booted to `ready` — same reader as `contract.spec.ts`. */
+/** The Preview's game, booted to `ready` — same reader as `contract.spec.ts`. */
 async function readyFrame(page: Page): Promise<Frame> {
-  const frame = await gameFrame(page);
-  await expect
-    .poll(() => frame.locator('#status').textContent(), { timeout: 20_000 })
-    .toBe('ready');
+  const frame = await previewFrame(page);
+  await gameBooted(frame);
+  expect(await bootStatus(frame)).toBe('ready');
   return frame;
 }
 
@@ -137,11 +134,11 @@ test('a GameSpec project — spec.json + logic-only script.spin — boots and sp
   cpSync(PROJECT_SPEC_GAME, join(dir, 'game'), { recursive: true });
 
   host = await startDevHost(dir);
-  await page.goto(`${IDE_URL}#/doc/composition`);
+  await page.goto(IDE_URL);
   const frame = await readyFrame(page);
 
   const outcome = await frame.evaluate(() => (window as any).__e8.spin());
-  expect(outcome).toEqual({ out: 'next' });
+  expect(outcome).toEqual({ out: 'next', kind: 'present' });
 
   await expect(page.getByTestId('diagnostics-panel')).toBeVisible();
   await expect(specOrSchemaError(page)).toHaveCount(0);

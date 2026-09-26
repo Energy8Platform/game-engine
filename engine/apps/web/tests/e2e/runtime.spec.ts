@@ -1,9 +1,16 @@
 import { readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { expect, test, type Frame } from '@playwright/test';
+import { expect, test, type Frame, type Page } from '@playwright/test';
 import { createIdeHost, type IdeHost } from '@energy8engine/ide-host';
-import { IDE_HOST_PORT, LOAD_BUDGET_MS } from './project-fixture';
+import {
+  IDE_HOST_PORT,
+  LOAD_BUDGET_MS,
+  bootStatus,
+  gameBooted,
+  previewFrame,
+  spinOnce as spinStatus,
+} from './project-fixture';
 
 /**
  * The plan's own thesis, proven in a real browser: a knob turned in the
@@ -62,24 +69,27 @@ test.afterAll(async () => {
   await host?.stop().catch(() => {});
 });
 
-async function gameFrame(page: import('@playwright/test').Page): Promise<Frame> {
-  // `Locator.contentFrame()` returns a `FrameLocator` (no `.evaluate()`) —
-  // the real `Frame` object this suite needs `window.__e8` access via
-  // comes from `ElementHandle.contentFrame()` instead.
-  const handle = await page.locator('iframe[title="game preview"]').elementHandle();
-  const frame = await handle?.contentFrame();
-  if (!frame) throw new Error('preview iframe has no content frame');
+/**
+ * The game in the IDE's Preview document, booted to `ready` —
+ * `previewFrame` brings that document in front (a hidden frame's ticker
+ * never finishes a spin) and hands back the real `Frame`.
+ */
+async function readyFrame(page: Page): Promise<Frame> {
+  const frame = await previewFrame(page);
+  await gameBooted(frame, 15_000);
+  expect(await bootStatus(frame)).toBe('ready');
   return frame;
 }
 
 test('the running game is visible in the IDE preview, and a spin plays', async ({ page }) => {
   // The load budget, measured the way `e8 shot` measures `loadMs`: the
   // game's own URL, not the IDE page around it, from navigation to
-  // `#status` holding text. This is the first load after the host booted,
-  // so vite's cold transform is inside the number — as it is for `shot`.
+  // `window.__e8` being installed (where `#status` used to be written).
+  // This is the first load after the host booted, so vite's cold
+  // transform is inside the number — as it is for `shot`.
   const t0 = Date.now();
   await page.goto(host.ctx.workspace.state().previewUrl!);
-  await expect.poll(() => page.locator('#status').textContent(), { timeout: 30_000 }).toBeTruthy();
+  await gameBooted(page, 30_000);
   const loadMs = Date.now() - t0;
   expect(
     loadMs,
@@ -88,13 +98,8 @@ test('the running game is visible in the IDE preview, and a spin plays', async (
 
   await page.goto('/');
 
-  const frame = await gameFrame(page);
-  await expect
-    .poll(() => frame.locator('#status').textContent(), { timeout: 15_000 })
-    .toBe('ready');
-
-  await frame.locator('#spin').click();
-  await expect.poll(() => frame.locator('#status').textContent(), { timeout: 15_000 }).toBe('done');
+  const frame = await readyFrame(page);
+  expect(await spinStatus(frame)).toBe('done');
 });
 
 /** The live board, `[col][row]`, as `__e8.symbols()` reads it — and a spin grid in the same shape. */
@@ -116,7 +121,10 @@ interface Spin {
 const spins = (frame: Frame): Promise<Spin[]> => frame.evaluate(() => (window as any).__e8.spins());
 /** The shell's Spin in, the `present` node's exit out; the spin it recorded. */
 async function spinOnce(frame: Frame): Promise<Spin> {
-  expect(await frame.evaluate(() => (window as any).__e8.spin())).toEqual({ out: 'next' });
+  expect(await frame.evaluate(() => (window as any).__e8.spin())).toEqual({
+    out: 'next',
+    kind: 'present',
+  });
   const all = await spins(frame);
   return all[all.length - 1];
 }
@@ -137,10 +145,7 @@ test("the spin that played is written down — request and the server's own resu
   page,
 }) => {
   await page.goto('/');
-  const frame = await gameFrame(page);
-  await expect
-    .poll(() => frame.locator('#status').textContent(), { timeout: 15_000 })
-    .toBe('ready');
+  const frame = await readyFrame(page);
 
   // The boot run showed a scene and the log stayed empty. Also the check
   // that `spins()` is reaching a real log rather than answering `[]`
@@ -174,14 +179,15 @@ test('switching base_game from classic to cascade in the IDE changes what a spin
   // ~2 s a spin, ~14-25 % hit rate); the file-wide 60 s is tight for that.
   test.setTimeout(120_000);
   await page.goto('/');
-  const frame = await gameFrame(page);
-  await expect
-    .poll(() => frame.locator('#status').textContent(), { timeout: 15_000 })
-    .toBe('ready');
+  const frame = await readyFrame(page);
 
   // The composition screen shows the ide-bridge row (this project's e8.yml
   // names it), schema-driven form and all — the same proven path
   // `composition-screen.test.tsx`/`skeleton.spec.ts` already exercise.
+  // The knob is on the Composition document; the spins run with the
+  // Preview back in front (`previewFrame`), on the same `frame` throughout
+  // — a rebind is applied in place, and the markers below prove it.
+  await toComposition(page);
   await expect(page.getByText('@energy8engine/ide-bridge')).toBeVisible();
   const mechanicField = page.getByLabel('stage mechanic');
   const stageField = page.getByLabel('stage (empty — the single one the composition bound)');
@@ -223,6 +229,7 @@ test('switching base_game from classic to cascade in the IDE changes what a spin
   // own doc for why waiting on the thing under test is not a check).
   const bound = () => frame.evaluate(() => (window as any).__e8.bound('base_game'));
   await mechanicField.fill('classic');
+  await previewFrame(page);
   await expect.poll(bound, { timeout: 20_000 }).toBe('classic');
 
   // What a person watching the classic presentation sees: the reels land
@@ -231,8 +238,10 @@ test('switching base_game from classic to cascade in the IDE changes what a spin
   const classic = await spinOnce(frame);
   expect(await symbols(frame)).toEqual(strings(classic.result.data.grid));
 
-  // Turn the knob again — in the IDE, not in the game's own local <select>.
+  // Turn the knob again — in the IDE, not in the game's own page.
+  await toComposition(page);
   await mechanicField.fill('cascade');
+  await previewFrame(page);
   await expect.poll(bound, { timeout: 20_000 }).toBe('cascade');
 
   // A losing spin presents identically under every mechanic for a boring
@@ -269,6 +278,9 @@ test('switching base_game from classic to cascade in the IDE changes what a spin
 
 const equal = (a: number[][], b: number[][]) => JSON.stringify(a) === JSON.stringify(b);
 
+/** To the Composition document, where the rows' forms are. */
+const toComposition = (page: Page) => page.getByTestId('activity-composition').click();
+
 /**
  * The step-content half of the old thesis: it reads the plan the game ran
  * off the spin log (`spins().at(-1).plan`), which the flow's `present` node
@@ -289,12 +301,11 @@ test("under cascade the plan removes exactly what each round measured and refill
 }) => {
   test.setTimeout(120_000);
   await page.goto('/');
-  const frame = await gameFrame(page);
-  await expect
-    .poll(() => frame.locator('#status').textContent(), { timeout: 15_000 })
-    .toBe('ready');
+  const frame = await readyFrame(page);
   const bound = () => frame.evaluate(() => (window as any).__e8.bound('base_game'));
+  await toComposition(page);
   await page.getByLabel('stage mechanic').fill('cascade');
+  await previewFrame(page);
   await expect.poll(bound, { timeout: 20_000 }).toBe('cascade');
 
   let cascade: Spin | undefined;
