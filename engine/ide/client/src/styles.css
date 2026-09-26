@@ -874,6 +874,16 @@ label {
 .e8-status-item:hover {
   background: var(--e8-status-hover);
 }
+/* `GameStatus`'s `failed` state is a `<button>` (task 5) — a click opens
+   Diagnostics, but it has to read as the same status-bar text the `span`
+   items are, not as a button. */
+button.e8-status-item {
+  border: 0;
+  background: transparent;
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+}
 .e8-theme-toggle {
   border: 0;
   background: transparent;

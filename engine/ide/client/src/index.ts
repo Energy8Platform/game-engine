@@ -71,6 +71,7 @@ export {
   SessionStatus,
   DirtyStatus,
   ThemeStatus,
+  GameStatus,
   type ThemeName,
 } from './shell/StatusItems';
 export { Explorer, openPath } from './shell/Explorer';

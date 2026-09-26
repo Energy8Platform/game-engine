@@ -2,12 +2,23 @@ import { describe, expect, it, beforeEach, vi } from 'vitest';
 import { act, cleanup, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import type { Context } from 'cordis';
-import { diagnostic, type Diagnostic, type ServerMessage } from '@energy8engine/contracts';
+import {
+  diagnostic,
+  type Diagnostic,
+  type GameStatusMessage,
+  type ServerMessage,
+} from '@energy8engine/contracts';
 import * as slotsPlugin from '../src/plugins/slots';
 import * as shellPlugin from '../src/plugins/shell';
 import * as gameDiagnosticsPlugin from '../src/plugins/diagnostics';
 import * as workspacePlugin from '../src/plugins/workspace';
-import { ProjectStatus, SessionStatus, DirtyStatus, ThemeStatus } from '../src/shell/StatusItems';
+import {
+  ProjectStatus,
+  SessionStatus,
+  DirtyStatus,
+  ThemeStatus,
+  GameStatus,
+} from '../src/shell/StatusItems';
 
 /** These tests only care about `.message`/`.code` — severity/plugin/where are fixed filler. */
 function d(message: string, extra?: Partial<Diagnostic>): Diagnostic {
@@ -271,6 +282,99 @@ describe('DirtyStatus', () => {
     ctx.shell.markDirty('a', true);
     const { container } = render(<DirtyStatus ctx={ctx} />);
     expect(container).toHaveTextContent('1 unsaved');
+  });
+});
+
+/**
+ * `GameStatus` reads `ctx.gameComposition.status` through
+ * `useGameComposition` — a hand-built double of just that shape (the four
+ * other fields the hook also reads are filler; nothing under test here
+ * looks at them), plus a `subscribe` this harness drives by hand instead of
+ * a socket, since the frame itself is `game-composition.test.ts`'s job. A
+ * `showPanel` spy stands in for `ctx.shell` — the one call the `failed`
+ * button makes.
+ */
+function gameStatusHarness() {
+  const listeners = new Set<() => void>();
+  const showPanel = vi.fn();
+  const service: {
+    rows: null;
+    diagnostics: [];
+    reloads: number;
+    transitions: [];
+    status: GameStatusMessage | null;
+    subscribe(listener: () => void): () => void;
+  } = {
+    rows: null,
+    diagnostics: [],
+    reloads: 0,
+    transitions: [],
+    status: null,
+    subscribe(listener) {
+      listeners.add(listener);
+      return () => listeners.delete(listener);
+    },
+  };
+  const ctx = {
+    gameComposition: service,
+    shell: { showPanel },
+  } as unknown as Context;
+  const setStatus = (status: GameStatusMessage | null) => {
+    service.status = status;
+    for (const listener of listeners) listener();
+  };
+  return { ctx, setStatus, showPanel };
+}
+
+describe('GameStatus', () => {
+  it('shows "○ no game" before any frame has arrived', () => {
+    const { ctx } = gameStatusHarness();
+    const { container } = render(<GameStatus ctx={ctx} />);
+    expect(container).toHaveTextContent('○ no game');
+    expect(container.querySelector('[data-state]')).toHaveAttribute('data-state', 'offline');
+  });
+
+  it('shows "… loading" while the game boots', () => {
+    const { ctx, setStatus } = gameStatusHarness();
+    const { container } = render(<GameStatus ctx={ctx} />);
+    act(() => setStatus({ type: 'game-status', state: 'loading' }));
+    expect(container).toHaveTextContent('… loading');
+    expect(container.querySelector('[data-state]')).toHaveAttribute('data-state', 'loading');
+  });
+
+  it('shows "● ready" once the game is up', () => {
+    const { ctx, setStatus } = gameStatusHarness();
+    const { container } = render(<GameStatus ctx={ctx} />);
+    act(() => setStatus({ type: 'game-status', state: 'ready' }));
+    expect(container).toHaveTextContent('● ready');
+    expect(container.querySelector('[data-state]')).toHaveAttribute('data-state', 'ready');
+  });
+
+  it('shows "◌ spinning…" mid-spin', () => {
+    const { ctx, setStatus } = gameStatusHarness();
+    const { container } = render(<GameStatus ctx={ctx} />);
+    act(() => setStatus({ type: 'game-status', state: 'spinning' }));
+    expect(container).toHaveTextContent('◌ spinning…');
+    expect(container.querySelector('[data-state]')).toHaveAttribute('data-state', 'spinning');
+  });
+
+  it('a failed state renders as a button naming the failure, and opens Diagnostics on click', async () => {
+    const { ctx, setStatus, showPanel } = gameStatusHarness();
+    render(<GameStatus ctx={ctx} />);
+    act(() => setStatus({ type: 'game-status', state: 'failed', message: 'spin failed' }));
+    const button = screen.getByRole('button', { name: '✕ spin failed' });
+    expect(button).toHaveAttribute('data-state', 'failed');
+    expect(showPanel).not.toHaveBeenCalled();
+    await userEvent.click(button);
+    expect(showPanel).toHaveBeenCalledWith('diagnostics');
+  });
+
+  it('offline reads the same as no game', () => {
+    const { ctx, setStatus } = gameStatusHarness();
+    const { container } = render(<GameStatus ctx={ctx} />);
+    act(() => setStatus({ type: 'game-status', state: 'offline' }));
+    expect(container).toHaveTextContent('○ no game');
+    expect(container.querySelector('[data-state]')).toHaveAttribute('data-state', 'offline');
   });
 });
 

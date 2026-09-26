@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import type { Context } from 'cordis';
 import { useShell } from '../plugins/shell';
 import { useGameDiagnostics } from '../plugins/diagnostics';
+import { useGameComposition } from '../plugins/game-composition';
 import { useWorkspace } from '../plugins/workspace';
 
 /**
@@ -171,5 +172,42 @@ export function ThemeStatus({ ctx: _ctx }: { ctx: Context }) {
     >
       {theme === 'dark' ? '🌙' : '☀️'}
     </button>
+  );
+}
+
+/**
+ * Right, first: what the running game is doing — the `game-status` frames
+ * its `ide-bridge` sends (slice 39), which replaced the project page's own
+ * `#status`. `failed` is a button: the reason is in Diagnostics.
+ */
+export function GameStatus({ ctx }: { ctx: Context }) {
+  const { status } = useGameComposition(ctx);
+  const state = status?.state ?? 'offline';
+  const label =
+    state === 'ready'
+      ? '● ready'
+      : state === 'spinning'
+        ? '◌ spinning…'
+        : state === 'loading'
+          ? '… loading'
+          : state === 'failed'
+            ? `✕ ${status?.message ?? 'failed'}`
+            : '○ no game';
+  if (state === 'failed') {
+    return (
+      <button
+        type="button"
+        className="e8-status-item"
+        data-state={state}
+        onClick={() => ctx.shell.showPanel('diagnostics')}
+      >
+        {label}
+      </button>
+    );
+  }
+  return (
+    <span className="e8-status-item" data-state={state}>
+      {label}
+    </span>
   );
 }

@@ -201,7 +201,7 @@ describe('App', () => {
     );
   });
 
-  it('registers the four status items, two a side, in order', async () => {
+  it('registers the five status items, two on the left and three on the right', async () => {
     const { ctx } = await harness();
     render(<App ctx={ctx} />);
     const items = ctx.slots.list<{ name: string; key: string; side: string; order: number }>(
@@ -212,7 +212,20 @@ describe('App', () => {
       ['dirty', 'left', 1],
       ['session', 'right', 0],
       ['theme', 'right', 1],
+      ['game', 'right', -1],
     ]);
+  });
+
+  it("the status bar's right side starts with status-game — game status leads session/theme", async () => {
+    // `order: -1` outranks `session` (0) and `theme` (1) — `Shell.tsx` draws
+    // `statusEntries` `byOrder`, not in registration order (task 5).
+    const { ctx } = await harness();
+    render(<App ctx={ctx} />);
+    const right = screen.getByTestId('status-bar').querySelector('[data-side="right"]');
+    const keys = within(right as HTMLElement)
+      .getAllByTestId(/^status-/)
+      .map((el) => el.getAttribute('data-testid'));
+    expect(keys[0]).toBe('status-game');
   });
 
   it('draws the shell — five regions — and no old tab bar', async () => {

@@ -410,3 +410,60 @@ describe('game composition feeder — transitions', () => {
     expect(ctx.gameComposition.transitions).toEqual([]);
   });
 });
+
+/**
+ * The game's own status (slice 39, task 5): the host relays `game-status`
+ * frames from the game's `ide-bridge` to every `/ide` socket, and sends
+ * `offline` itself once the game socket goes. `null` until the first one
+ * lands — `StatusItems.tsx`'s `GameStatus` reads that as `offline` too, but
+ * this service tells the two apart (see task-5-brief.md).
+ */
+describe('game composition feeder — status', () => {
+  it('a game-status frame sets status and notifies', async () => {
+    const { ctx, push } = await harness(answer({ rows: ROWS, diagnostics: [] }));
+    await vi.waitFor(() => expect(ctx.gameComposition.rows).toHaveLength(2));
+    expect(ctx.gameComposition.status).toBeNull();
+    const listener = vi.fn();
+    ctx.gameComposition.subscribe(listener);
+
+    push(JSON.stringify({ type: 'game-status', state: 'ready' }));
+
+    expect(listener).toHaveBeenCalledTimes(1);
+    expect(ctx.gameComposition.status).toEqual({ type: 'game-status', state: 'ready' });
+  });
+
+  it("accepts offline — the host's own frame when the game goes", async () => {
+    const { ctx, push } = await harness(answer({ rows: ROWS, diagnostics: [] }));
+    await vi.waitFor(() => expect(ctx.gameComposition.rows).toHaveLength(2));
+
+    push(JSON.stringify({ type: 'game-status', state: 'offline' }));
+
+    expect(ctx.gameComposition.status).toEqual({ type: 'game-status', state: 'offline' });
+  });
+
+  it('carries a failed state and its message through', async () => {
+    const { ctx, push } = await harness(answer({ rows: ROWS, diagnostics: [] }));
+    await vi.waitFor(() => expect(ctx.gameComposition.rows).toHaveLength(2));
+
+    push(JSON.stringify({ type: 'game-status', state: 'failed', message: 'spin failed' }));
+
+    expect(ctx.gameComposition.status).toEqual({
+      type: 'game-status',
+      state: 'failed',
+      message: 'spin failed',
+    });
+  });
+
+  it('ignores a frame with an unknown state, or a non-string message', async () => {
+    const { ctx, push } = await harness(answer({ rows: ROWS, diagnostics: [] }));
+    await vi.waitFor(() => expect(ctx.gameComposition.rows).toHaveLength(2));
+    const listener = vi.fn();
+    ctx.gameComposition.subscribe(listener);
+
+    push(JSON.stringify({ type: 'game-status', state: 'bogus' }));
+    push(JSON.stringify({ type: 'game-status', state: 'ready', message: 5 }));
+
+    expect(listener).not.toHaveBeenCalled();
+    expect(ctx.gameComposition.status).toBeNull();
+  });
+});

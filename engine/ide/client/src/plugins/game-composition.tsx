@@ -6,6 +6,8 @@ import {
   type GameCompositionMessage,
   type GameCompositionResponse,
   type GameCompositionRow,
+  type GameStatusMessage,
+  type GameStatusState,
   type GameTransitionsMessage,
 } from '@energy8engine/contracts';
 import type { ConnectionConfig, WebSocketLike } from './connection';
@@ -89,6 +91,15 @@ export interface GameCompositionState {
    * what usually fills this). A `game-composition` frame leaves it standing.
    */
   transitions: string[];
+  /**
+   * The last `game-status` frame the host relayed — up from the running
+   * game's own `ide-bridge`, or the host's own `offline` once the game
+   * socket that last reported goes (closed, or the project changed). `null`
+   * until the first one lands; `StatusItems.tsx`'s `GameStatus` reads that
+   * the same as `offline` on screen, but this field keeps "never spoken"
+   * and "spoke and said gone" apart for anything that cares which.
+   */
+  status: GameStatusMessage | null;
 }
 
 export interface GameCompositionService extends GameCompositionState {
@@ -148,6 +159,30 @@ function isTransitionsFrame(parsed: unknown): parsed is GameTransitionsMessage {
   );
 }
 
+/** The five states `contracts` names — anything else is a frame this client does not understand yet, not a state to show. */
+const STATUS_STATES = new Set<GameStatusState>([
+  'loading',
+  'ready',
+  'spinning',
+  'failed',
+  'offline',
+]);
+
+function isStatusFrame(parsed: unknown): parsed is GameStatusMessage {
+  if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) return false;
+  const { type, state, message } = parsed as {
+    type?: unknown;
+    state?: unknown;
+    message?: unknown;
+  };
+  return (
+    type === 'game-status' &&
+    typeof state === 'string' &&
+    STATUS_STATES.has(state as GameStatusState) &&
+    (message === undefined || typeof message === 'string')
+  );
+}
+
 export function apply(ctx: Context, config: GameCompositionConfig) {
   const listeners = new Set<() => void>();
   const fetchFn = config.fetchFn ?? ((...args: Parameters<typeof fetch>) => fetch(...args));
@@ -170,6 +205,7 @@ export function apply(ctx: Context, config: GameCompositionConfig) {
     diagnostics: [],
     reloads: 0,
     transitions: [],
+    status: null,
     subscribe(listener) {
       listeners.add(listener);
       return () => listeners.delete(listener);
@@ -264,6 +300,11 @@ export function apply(ctx: Context, config: GameCompositionConfig) {
       notify();
       return;
     }
+    if (isStatusFrame(parsed)) {
+      service.status = parsed;
+      notify();
+      return;
+    }
     // Same guard as `workspace`: `null`, an array or a primitive all pass
     // JSON.parse; a frame without a `rows` array is ignored, not applied.
     if (!isFrame(parsed)) return;
@@ -283,6 +324,7 @@ export function useGameComposition(ctx: Context): GameCompositionState {
     diagnostics: ctx.gameComposition.diagnostics,
     reloads: ctx.gameComposition.reloads,
     transitions: ctx.gameComposition.transitions,
+    status: ctx.gameComposition.status,
   });
   // A fresh object per notification on purpose: the service mutates its
   // own fields in place, so handing `setState` the same reference twice

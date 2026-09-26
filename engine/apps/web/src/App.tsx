@@ -5,6 +5,7 @@ import {
   DiagnosticsPanel,
   DirtyStatus,
   Explorer,
+  GameStatus,
   PreviewWall,
   ProjectStatus,
   Projects,
@@ -183,6 +184,12 @@ export function App({ ctx }: { ctx: Context }) {
       ctx.slots.register(
         { name: 'shell.status', key: 'theme', side: 'right', order: 1 },
         ThemeStatus,
+      ),
+      // `order: -1`: ahead of `session`/`theme` on the right — the game's
+      // own state outranks the dev server's and the theme toggle (task 5).
+      ctx.slots.register(
+        { name: 'shell.status', key: 'game', side: 'right', order: -1 },
+        GameStatus,
       ),
     ];
     return () => off.forEach((dispose) => dispose());
