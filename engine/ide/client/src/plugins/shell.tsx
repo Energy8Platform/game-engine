@@ -73,8 +73,20 @@ export interface ShellService {
    * `replace` says the shell chose this document, the person did not — the
    * fresh-load default — so the address is overwritten rather than pushed
    * and Back never lands on the empty address a default was painted over.
+   *
+   * `background: true` mounts the document WITHOUT navigating to it: it
+   * adds the tab if the key is not open yet and leaves the address and the
+   * active document exactly as they are — no `replace`, no push, nothing
+   * activated. It exists for a document whose COMPONENT has to be running
+   * before anyone opens its tab — the Preview's game (Task 8b): the IDE's
+   * own `ide-bridge` depends on that running game for the node-type
+   * registry, the Flow palette's node kinds and edges, transitions, and
+   * the status bar's `game`/`session` dots, none of which arrive while the
+   * Preview has never been mounted. A key already open — foreground or
+   * background, even the active one — is left untouched; `background`
+   * only ever ADDS a tab, it never re-activates or re-navigates one.
    */
-  openContributed(key: string, opts?: { replace?: boolean }): void;
+  openContributed(key: string, opts?: { replace?: boolean; background?: boolean }): void;
   /**
    * Opens a project file as an instance tab, keyed `f:<path>`, choosing
    * editor or viewer the way the Explorer does — through the one chooser
@@ -477,8 +489,11 @@ export function apply(ctx: Context) {
 
     openContributed(key, opts) {
       const replace = opts?.replace ?? false;
+      const background = opts?.background ?? false;
       if (documents.has(key)) {
-        openInternal({ ...documents.get(key)! }, replace);
+        // Background never activates a key that is already open — even
+        // the active one; only the foreground path re-activates.
+        if (!background) openInternal({ ...documents.get(key)! }, replace);
         return;
       }
       const found = findContributed(key);
@@ -488,6 +503,22 @@ export function apply(ctx: Context) {
           `no document is registered for "${key}"`,
           'register it on the shell.document slot',
         );
+        return;
+      }
+      if (background) {
+        // Mounted, not navigated to — see `openContributed`'s own doc for
+        // why (Task 8b: the Preview's game). Built exactly as
+        // `openFoundContributed` builds its tab, minus the `go()` that
+        // would move the address.
+        contributed.add(found.key);
+        documents.set(found.key, {
+          key: found.key,
+          title: found.title ?? found.key,
+          component: found.component,
+          closable: found.closable ?? false,
+          dirty: false,
+        });
+        notify();
         return;
       }
       openFoundContributed(found, replace);

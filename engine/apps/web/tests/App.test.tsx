@@ -270,6 +270,55 @@ describe('App', () => {
     expect(screen.getByTestId('doc-none')).toHaveTextContent('open a project from Projects');
   });
 
+  // --- Task 8b: the composition default's own doc explains why — the
+  // Preview opens too, in the background, so its game is running the
+  // moment a project opens, whether or not anyone ever looks at the tab.
+
+  it('a fresh load with a project open opens composition, then preview in the background, composition active', async () => {
+    const { ctx } = await harness(undefined, OPEN_PROJECT);
+    render(<App ctx={ctx} />);
+    await waitFor(() =>
+      expect(ctx.shell.documents().map((d) => d.key)).toEqual(['composition', 'preview']),
+    );
+    expect(ctx.shell.active()?.key).toBe('composition');
+  });
+
+  it('a deep link that already named a document opens neither default — not composition, not preview', async () => {
+    location.hash = '#/doc/preview';
+    const { ctx } = await harness(undefined, OPEN_PROJECT);
+    render(<App ctx={ctx} />);
+    await waitFor(() => expect(ctx.shell.sidebar()).toBe('explorer'));
+    expect(ctx.shell.active()?.key).toBe('preview');
+    // Only the one document a person actually named — the composition
+    // default's own preview-in-background call never runs because the
+    // whole default block is skipped (an address already resolves to
+    // something).
+    expect(ctx.shell.documents().map((d) => d.key)).toEqual(['preview']);
+  });
+
+  it('a switch between two projects adds no second preview tab', async () => {
+    const { ctx, socket } = await harness(undefined, OPEN_PROJECT);
+    render(<App ctx={ctx} />);
+    await waitFor(() =>
+      expect(ctx.shell.documents().map((d) => d.key)).toEqual(['composition', 'preview']),
+    );
+    // Back past both, so the composition default's own condition
+    // (`ctx.shell.active() === undefined`) can re-fire on the next project
+    // — the one case where `decide()` calls `openContributed('preview', {
+    // background: true })` a second time, and it has to be a no-op: the
+    // tab is already there.
+    act(() => {
+      location.hash = '';
+      window.dispatchEvent(new HashChangeEvent('hashchange'));
+    });
+    expect(ctx.shell.active()).toBeUndefined();
+    const switched = { ...OPEN_PROJECT, projects: [{ id: 'y', name: 'Y' }], active: 'y' };
+    act(() => socket.push({ type: 'workspace', workspace: { ...switched, active: null } }));
+    act(() => socket.push({ type: 'workspace', workspace: switched }));
+    expect(ctx.shell.active()?.key).toBe('composition');
+    expect(ctx.shell.documents().map((d) => d.key)).toEqual(['composition', 'preview']);
+  });
+
   it('a project opened later, from the list, opens the composition then — once per null → id', async () => {
     // Fix round 1 of task 4: with no project on load nothing opens; a
     // click on Projects makes `active` go null → id on a later frame, and

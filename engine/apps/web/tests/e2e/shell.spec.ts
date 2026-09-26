@@ -40,7 +40,7 @@ import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { expect, test, type Page } from '@playwright/test';
 import { IDE_WEB_PORT } from '../../e2e-ports';
-import { PNG_BYTES, projectCopy, startDevHost, type DevHost } from './project-fixture';
+import { PNG_BYTES, gameBooted, projectCopy, startDevHost, type DevHost } from './project-fixture';
 
 /** The IDE app — vite on 5680, proxying `/api`, `/plugin-client` and `/ide` to the host on 5679. */
 const IDE_URL = `http://127.0.0.1:${IDE_WEB_PORT}/`;
@@ -62,7 +62,9 @@ test.beforeEach(async ({ page }) => {
  */
 async function openIde(page: Page, host: DevHost, hash = ''): Promise<void> {
   await page.goto(host.gameUrl);
-  await expect(page.locator('#status')).not.toHaveText('', { timeout: 20_000 });
+  // The page draws no `#status` any more (61da4d91) — `window.__e8` is
+  // where `main.ts` now installs its readiness hook, at the same point.
+  await gameBooted(page);
   await page.goto(`${IDE_URL}${hash}`);
 }
 

@@ -204,6 +204,51 @@ describe('shell', () => {
     ]);
   });
 
+  // --- Task 8b: `background` mounts a contributed document without
+  // navigating to it — the Preview's game has to be running before anyone
+  // opens its tab (see `openContributed`'s own doc in shell.tsx).
+
+  it('background adds a tab after the active one, without activating it or moving the address', () => {
+    const ctx = harness();
+    ctx.slots.register({ name: 'shell.document', key: 'composition' }, Dummy);
+    ctx.slots.register({ name: 'shell.document', key: 'preview' }, Dummy);
+    ctx.shell.openContributed('composition');
+    const hashBefore = location.hash;
+    ctx.shell.openContributed('preview', { background: true });
+    expect(ctx.shell.documents().map((d) => d.key)).toEqual(['composition', 'preview']);
+    expect(ctx.shell.active()?.key).toBe('composition');
+    expect(location.hash).toBe(hashBefore);
+  });
+
+  it('background on a key already open — even the active one — is a no-op', () => {
+    const ctx = harness();
+    ctx.slots.register({ name: 'shell.document', key: 'preview' }, Dummy);
+    ctx.shell.openContributed('preview'); // opens it in front, foreground
+    ctx.shell.openContributed('preview', { background: true }); // already open: nothing moves
+    expect(ctx.shell.documents()).toHaveLength(1);
+    expect(ctx.shell.active()?.key).toBe('preview');
+  });
+
+  it('background called twice adds one tab, not two, and never activates it', () => {
+    const ctx = harness();
+    ctx.slots.register({ name: 'shell.document', key: 'composition' }, Dummy);
+    ctx.slots.register({ name: 'shell.document', key: 'preview' }, Dummy);
+    ctx.shell.openContributed('composition');
+    ctx.shell.openContributed('preview', { background: true });
+    ctx.shell.openContributed('preview', { background: true });
+    expect(ctx.shell.documents().map((d) => d.key)).toEqual(['composition', 'preview']);
+    expect(ctx.shell.active()?.key).toBe('composition');
+  });
+
+  it('background on a key nobody registered reports the same diagnostic the foreground path does', () => {
+    const ctx = harness();
+    ctx.shell.openContributed('ghost', { background: true });
+    expect(ctx.shell.documents()).toEqual([]);
+    expect(ctx.connection.diagnostics.map((d) => d.message)).toEqual([
+      expect.stringContaining('ghost'),
+    ]);
+  });
+
   it('closing a clean tab removes it and activates the neighbour', () => {
     const ctx = harness();
     ctx.shell.open({ key: 'a', title: 'A', component: Dummy, closable: true });
@@ -1211,6 +1256,21 @@ describe('Shell', () => {
     expect(screen.getByTestId('doc-error').textContent).toContain('boom');
 
     await ctx.fiber.dispose();
+  });
+
+  it('a background-opened document is mounted in the DOM, hidden — not just recorded as open', () => {
+    // Task 8b: `background` exists so the component actually MOUNTS — an
+    // entry in `documents()` proves nothing on its own if `Shell` never
+    // draws its pane. Composition stays active; the Preview's pane is in
+    // the DOM but `hidden`, the same as any other inactive tab.
+    const ctx = harness();
+    ctx.slots.register({ name: 'shell.document', key: 'composition' }, Dummy);
+    ctx.slots.register({ name: 'shell.document', key: 'preview' }, Dummy);
+    ctx.shell.openContributed('composition');
+    ctx.shell.openContributed('preview', { background: true });
+    render(<Shell ctx={ctx} />);
+    expect(screen.getByTestId('doc-pane-composition')).toBeVisible();
+    expect(screen.getByTestId('doc-pane-preview')).not.toBeVisible();
   });
 
   it('the panel is visible on every document, not only one', async () => {

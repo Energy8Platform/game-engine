@@ -210,14 +210,21 @@ export function App({ ctx }: { ctx: Context }) {
     // A fresh load names no document. Five regions around an empty editor
     // and a bare sidebar would be an unexplained empty pane, so once a
     // project is open the composition opens — the way the old layout
-    // showed its first screen — with the Explorer beside it. With no
-    // project open there is nothing for a composition to show, so nothing
-    // opens and the empty group points at Projects (A4); the moment a
-    // project becomes active — on the first state, or a later frame after
-    // a click on Projects — the composition opens then, once per
-    // null → id transition. A switch between two projects, a deep link —
-    // resolved, or still pending on a plugin's client half — and a
-    // sidebar already chosen are left alone.
+    // showed its first screen — with the Explorer beside it, and the
+    // Preview opens right behind it, in the BACKGROUND (Task 8b): nobody
+    // opens that tab by default, but its game has to be running anyway —
+    // the IDE's own `ide-bridge` depends on it for the node-type registry,
+    // the Flow palette's node kinds and edges, transitions, and the status
+    // bar's `game`/`session` dots, none of which speak while the Preview
+    // has never been mounted. With no project open there is nothing for a
+    // composition to show, so nothing opens and the empty group points at
+    // Projects (A4); the moment a project becomes active — on the first
+    // state, or a later frame after a click on Projects — both open then,
+    // once per null → id transition. A switch between two projects, a deep
+    // link — resolved, or still pending on a plugin's client half — and a
+    // sidebar already chosen are left alone; `background` on a key already
+    // open is a no-op on its own, so a re-fired default adds no second
+    // Preview tab either.
     // Both defaults depend on a fact the workspace may not hold yet (its
     // boot GET, or the host's first frame): the sidebar decides on the
     // first state; the composition rule listens to every frame.
@@ -237,6 +244,7 @@ export function App({ ctx }: { ctx: Context }) {
         ctx.shell.pending() === undefined
       ) {
         ctx.shell.openContributed('composition', { replace: true });
+        ctx.shell.openContributed('preview', { background: true });
       }
       previousActive = state.active;
       if (!sidebarDecided) {
