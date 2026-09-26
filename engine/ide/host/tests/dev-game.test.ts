@@ -616,7 +616,9 @@ describe('dev-game — the spin route', () => {
     });
 
     const body = await (
-      await fetch(`${preview(ctx!)}/api/session?balance=-5&currency=constructor&social=true&device=tablet`)
+      await fetch(
+        `${preview(ctx!)}/api/session?balance=-5&currency=constructor&lang=&social=true&device=tablet`,
+      )
     ).json();
     expect(body.balance).toBe(1000);
     expect(body.currency.code).toBe('USD');

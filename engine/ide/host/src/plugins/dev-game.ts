@@ -811,11 +811,6 @@ export async function apply(ctx: Context, config: DevGameConfig): Promise<void> 
     const actions = schema?.actions?.length
       ? Object.fromEntries(schema.actions.map((a) => [a.name, a.cost]))
       : undefined;
-    // The same raw request the `/@fs/` guard below reads through
-    // `req._req.url` — this route has no path params of its own, only the
-    // query string, and `req._req` is the one place that's exposed as a
-    // plain field on `@cordisjs/plugin-server`'s wrapper.
-    const params = new URL(req._req.url ?? '', 'http://host').searchParams;
     res.json({
       // `session-host` keys its persisted dev wallet on this plus the
       // seed's own `balance`/`currency` (`sessionStorage['e8:wallet:
@@ -824,7 +819,7 @@ export async function apply(ctx: Context, config: DevGameConfig): Promise<void> 
       gameId: config.gameId,
       balance: 1000,
       currency: { code: 'USD', symbol: '$', decimals: 2, position: 'left' },
-      ...sessionOverrides(params),
+      ...sessionOverrides(req.query),
       betLevels,
       defaultBet: betLevels[0],
       ...(actions ? { actions } : {}),
