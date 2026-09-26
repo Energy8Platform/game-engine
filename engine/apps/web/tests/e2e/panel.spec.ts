@@ -92,9 +92,25 @@ test('status-game follows the game: ready, spinning, ready again, and no game on
   await gameBooted(frame);
   await expect(gameStatus(page)).toHaveText('● ready', { timeout: 30_000 });
 
-  // Not awaited: the item is read WHILE the spin is out.
+  // The game's `POST /api/spin` is held (`tempo.spec.ts`'s case 3b does the
+  // same; `page.route` sees the Preview iframe's requests too), so the
+  // spinning window cannot close under the read: the item flips when the
+  // flow's `spin` node is ENTERED — `ide-bridge` sends `spinning` on its
+  // `out: null` trace entry, before the request answers — and stays there
+  // until the request is let go.
+  let release!: () => void;
+  const held = new Promise<void>((r) => (release = r));
+  let seen!: () => void;
+  const requested = new Promise<void>((r) => (seen = r));
+  await page.route('**/api/spin', async (route) => {
+    seen();
+    await held;
+    await route.continue();
+  });
   const spun = spinOnce(frame);
+  await requested;
   await expect(gameStatus(page)).toHaveText('◌ spinning…');
+  release();
   expect(await spun).toBe('done');
   await expect(gameStatus(page)).toHaveText('● ready');
 

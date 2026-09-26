@@ -150,7 +150,9 @@ async function expectSpinRuns(page: Page, errors: string[]): Promise<void> {
 /** The game is on screen and playable — a canvas, the shell's Spin live (a shell, not busy), no failure text. (The board itself: `expectSpinRuns`.) */
 async function expectPlayable(page: Page): Promise<void> {
   await expect(page.locator('canvas')).toBeVisible();
-  expect(await page.evaluate(() => (window as any).__e8.shell()?.state.busy)).toBe(false);
+  await expect
+    .poll(() => page.evaluate(() => (window as any).__e8.shell()?.state.busy))
+    .toBe(false);
   await expect(page.locator('#mount')).not.toContainText('This game could not start');
 }
 
