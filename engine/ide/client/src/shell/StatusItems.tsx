@@ -178,14 +178,16 @@ export function ThemeStatus({ ctx: _ctx }: { ctx: Context }) {
 /**
  * Right, first: what the running game is doing — the `game-status` frames
  * its `ide-bridge` sends (slice 39), which replaced the project page's own
- * `#status`. `failed` is a button: the reason is in Diagnostics.
+ * `#status`. `failed` is a button: the reason is in Diagnostics. A `ready`
+ * that carries a message says it (`● ready — no flow row`): the game is up,
+ * but something a person would otherwise wonder about is missing.
  */
 export function GameStatus({ ctx }: { ctx: Context }) {
   const { status } = useGameComposition(ctx);
   const state = status?.state ?? 'offline';
   const label =
     state === 'ready'
-      ? '● ready'
+      ? `● ready${status?.message ? ` — ${status.message}` : ''}`
       : state === 'spinning'
         ? '◌ spinning…'
         : state === 'loading'

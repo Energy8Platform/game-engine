@@ -350,6 +350,14 @@ describe('GameStatus', () => {
     expect(container.querySelector('[data-state]')).toHaveAttribute('data-state', 'ready');
   });
 
+  it('a `ready` that carries a message says it — a game with no flow row is not a bare "● ready"', () => {
+    const { ctx, setStatus } = gameStatusHarness();
+    const { container } = render(<GameStatus ctx={ctx} />);
+    act(() => setStatus({ type: 'game-status', state: 'ready', message: 'no flow row' }));
+    expect(container.textContent).toBe('● ready — no flow row');
+    expect(container.querySelector('[data-state]')).toHaveAttribute('data-state', 'ready');
+  });
+
   it('shows "◌ spinning…" mid-spin', () => {
     const { ctx, setStatus } = gameStatusHarness();
     const { container } = render(<GameStatus ctx={ctx} />);
