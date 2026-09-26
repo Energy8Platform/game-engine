@@ -88,6 +88,11 @@ describe('toShellConfig — the session feeds the shell, the row config dresses 
     expect(toShellConfig(Config({ features: { hotkeys: true } }), INIT).features.hotkeys).toBe(true);
   });
 
+  it('maps session.social to the shell isSocial', () => {
+    expect(toShellConfig(Config({}), { ...INIT, social: true }).isSocial).toBe(true);
+    expect(toShellConfig(Config({}), INIT).isSocial).toBeUndefined();
+  });
+
   it('gameInfo, menu, theme and version pass through; i18n is not a ShellConfig field; an unknown key survives and reaches nothing', () => {
     const cfg = Config({
       version: '2.1.0',

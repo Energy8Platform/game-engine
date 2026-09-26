@@ -15,6 +15,11 @@
  * `theme:` is `null` after validation, and the shell's `resolveTheme(theme
  * = {})` only defaults an `undefined` — a `null` reached `null.scheme` and
  * took the whole row down with it.
+ *
+ * `isSocial` (slice 39) comes straight from `init.social` — the Preview
+ * toolbar's own opinion, forwarded by `session-host` and never overridden by
+ * this row's own config; a provider with no opinion (`social` absent) leaves
+ * it `undefined`, which is `ShellController`'s own "off" default.
  */
 import type { SessionInit } from '@energy8engine/contracts';
 import type { PixiShellConfig } from '@energy8platform/shell/pixi';
@@ -34,6 +39,7 @@ export function toShellConfig(config: Config, init: SessionInit): Omit<PixiShell
       maxDecimals: init.currency.decimals,
     },
     language: config.language || init.language || 'en',
+    isSocial: init.social ?? undefined,
     version: config.version,
     features: {
       // The schema bounds it to 0..3 (`natural().max(3)`); schemastery

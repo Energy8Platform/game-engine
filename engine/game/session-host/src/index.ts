@@ -23,14 +23,24 @@
  * the HOST to track one — would mean a wallet that outlives the tab it
  * belongs to, survives a restart of `e8-server`, and needs its own reset
  * story. None of that is wanted for a DEV wallet: this one is exactly as
- * durable as the TAB — `sessionStorage['e8:wallet:<gameId>']`, written
- * after every play the host ANSWERED (see `play`: a fetch that throws
- * charges the tab, not the store) and read back on the next load, so a reload keeps the
- * balance and a new tab starts over at `init.balance` (1000, or whatever
- * `/api/session` answered). The game id comes with that answer; without
- * one (a host that predates it, the fallback init) or without
- * `sessionStorage` (a node test) nothing persists. A real ledger is
- * `session-sdk`'s platform.
+ * durable as the TAB — `sessionStorage['e8:wallet:<gameId>:<balance>:
+ * <currency code>']`, written after every play the host ANSWERED (see
+ * `play`: a fetch that throws charges the tab, not the store) and read back
+ * on the next load, so a reload keeps the balance and a new tab starts over
+ * at `init.balance` (1000, or whatever `/api/session` answered). The game
+ * id comes with that answer; without one (a host that predates it, the
+ * fallback init) or without `sessionStorage` (a node test) nothing
+ * persists. A real ledger is `session-sdk`'s platform.
+ *
+ * **Why the key also carries `balance`/`currency` (slice 39), not `gameId`
+ * alone.** The Preview toolbar's own address can seed a DIFFERENT wallet on
+ * the very next load — a different `balance=`, a different `currency=` —
+ * and that is a fresh wallet to start, not the old tab's leftover balance
+ * read back under a seed that no longer describes it. Keying on `gameId`
+ * alone could not tell those two loads apart; keying on the triple means a
+ * changed seed is itself what selects a fresh key, while the SAME toolbar
+ * (a plain reload) still finds its own key and keeps the balance it left
+ * off at.
  *
  * What an opening play charges is `betLevel × init.actions[req.action]`, not
  * `betLevel` alone — an unpriced action (no `init.actions`, or one that
@@ -74,6 +84,23 @@ declare module 'cordis' {
 export interface SessionHostConfig {
   /** Tests only; the page's `fetch` otherwise — same device as `flow1`'s `FlowConfig.fetchFn`. */
   fetchFn?: typeof fetch;
+  /** Tests only; the page's own `location.search` otherwise. */
+  search?: string;
+}
+
+/** The Preview toolbar's parameters (slice 39), in this order — the only part of the page's address the dev host is told. */
+const FORWARDED = ['lang', 'currency', 'balance', 'social', 'device'] as const;
+
+/** `?lang=…&currency=…` from a page's `location.search`, or `''` when it carries none of them. */
+export function sessionQuery(search: string): string {
+  const from = new URLSearchParams(search);
+  const to = new URLSearchParams();
+  for (const key of FORWARDED) {
+    const value = from.get(key);
+    if (value !== null) to.set(key, value);
+  }
+  const query = to.toString();
+  return query ? `?${query}` : '';
 }
 
 /**
@@ -93,11 +120,16 @@ const FALLBACK_INIT: SessionInit = {
  * The persisted wallet, or `undefined` when there is nowhere to keep one.
  * `typeof sessionStorage` is inside the try on purpose: in a browser the
  * property is a getter that throws when storage is denied to the frame.
+ *
+ * Keyed on `init.balance`/`init.currency.code` too (see the module doc's
+ * "why the key also carries balance/currency"): a new seed from the toolbar
+ * starts a fresh wallet under a fresh key; the same toolbar (same seed on
+ * reload) keeps finding the old one.
  */
-function walletStore(gameId: string | undefined) {
+function walletStore(gameId: string | undefined, init: SessionInit) {
   try {
     if (!gameId || typeof sessionStorage === 'undefined') return undefined;
-    const key = `e8:wallet:${gameId}`;
+    const key = `e8:wallet:${gameId}:${init.balance}:${init.currency.code}`;
     return {
       read(): number | undefined {
         const stored = Number(sessionStorage.getItem(key) ?? NaN);
@@ -122,8 +154,9 @@ export async function apply(ctx: Context, config: SessionHostConfig = {}): Promi
 
   let init: SessionInit;
   let gameId: string | undefined;
+  const search = config.search ?? (globalThis as { location?: { search?: string } }).location?.search ?? '';
   try {
-    const res = await fetchFn('/api/session');
+    const res = await fetchFn(`/api/session${sessionQuery(search)}`);
     if (!res.ok) throw new Error(`the host answered ${res.status}`);
     // `gameId` is the wallet's key, not part of `init` — the flow's
     // `$session` root is the seam's shape and nothing more.
@@ -145,7 +178,7 @@ export async function apply(ctx: Context, config: SessionHostConfig = {}): Promi
   // The dev wallet (see the module doc). Charged/credited by `play` below;
   // read fresh by the live root's getter on every `$session.balance`. A
   // stored balance (this tab's earlier load) wins over the seed.
-  const store = walletStore(gameId);
+  const store = walletStore(gameId, init);
   let balance = store?.read() ?? init.balance;
 
   async function play(req: PlayRequest): Promise<{ result?: SpinResult; diagnostics: Diagnostic[] }> {

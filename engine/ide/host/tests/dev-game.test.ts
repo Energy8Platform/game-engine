@@ -18,6 +18,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { ServerMessage, SpinResult } from '@energy8engine/contracts';
 import { createIdeHost, type IdeHost } from '../src/index';
 import * as devGame from '../src/plugins/dev-game';
+import { sessionOverrides } from '../src/plugins/dev-game';
 import * as files from '../src/plugins/files';
 import * as rpc from '../src/plugins/rpc';
 
@@ -580,6 +581,50 @@ describe('dev-game — the spin route', () => {
     expect(await res.json()).toMatchObject({ gameId: 'first-slot', betLevels: [2], defaultBet: 2 });
   });
 
+  it('/api/session applies the preview toolbar: balance, currency, lang, social, device', async () => {
+    await bare();
+    await ctx!.plugin(devGame, {
+      root: WEB_ROOT,
+      gamesDir: GAME,
+      gameId: 'first-slot',
+      betLevel: 2,
+      port: 0,
+      previewPort: 0,
+    });
+
+    const body = await (
+      await fetch(`${preview(ctx!)}/api/session?balance=250&currency=EUR&lang=de&social=1&device=mobile`)
+    ).json();
+    expect(body).toMatchObject({
+      balance: 250,
+      currency: { code: 'EUR', symbol: '€', decimals: 2, position: 'left' },
+      language: 'de',
+      social: true,
+      device: 'mobile',
+    });
+  });
+
+  it('/api/session ignores an invalid value field by field', async () => {
+    await bare();
+    await ctx!.plugin(devGame, {
+      root: WEB_ROOT,
+      gamesDir: GAME,
+      gameId: 'first-slot',
+      betLevel: 2,
+      port: 0,
+      previewPort: 0,
+    });
+
+    const body = await (
+      await fetch(`${preview(ctx!)}/api/session?balance=-5&currency=constructor&social=true&device=tablet`)
+    ).json();
+    expect(body.balance).toBe(1000);
+    expect(body.currency.code).toBe('USD');
+    expect(body).not.toHaveProperty('social');
+    expect(body).not.toHaveProperty('device');
+    expect(body).not.toHaveProperty('language');
+  });
+
   it("forwards a POSTed action/betLevel to session.play, over the plugin's own config defaults — a buy mode or bet ladder the flow names", async () => {
     await bare();
     await ctx!.plugin(devGame, {
@@ -748,6 +793,36 @@ describe('dev-game — the spin route', () => {
     });
 
     socket.close();
+  });
+});
+
+/**
+ * `sessionOverrides` on its own, pure — no server, no fetch, just the
+ * field-by-field validation the route applies over each query param. One
+ * bad field must never take down the whole request; every case below pins
+ * that the OTHER fields still apply.
+ */
+describe('sessionOverrides — one bad field is dropped, never the request', () => {
+  const params = (q: string) => new URL(`http://host/api/session${q}`).searchParams;
+
+  it('balance: a non-numeric string is dropped', () => {
+    expect(sessionOverrides(params('?balance=abc'))).not.toHaveProperty('balance');
+  });
+
+  it('balance: an empty value is dropped', () => {
+    expect(sessionOverrides(params('?balance='))).not.toHaveProperty('balance');
+  });
+
+  it('balance: 0 is a valid balance, not "falsy and dropped"', () => {
+    expect(sessionOverrides(params('?balance=0')).balance).toBe(0);
+  });
+
+  it('balance: a fractional value is kept as-is', () => {
+    expect(sessionOverrides(params('?balance=12.5')).balance).toBe(12.5);
+  });
+
+  it("currency: a name that is not one of DEV_CURRENCIES' own keys is dropped — Object.hasOwn, not a bare index, so `toString`/`constructor` cannot match an inherited property", () => {
+    expect(sessionOverrides(params('?currency=toString'))).not.toHaveProperty('currency');
   });
 });
 

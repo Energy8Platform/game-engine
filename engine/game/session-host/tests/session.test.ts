@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { Context } from 'cordis';
 import { diagnostic, type SessionInit, type SpinResult } from '@energy8engine/contracts';
 import * as sessionHost from '../src/index';
+import { sessionQuery } from '../src/index';
 
 const INIT: SessionInit = {
   balance: 1000,
@@ -233,10 +234,42 @@ describe('session-host', () => {
   });
 });
 
+describe('session-host — the page query reaches /api/session', () => {
+  it('forwards only lang, currency, balance, social, device, in that order', () => {
+    expect(sessionQuery('?game=x&device=mobile&balance=50&lang=de&currency=EUR&social=1&junk=1')).toBe(
+      '?lang=de&currency=EUR&balance=50&social=1&device=mobile',
+    );
+  });
+
+  it('is empty when the page has none of them', () => {
+    expect(sessionQuery('')).toBe('');
+    expect(sessionQuery('?game=preview')).toBe('');
+  });
+
+  it('fetches /api/session with the forwarded query', async () => {
+    const urls: string[] = [];
+    const recording = (fetchFn: typeof fetch): typeof fetch =>
+      (async (url: string, init?: RequestInit) => {
+        urls.push(url);
+        return fetchFn(url, init);
+      }) as unknown as typeof fetch;
+
+    const ctx = new Context();
+    await ctx.plugin(sessionHost, {
+      fetchFn: recording(fakeFetch({})),
+      search: '?currency=JPY&balance=7',
+    });
+    expect(urls[0]).toBe('/api/session?currency=JPY&balance=7');
+    await ctx.fiber.dispose();
+  });
+});
+
 /**
- * The persisted wallet — `sessionStorage['e8:wallet:<gameId>']`, keyed by
- * the `gameId` `GET /api/session` answers. vitest's node environment has
- * no `sessionStorage`, which is the "nothing persists" case the suite
+ * The persisted wallet — `sessionStorage['e8:wallet:<gameId>:<balance>:
+ * <currency code>']`, keyed by the `gameId` `GET /api/session` answers plus
+ * the seed it answered with (slice 39 — a changed seed starts a fresh
+ * wallet; see `src/index.ts`'s `walletStore` doc). vitest's node environment
+ * has no `sessionStorage`, which is the "nothing persists" case the suite
  * above runs in; these install a Map-backed fake and remove it after.
  */
 describe('session-host — the wallet survives a reload', () => {
@@ -257,13 +290,13 @@ describe('session-host — the wallet survives a reload', () => {
     const ctx = await boot(fakeFetch({ session: withGameId }));
     expect(ctx.get('session')!.init).toEqual(INIT);
     await ctx.get('session')!.play({ action: 'spin', betLevel: 1 });
-    expect(storage.get('e8:wallet:first-slot')).toBe('1001');
+    expect(storage.get(`e8:wallet:first-slot:${INIT.balance}:${INIT.currency.code}`)).toBe('1001');
     await ctx.fiber.dispose();
   });
 
   it('a stored balance wins over the seed on the next load', async () => {
     g.sessionStorage = fake;
-    storage.set('e8:wallet:first-slot', '250');
+    storage.set(`e8:wallet:first-slot:${INIT.balance}:${INIT.currency.code}`, '250');
     const ctx = await boot(fakeFetch({ session: withGameId }));
     const { result } = await ctx.get('session')!.play({ action: 'spin', betLevel: 1 });
     expect(result!.balance).toBe(251);
@@ -272,7 +305,7 @@ describe('session-host — the wallet survives a reload', () => {
 
   it('a stored value that is not a number, or another game’s, is ignored', async () => {
     g.sessionStorage = fake;
-    storage.set('e8:wallet:first-slot', 'lots');
+    storage.set(`e8:wallet:first-slot:${INIT.balance}:${INIT.currency.code}`, 'lots');
     storage.set('e8:wallet:other', '5');
     const ctx = await boot(fakeFetch({ session: withGameId }));
     const { result } = await ctx.get('session')!.play({ action: 'spin', betLevel: 1 });
@@ -282,7 +315,8 @@ describe('session-host — the wallet survives a reload', () => {
 
   it('a thrown fetch charges the tab but not the store; a 502 (an answer) charges both', async () => {
     g.sessionStorage = fake;
-    storage.set('e8:wallet:first-slot', '1000');
+    const key = `e8:wallet:first-slot:${INIT.balance}:${INIT.currency.code}`;
+    storage.set(key, '1000');
     const down = await boot(
       fakeFetch({
         session: withGameId,
@@ -297,15 +331,34 @@ describe('session-host — the wallet survives a reload', () => {
     // Charged for the tab's life (slice 26) — but nothing answered, so a
     // reload against the same dead server starts from the same 1000.
     expect(provideRoot.mock.calls[0][1]()).toMatchObject({ balance: 999 });
-    expect(storage.get('e8:wallet:first-slot')).toBe('1000');
+    expect(storage.get(key)).toBe('1000');
     await down.fiber.dispose();
 
     const answered = await boot(
       fakeFetch({ session: withGameId, spin: () => fail(502, { diagnostics: [] }) }),
     );
     await answered.get('session')!.play({ action: 'spin', betLevel: 1 });
-    expect(storage.get('e8:wallet:first-slot')).toBe('999');
+    expect(storage.get(key)).toBe('999');
     await answered.fiber.dispose();
+  });
+
+  it('a new seed from the toolbar (a different balance) starts a fresh wallet — the old one is under a different key', async () => {
+    g.sessionStorage = fake;
+    const withBalance = (balance: number) => () => ok({ ...INIT, balance, gameId: 'first-slot' });
+
+    const first = await boot(fakeFetch({ session: withBalance(1000) }));
+    const { result: r1 } = await first.get('session')!.play({ action: 'spin', betLevel: 1 });
+    expect(r1!.balance).toBe(1001);
+    await first.fiber.dispose();
+
+    // Same sessionStorage fake, but /api/session now seeds a DIFFERENT
+    // balance (the toolbar's own `balance=50`, say) — the second boot must
+    // start at 50, not read back the first boot's stored 1001 under a key
+    // that no longer matches the new seed.
+    const second = await boot(fakeFetch({ session: withBalance(50) }));
+    const { result: r2 } = await second.get('session')!.play({ action: 'spin', betLevel: 1 });
+    expect(r2!.balance).toBe(51);
+    await second.fiber.dispose();
   });
 
   it('no gameId from the host (or no sessionStorage at all): nothing is stored', async () => {

@@ -107,7 +107,7 @@ import { posix, resolve, sep } from 'node:path';
 import type { Context } from 'cordis';
 import Server from '@cordisjs/plugin-server';
 import * as session from '@energy8engine/session-dev';
-import { diagnostic, type SpinResult } from '@energy8engine/contracts';
+import { DEV_CURRENCIES, diagnostic, type SessionInit, type SpinResult } from '@energy8engine/contracts';
 import { createServer as createViteServer, type ViteDevServer } from 'vite';
 import { installErrorBoundary } from '../error-boundary';
 import { viteRows } from '../vite-rows';
@@ -289,6 +289,31 @@ function removeStyle(id) {
 
 export { ErrorOverlay, createHotContext, injectQuery, removeStyle, updateStyle };
 `;
+
+/**
+ * The Preview toolbar's parameters (slice 39) over the dev wallet's
+ * defaults — each one a string from the page's address, so each is checked
+ * on its own and an invalid one is dropped, never the request. `currency`
+ * is looked up with `Object.hasOwn`, not a bare index: a bare
+ * `DEV_CURRENCIES[currency]` would let `currency=constructor` (or
+ * `toString`, `hasOwnProperty`, …) read an inherited `Object.prototype`
+ * member instead of missing cleanly.
+ */
+export function sessionOverrides(params: URLSearchParams): Partial<SessionInit> {
+  const out: Partial<SessionInit> = {};
+  const balance = params.get('balance');
+  if (balance !== null && balance.trim() !== '') {
+    const n = Number(balance);
+    if (Number.isFinite(n) && n >= 0) out.balance = n;
+  }
+  const currency = params.get('currency');
+  if (currency !== null && Object.hasOwn(DEV_CURRENCIES, currency)) out.currency = DEV_CURRENCIES[currency];
+  const lang = params.get('lang');
+  if (lang) out.language = lang;
+  if (params.get('social') === '1') out.social = true;
+  if (params.get('device') === 'mobile') out.device = 'mobile';
+  return out;
+}
 
 export async function apply(ctx: Context, config: DevGameConfig): Promise<void> {
   // The game's own server (spec §6, see the module doc). `isolate('server')`
@@ -756,14 +781,16 @@ export async function apply(ctx: Context, config: DevGameConfig): Promise<void> 
    * already read into `config.betLevel` by `project-scope.ts`'s
    * `readGameConfig`; NOT the compiled `.spin`'s `bet_levels`, a different
    * (server-side) declaration of the same idea. `balance`/`currency` are
-   * fixed: nothing about this dev host has an opinion on either yet.
+   * this dev host's own defaults — the Preview toolbar's own parameters
+   * (slice 39), read off this request's own query string, apply OVER them
+   * below (`sessionOverrides`), field by field.
    *
    * `actions` (name → cost, `session-host`'s per-action charge) comes from
    * `ctx.spinSchema`, read leniently (`reflect.get(…, false)`) since this
    * plugin does not inject it — a composition with no `schema` row, or one
    * whose `.spin` failed to parse, omits the key rather than send `{}`.
    */
-  preview.get('/api/session', async (_req, res) => {
+  preview.get('/api/session', async (req, res) => {
     // One source for both fields: `defaultBet` is `betLevels[0]`, never a
     // second read of `config.betLevel` that could name a bet the ladder
     // itself doesn't have — see `project-scope.ts`'s `readGameConfig`,
@@ -777,12 +804,20 @@ export async function apply(ctx: Context, config: DevGameConfig): Promise<void> 
     const actions = schema?.actions?.length
       ? Object.fromEntries(schema.actions.map((a) => [a.name, a.cost]))
       : undefined;
+    // The same raw request the `/@fs/` guard below reads through
+    // `req._req.url` — this route has no path params of its own, only the
+    // query string, and `req._req` is the one place that's exposed as a
+    // plain field on `@cordisjs/plugin-server`'s wrapper.
+    const params = new URL(req._req.url ?? '', 'http://host').searchParams;
     res.json({
-      // `session-host` keys its persisted dev wallet on this
-      // (`sessionStorage['e8:wallet:<gameId>']`).
+      // `session-host` keys its persisted dev wallet on this plus the
+      // seed's own `balance`/`currency` (`sessionStorage['e8:wallet:
+      // <gameId>:<balance>:<currency code>']`) — see that row's own doc
+      // for why a changed seed is what starts a fresh wallet.
       gameId: config.gameId,
       balance: 1000,
       currency: { code: 'USD', symbol: '$', decimals: 2, position: 'left' },
+      ...sessionOverrides(params),
       betLevels,
       defaultBet: betLevels[0],
       ...(actions ? { actions } : {}),
