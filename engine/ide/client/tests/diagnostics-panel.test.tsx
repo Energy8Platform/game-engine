@@ -82,16 +82,20 @@ describe('DiagnosticsPanel', () => {
     expect(screen.getByTestId('diagnostics-panel')).toHaveTextContent('3');
   });
 
-  it('the heading reads "Diagnostics", matching the tab that opens it', () => {
-    // Ruling 8/9 once pinned this heading to Russian as a narrow exception
-    // while the panel's own rows stayed English; D4 retired that split —
-    // the interface is English throughout (dictionary in the design doc's
-    // §3), so this heading now simply matches the tab, for the same reason
-    // `App.test.tsx` pins the composition tab: a screen's own title reads
-    // in the language of the screen. Addressed by accessible name,
-    // matching that file's precedent.
-    render(<DiagnosticsPanel project={[]} game={[]} editor={[]} />);
-    expect(screen.getByRole('heading', { name: 'Diagnostics' })).toBeTruthy();
+  it('renders no heading and no count badge of its own — Task 4 moved both to the panel tab strip', () => {
+    // The tab strip (`Shell.tsx`'s `.e8-panel-tab`) now carries the title
+    // and, via `ctx.shell.setPanelBadge`, the count — this panel used to
+    // repeat both in its own `.e8-diagnostics-panel-header`, one place to
+    // look becoming two the moment the tab existed alongside it.
+    render(
+      <DiagnosticsPanel
+        project={[]}
+        game={[group(undefined, [d('error', 'reels', 'runtime', 'reels blew up')])]}
+        editor={[]}
+      />,
+    );
+    expect(screen.queryByRole('heading', { name: 'Diagnostics' })).toBeNull();
+    expect(document.querySelector('.e8-diagnostics-panel-header')).toBeNull();
   });
 });
 

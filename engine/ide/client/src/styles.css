@@ -724,10 +724,9 @@ label {
 }
 
 /* The panel row is `auto` in `.e8-shell`'s own row track, so a collapsed
-   panel (header only, no `.e8-panel-entry` children — see Shell.tsx)
-   shrinks the row with it; `:has()` is what lets a purely-CSS rule tell
-   the two apart without Shell.tsx growing a `data-collapsed` attribute
-   this task has no reason to add. */
+   panel (the tab strip alone, `data-collapsed` set — see Shell.tsx) shrinks
+   the row with it; see the `:not([data-collapsed])` rule below for why a
+   plain `:has(.e8-panel-entry)` stopped telling the two apart. */
 .e8-panel {
   grid-area: panel;
   position: relative;
@@ -794,41 +793,50 @@ label {
 .e8-resize:active::after {
   opacity: 0;
 }
-.e8-panel:has(.e8-panel-entry) {
+/* `data-collapsed` (Shell.tsx), not `:has(.e8-panel-entry)`: every entry
+   stays in the DOM now, hidden rather than removed (Task 4 — a plugin's
+   own state must survive a collapse), so `:has()` could no longer tell a
+   collapsed panel from an open one. */
+.e8-panel:not([data-collapsed]) {
   height: var(--e8-panel-h);
 }
-/* The shell's own strip on the panel's top row: the toggle, and — only
-   while collapsed, when no entry is drawn — the entries' titles. Absolute,
-   so an entry's header row (`.e8-diagnostics-panel-header`) sits on the
-   same 28px line with the toggle at its right. */
+/* The tab strip (Task 4): one `.e8-panel-tab` per `shell.panel` entry, in
+   flow above the entries — no `.e8-diagnostics-panel-header` overlaid
+   underneath any more, so there is nothing left to float over. */
 .e8-panel-header {
-  position: absolute;
-  top: 0;
-  right: 0;
-  left: 0;
-  z-index: 1;
   display: flex;
   align-items: center;
-  gap: 8px;
   height: var(--e8-header-h);
-  padding: 0 8px 0 12px;
-  /* Only the toggle takes the pointer; the row underneath stays reachable. */
-  pointer-events: none;
+  padding: 0 4px 0 8px;
+  border-bottom: 1px solid var(--e8-border);
 }
-.e8-panel-header button {
-  margin-left: auto;
-  pointer-events: auto;
-}
-.e8-panel-title {
-  color: var(--e8-fg);
+.e8-panel-tab {
+  height: 100%;
+  padding: 0 10px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border: 0;
+  border-bottom: 1px solid transparent;
+  border-radius: 0;
+  background: transparent;
+  color: var(--e8-fg-muted);
   font-size: var(--e8-size-label);
-  font-weight: 600;
+  font-weight: 500;
 }
-.e8-panel-header button {
+.e8-panel-tab:hover {
+  color: var(--e8-fg);
+}
+.e8-panel-tab[aria-selected='true'] {
+  color: var(--e8-fg);
+  border-bottom-color: var(--e8-accent);
+}
+.e8-panel-header [data-testid='panel-toggle'] {
   width: 20px;
   height: 20px;
   padding: 0;
   border: 0;
+  margin-left: auto;
   background: transparent;
   color: var(--e8-fg-muted);
 }
@@ -873,25 +881,13 @@ label {
   font-size: var(--e8-size-label);
 }
 
-/* Diagnostics, inside the panel: a 28px header row (title and count), then
-   one line per row; severity is the only colour. No page geometry here —
-   this used to be a band on a screen, with a 1136px centred column that
-   made no sense inside a 200px panel. */
+/* Diagnostics, inside the panel: one line per row; severity is the only
+   colour. No heading and no count of its own (Task 4 moved both to the
+   panel tab strip) and no page geometry either — this used to be a band
+   on a screen, with a 1136px centred column that made no sense inside a
+   200px panel. */
 .e8-diagnostics-panel {
   color: var(--e8-fg-muted);
-}
-.e8-diagnostics-panel-header {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  height: var(--e8-header-h);
-  padding: 0 12px;
-}
-.e8-diagnostics-panel h2 {
-  margin: 0;
-  color: var(--e8-fg);
-  font-size: var(--e8-size-label);
-  font-weight: 600;
 }
 .e8-diagnostics-panel .e8-empty,
 .e8-diagnostics-dropped {

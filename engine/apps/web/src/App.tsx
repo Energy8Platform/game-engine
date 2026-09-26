@@ -33,11 +33,25 @@ function CompositionDocument({ ctx }: { ctx: Context }) {
  * registration would go stale the moment any of the three updates. This
  * was `Layout.tsx`'s `DiagnosticsPanelEntry`; as a `shell.panel` entry it
  * sits under whichever document is active rather than pinned to one.
+ *
+ * Task 4 moved the panel's own heading and count out to the tab strip
+ * (`Shell.tsx`'s `.e8-panel-tab`): the count is `ctx.shell.setPanelBadge`,
+ * pushed here rather than read by the strip itself, because only this
+ * component sees the three live sources — the strip only ever sees a
+ * plugin's chosen key and whatever it last pushed. Errors and warnings
+ * count; `info` does not — the same severities a person would call
+ * "something to fix" versus "worth knowing".
  */
 function DiagnosticsDocument({ ctx }: { ctx: Context }) {
   const { diagnostics: project } = useGameComposition(ctx);
   const { groups: game, dropped } = useGameDiagnostics(ctx);
   const editor = useEditorDiagnostics(ctx);
+  const count = [
+    ...project,
+    ...(game ?? []).flatMap((group) => group.diagnostics.map((entry) => entry.diagnostic)),
+    ...editor,
+  ].filter((d) => d.severity === 'error' || d.severity === 'warning').length;
+  useEffect(() => ctx.shell.setPanelBadge('diagnostics', count), [ctx, count]);
   return (
     <DiagnosticsPanel project={project} game={game} droppedFromGame={dropped} editor={editor} />
   );
@@ -146,7 +160,7 @@ export function App({ ctx }: { ctx: Context }) {
 
   useEffect(() => {
     return ctx.slots.register(
-      { name: 'shell.panel', key: 'diagnostics', title: 'Diagnostics' },
+      { name: 'shell.panel', key: 'diagnostics', title: 'Diagnostics', order: 0 },
       DiagnosticsDocument,
     );
     // eslint-disable-next-line react-hooks/exhaustive-deps

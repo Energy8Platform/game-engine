@@ -32,6 +32,7 @@ export interface DocumentMeta {
 export interface PanelMeta {
   key: string;
   title: string;
+  order?: number;
 }
 export interface StatusMeta {
   key: string;
@@ -111,6 +112,37 @@ export interface ShellService {
   panelCollapsed(): boolean;
   togglePanel(): void;
 
+  /**
+   * The `shell.panel` key whose tab is selected — the entries a plugin
+   * contributes are TABS now (Task 4), not one stacked column, so exactly
+   * one is showing at a time. `undefined` only when nothing is registered
+   * at all; the moment one entry exists, `panel()` falls back to it
+   * (`byOrder`'s first) rather than leaving every tab unselected.
+   */
+  panel(): string | undefined;
+  /**
+   * Selects a `shell.panel` tab by key and expands the panel if it was
+   * collapsed — the one call a status-bar item or any other plugin needs
+   * to jump a person to a specific tab (`ctx.shell.showPanel('diagnostics')`),
+   * without importing React: a project plugin's client half is plain JS,
+   * `React` reached only off `globalThis.__E8_IDE__` for the ones that
+   * draw their own component, so the panel's own API has to work without
+   * it too. Persisted the same way a click on the tab itself is.
+   */
+  showPanel(key: string): void;
+  /**
+   * Sets (or clears) the small count a panel tab shows beside its title —
+   * `ctx.shell.setPanelBadge('diagnostics', errors + warnings)`. Imperative
+   * for the same reason `showPanel` is: nothing here is a React component,
+   * so there is no prop to pass it through. `0` clears the badge rather
+   * than drawing an empty pill — a tab reading "Diagnostics 0" is not
+   * informative, it is a row that used to say `nothing to report` doing so
+   * twice.
+   */
+  setPanelBadge(key: string, value: number | string | undefined): void;
+  /** The badge currently set for `key`, or `undefined` — nothing to show. */
+  panelBadge(key: string): number | string | undefined;
+
   /** The `shell.sideRight` key currently shown, or `undefined` — collapsed. */
   sideRight(): string | undefined;
   /** Shows the right sidebar's `shell.sideRight` contribution registered under `key`. */
@@ -159,6 +191,45 @@ function docKeyFromHash(): string {
   return hash.startsWith(HASH_PREFIX) ? hash.slice(HASH_PREFIX.length) : '';
 }
 
+/** `localStorage` key for the panel's selected tab (Task 4). */
+const PANEL_TAB_KEY = 'e8.panel-tab';
+
+/**
+ * Failures are data: a private window or storage switched off throws on
+ * both reads and writes. A read failure means nothing was ever stored, so
+ * the panel falls back to its first tab the same as a fresh install; a
+ * write failure means the choice holds for this tab only and does not
+ * survive a reload. Same rule `Shell.tsx`'s own `readSize`/`writeSize`
+ * already apply to the sizes it drags.
+ */
+function readStored(key: string): string | undefined {
+  try {
+    return localStorage.getItem(key) ?? undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function writeStored(key: string, value: string) {
+  try {
+    localStorage.setItem(key, value);
+  } catch {
+    // See `readStored`.
+  }
+}
+
+/**
+ * Registration order is what `ctx.slots.list()` already returns; `order`
+ * breaks ties on top of it. `Array.prototype.sort` is stable, so entries
+ * that never set `order` keep the registration order they came in. Shared
+ * by every slot that carries an `order` (activity, status, and — Task 4 —
+ * panel); moved here from `Shell.tsx` so `panel()` below can sort the same
+ * way the strip draws.
+ */
+export function byOrder<T extends { order?: number }>(entries: readonly T[]): T[] {
+  return [...entries].sort((a, b) => (a.order ?? Infinity) - (b.order ?? Infinity));
+}
+
 export function apply(ctx: Context) {
   // Insertion-ordered, the same guarantee `documents()` promises: a `Map`
   // keeps that natively, so nothing here needs the registry package's own
@@ -168,6 +239,11 @@ export function apply(ctx: Context) {
   let sidebarKey: string | undefined;
   let sideRightKey: string | undefined;
   let panelCollapsed = false;
+  // The selected `shell.panel` tab, read once at apply time — a fresh
+  // load's `localStorage`, or `undefined` on a private window/first run,
+  // in which case `panel()` falls back to the first entry itself.
+  let panelKey: string | undefined = readStored(PANEL_TAB_KEY);
+  const panelBadges = new Map<string, number | string>();
   let ready = false;
   let pending: string | undefined;
   // The last key the address named that was an open document — where a
@@ -495,6 +571,30 @@ export function apply(ctx: Context) {
       notify();
     },
 
+    panel() {
+      const entries = byOrder(ctx.slots.list<SlotMeta & PanelMeta>(SLOT_NAMES.panel));
+      return entries.some((e) => e.key === panelKey) ? panelKey : entries[0]?.key;
+    },
+
+    showPanel(key) {
+      panelKey = key;
+      panelCollapsed = false;
+      writeStored(PANEL_TAB_KEY, key);
+      notify();
+    },
+
+    setPanelBadge(key, value) {
+      const next = value === 0 ? undefined : value;
+      if (panelBadges.get(key) === next) return;
+      if (next === undefined) panelBadges.delete(key);
+      else panelBadges.set(key, next);
+      notify();
+    },
+
+    panelBadge(key) {
+      return panelBadges.get(key);
+    },
+
     sideRight() {
       return sideRightKey;
     },
@@ -558,6 +658,8 @@ export function useShell(ctx: Context): {
   pending: string | undefined;
   sidebar: string | undefined;
   panelCollapsed: boolean;
+  /** The selected `shell.panel` tab — see `ShellService.panel`'s own doc. */
+  panel: string | undefined;
   sideRight: string | undefined;
 } {
   const read = () => ({
@@ -566,12 +668,25 @@ export function useShell(ctx: Context): {
     pending: ctx.shell.pending(),
     sidebar: ctx.shell.sidebar(),
     panelCollapsed: ctx.shell.panelCollapsed(),
+    panel: ctx.shell.panel(),
     sideRight: ctx.shell.sideRight(),
   });
   const [state, setState] = useState(read);
   useEffect(() => {
     setState(read());
-    return ctx.shell.subscribe(() => setState(read()));
+    const refresh = () => setState(read());
+    // Two sources, not one: `panel()` (like `documents()`) reads
+    // `ctx.slots` as well as `ctx.shell`'s own state, so a `shell.panel`
+    // entry registering or withdrawing — a plugin's client half landing,
+    // Task 4's own reason for this second subscription — must refresh this
+    // hook too, not only the `ctx.shell.subscribe` notifications `Shell.tsx`
+    // already relied on.
+    const offShell = ctx.shell.subscribe(refresh);
+    const offSlots = ctx.slots.subscribe(refresh);
+    return () => {
+      offShell();
+      offSlots();
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [ctx]);
   return state;

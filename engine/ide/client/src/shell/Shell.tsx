@@ -5,6 +5,7 @@ import { diagnostic } from '@energy8engine/contracts';
 import type { ConnectionService } from '../plugins/connection';
 import type { SlotMeta } from '../plugins/slots';
 import {
+  byOrder,
   useShell,
   type ActivityMeta,
   type SidebarMeta,
@@ -20,11 +21,6 @@ function errorMessage(error: unknown): string {
 
 /** The two things an activity button can open — anything else is a contribution the shell cannot draw. */
 const ACTIVITY_OPENS: readonly string[] = ['sidebar', 'document'];
-
-/** Registration order is what `ctx.slots.list()` already returns; `order` breaks ties on top of it. `Array.prototype.sort` is stable, so entries that never set `order` keep the registration order they came in. */
-function byOrder<T extends { order?: number }>(entries: readonly T[]): T[] {
-  return [...entries].sort((a, b) => (a.order ?? Infinity) - (b.order ?? Infinity));
-}
 
 /**
  * Isolates one document from the rest of the shell — the same shape the
@@ -295,7 +291,7 @@ function DocumentTab({
  * to show, even though no slot named it.
  */
 export function Shell({ ctx }: { ctx: Context }) {
-  const { documents, active, pending, sidebar, panelCollapsed, sideRight } = useShell(ctx);
+  const { documents, active, pending, sidebar, panelCollapsed, panel, sideRight } = useShell(ctx);
   const [pendingClose, setPendingClose] = useState<string | undefined>(undefined);
   const sidebarSize = useResize(SIZE_KEYS.sidebar, 'x', 1);
   // Dragging the panel's top edge UP makes it taller, hence the sign.
@@ -367,7 +363,7 @@ export function Shell({ ctx }: { ctx: Context }) {
   const activities = byOrder(validActivities);
   const sidebarEntries = ctx.slots.list<SlotMeta & SidebarMeta>(ctx.shell.slots.sidebar);
   const documentContribs = ctx.slots.list<SlotMeta & DocumentMeta>(ctx.shell.slots.document);
-  const panelEntries = ctx.slots.list<SlotMeta & PanelMeta>(ctx.shell.slots.panel);
+  const panelEntries = byOrder(ctx.slots.list<SlotMeta & PanelMeta>(ctx.shell.slots.panel));
   const statusEntries = byOrder(ctx.slots.list<SlotMeta & StatusMeta>(ctx.shell.slots.status));
 
   const nothingAtAll =
@@ -521,20 +517,39 @@ export function Shell({ ctx }: { ctx: Context }) {
         ) : null}
       </aside>
 
-      <div className="e8-panel" data-testid="panel">
+      <div
+        className="e8-panel"
+        data-testid="panel"
+        data-collapsed={panelCollapsed ? '' : undefined}
+      >
         <div className="e8-resize e8-resize-y" data-testid="resize-panel" {...panelSize.handlers} />
-        <div className="e8-panel-header">
-          {/* Expanded, the entry's own header row carries the title (and a
-              count only it knows — `Diagnostics 3`); this strip overlays its
-              right edge with the toggle. Collapsed, the entry is gone, so
-              the strip names what it is hiding. */}
-          {panelCollapsed
-            ? panelEntries.map((entry) => (
-                <span key={entry.key} className="e8-panel-title">
-                  {entry.title}
-                </span>
-              ))
-            : null}
+        <div className="e8-panel-header" role="tablist">
+          {/* One tab per `shell.panel` entry (Task 4): the title, and a
+              badge only `ctx.shell.setPanelBadge` puts there — the entry
+              itself carries neither any more, so a plugin with several
+              tabs reads the same as one with a single stacked pane used
+              to. The toggle rides the strip's right edge either way. */}
+          {panelEntries.map((entry) => {
+            const badge = ctx.shell.panelBadge(entry.key);
+            return (
+              <button
+                key={entry.key}
+                type="button"
+                role="tab"
+                className="e8-panel-tab"
+                aria-selected={entry.key === panel}
+                data-testid={`panel-tab-${entry.key}`}
+                onClick={() => ctx.shell.showPanel(entry.key)}
+              >
+                {entry.title}
+                {badge === undefined ? null : (
+                  <span className="e8-badge" data-testid={`panel-badge-${entry.key}`}>
+                    {badge}
+                  </span>
+                )}
+              </button>
+            );
+          })}
           <button
             type="button"
             data-testid="panel-toggle"
@@ -544,13 +559,21 @@ export function Shell({ ctx }: { ctx: Context }) {
             {panelCollapsed ? '▸' : '▾'}
           </button>
         </div>
-        {panelCollapsed
-          ? null
-          : panelEntries.map((entry) => (
-              <div key={entry.key} className="e8-panel-entry" data-testid={`panel-${entry.key}`}>
-                <entry.component ctx={ctx} />
-              </div>
-            ))}
+        {/* Every entry stays mounted (Ruling 13's own rule, applied to the
+            panel): collapsed or on another tab, it is `hidden`, never
+            unmounted — a plugin's own state survives switching away from
+            it or collapsing the panel, same as a document's pane. */}
+        {panelEntries.map((entry) => (
+          <div
+            key={entry.key}
+            className="e8-panel-entry"
+            role="tabpanel"
+            data-testid={`panel-${entry.key}`}
+            hidden={panelCollapsed || entry.key !== panel}
+          >
+            <entry.component ctx={ctx} />
+          </div>
+        ))}
       </div>
 
       <div className="e8-status" data-testid="status-bar">

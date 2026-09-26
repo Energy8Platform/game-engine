@@ -2,7 +2,13 @@ import React from 'react';
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { beforeEach, describe, expect, it } from 'vitest';
 import { createIdeClient, useGameComposition } from '@energy8engine/ide-client';
-import type { CompositionRow, ServerMessage, WorkspaceState } from '@energy8engine/contracts';
+import {
+  diagnostic as d,
+  type CompositionRow,
+  type Diagnostic,
+  type ServerMessage,
+  type WorkspaceState,
+} from '@energy8engine/contracts';
 import { App } from '../src/App';
 
 /**
@@ -43,6 +49,10 @@ async function harness(
     previewUrl: null,
     diagnostics: [],
   },
+  // `/api/composition`'s own `diagnostics` — namespace 1, `project` in
+  // `DiagnosticsPanel`'s terms. Empty by default, like every other route
+  // here; the diagnostics-badge test below is the one that sets it.
+  compositionDiagnostics: Diagnostic[] = [],
 ) {
   const socket = fakeSocket();
   const ctx = await createIdeClient({
@@ -67,7 +77,9 @@ async function harness(
             ? { entries: [], diagnostics: [] }
             : url === '/api/workspace'
               ? workspace
-              : { rows: [], diagnostics: [] },
+              : url === '/api/composition'
+                ? { rows: [], diagnostics: compositionDiagnostics }
+                : { rows: [], diagnostics: [] },
         ),
         { headers: { 'content-type': 'application/json' } },
       );
@@ -156,6 +168,37 @@ describe('App', () => {
     render(<App ctx={ctx} />);
     expect(ctx.slots.list('shell.panel').map((e) => e.key)).toEqual(['diagnostics']);
     expect(ctx.slots.list('composition.card')).toEqual([]);
+  });
+
+  it('the diagnostics badge counts errors and warnings across project, game and editor — never info', async () => {
+    // One error from `/api/composition` (project), one warning and one info
+    // from a `game-diagnostics` frame (game — the info row must NOT count),
+    // one error from the editor's own `ctx.connection.report` — 3 counted.
+    const projectDiagnostics: Diagnostic[] = [d('error', 'reels1', 'package', 'could not resolve')];
+    const { ctx, socket } = await harness(undefined, undefined, projectDiagnostics);
+    render(<App ctx={ctx} />);
+    await waitFor(() =>
+      expect(ctx.slots.list('shell.panel').map((e: { key: string }) => e.key)).toEqual([
+        'diagnostics',
+      ]),
+    );
+
+    act(() => {
+      socket.push({
+        type: 'game-diagnostics',
+        diagnostics: [
+          d('warning', 'reels', 'runtime', 'reels wobble'),
+          d('info', 'reels', 'runtime', 'just fyi'),
+        ],
+      } as unknown as ServerMessage);
+    });
+    act(() => {
+      ctx.connection.report(d('error', 'slots', 'shell', 'two cards claim a key'));
+    });
+
+    await waitFor(() =>
+      expect(screen.getByTestId('panel-badge-diagnostics')).toHaveTextContent('3'),
+    );
   });
 
   it('registers the four status items, two a side, in order', async () => {

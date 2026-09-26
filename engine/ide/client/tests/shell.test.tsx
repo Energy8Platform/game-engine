@@ -1,5 +1,5 @@
 import { describe, expect, it, beforeEach, afterEach, vi } from 'vitest';
-import { act, render, screen, within } from '@testing-library/react';
+import { act, fireEvent, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { Context } from 'cordis';
 import { type Diagnostic } from '@energy8engine/contracts';
@@ -743,15 +743,123 @@ describe('Shell', () => {
     expect(screen.getByTestId('sidebar')).toHaveTextContent(/nothing registered/i);
   });
 
-  it('the panel shows its contribution and collapses on demand', async () => {
+  // --- Task 4: the panel is a tab strip a plugin contributes, with a
+  // badge and `showPanel` — every `shell.panel` entry gets its own tab
+  // (title + optional badge), all entries stay mounted (hidden, not
+  // unmounted, when inactive or collapsed), and the chosen tab survives a
+  // reload via `localStorage['e8.panel-tab']`.
+
+  /** Two `shell.panel` entries, `b` registered before `a` but ordered after it — the same trap `byOrder`'s own activity-bar tests set. */
+  function twoPanelEntries(ctx: Context) {
+    ctx.slots.register({ name: 'shell.panel', key: 'b', title: 'B', order: 1 }, () => (
+      <div>B-BODY</div>
+    ));
+    ctx.slots.register({ name: 'shell.panel', key: 'a', title: 'A', order: 0 }, () => (
+      <div>A-BODY</div>
+    ));
+  }
+
+  it('draws one tab per entry, ordered, the lowest order selected by default', () => {
     const ctx = harness();
-    ctx.slots.register({ name: 'shell.panel', key: 'diagnostics', title: 'Diagnostics' }, () => (
-      <div>DIAG</div>
+    twoPanelEntries(ctx);
+    render(<Shell ctx={ctx} />);
+    const tabs = within(screen.getByTestId('panel')).getAllByRole('tab');
+    expect(tabs.map((t) => t.dataset.testid)).toEqual(['panel-tab-a', 'panel-tab-b']);
+    expect(screen.getByTestId('panel-tab-a')).toHaveAttribute('aria-selected', 'true');
+    expect(screen.getByTestId('panel-tab-b')).toHaveAttribute('aria-selected', 'false');
+    expect(screen.getByTestId('panel-a')).toBeVisible();
+    expect(screen.getByTestId('panel-b')).not.toBeVisible();
+  });
+
+  it('clicking a tab selects it and remembers the choice for the next shell over the same storage', () => {
+    localStorage.removeItem('e8.panel-tab');
+    const ctx = harness();
+    twoPanelEntries(ctx);
+    const first = render(<Shell ctx={ctx} />);
+    fireEvent.click(screen.getByTestId('panel-tab-b'));
+    expect(screen.getByTestId('panel-tab-b')).toHaveAttribute('aria-selected', 'true');
+    expect(screen.getByTestId('panel-b')).toBeVisible();
+    expect(localStorage.getItem('e8.panel-tab')).toBe('b');
+    first.unmount();
+
+    // A fresh shell — a reload — reads the same storage back and opens on `b`.
+    const ctx2 = harness();
+    twoPanelEntries(ctx2);
+    render(<Shell ctx={ctx2} />);
+    expect(screen.getByTestId('panel-tab-b')).toHaveAttribute('aria-selected', 'true');
+  });
+
+  it('a stored key nothing answers to falls back to the first tab', () => {
+    localStorage.setItem('e8.panel-tab', 'ghost');
+    const ctx = harness();
+    twoPanelEntries(ctx);
+    render(<Shell ctx={ctx} />);
+    expect(screen.getByTestId('panel-tab-a')).toHaveAttribute('aria-selected', 'true');
+  });
+
+  it('a throwing localStorage — a private window, storage switched off — still renders the panel', () => {
+    vi.spyOn(Storage.prototype, 'getItem').mockImplementation(() => {
+      throw new Error('blocked');
+    });
+    vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => {
+      throw new Error('blocked');
+    });
+    const ctx = harness();
+    twoPanelEntries(ctx);
+    expect(() => render(<Shell ctx={ctx} />)).not.toThrow();
+    expect(screen.getByTestId('panel-tab-a')).toHaveAttribute('aria-selected', 'true');
+    expect(() => fireEvent.click(screen.getByTestId('panel-tab-b'))).not.toThrow();
+  });
+
+  it('collapsing hides both entries without unmounting them — a component inside keeps its own state', async () => {
+    // Same shape as "typed text survives a tab switch" above, for the
+    // identical reason: `hidden`, not removed, is what keeps the SAME
+    // `<input>` node (and whatever it holds) alive across a collapse.
+    const ctx = harness();
+    ctx.slots.register({ name: 'shell.panel', key: 'a', title: 'A' }, () => (
+      <input data-testid="panel-input" />
     ));
     render(<Shell ctx={ctx} />);
-    expect(screen.getByTestId('panel')).toHaveTextContent('DIAG');
+    const input = screen.getByTestId<HTMLInputElement>('panel-input');
+    await userEvent.type(input, 'hello');
     await userEvent.click(screen.getByTestId('panel-toggle'));
-    expect(screen.getByTestId('panel')).not.toHaveTextContent('DIAG');
+    expect(screen.getByTestId('panel-a')).not.toBeVisible();
+    expect(input).not.toBeVisible();
+    await userEvent.click(screen.getByTestId('panel-toggle'));
+    expect(screen.getByTestId('panel-a')).toBeVisible();
+    expect(screen.getByTestId('panel-input')).toBe(input); // the same node, not a fresh mount
+    expect(input.value).toBe('hello');
+  });
+
+  it('ctx.shell.showPanel expands a collapsed panel and selects the named tab', () => {
+    const ctx = harness();
+    twoPanelEntries(ctx);
+    render(<Shell ctx={ctx} />);
+    fireEvent.click(screen.getByTestId('panel-toggle'));
+    expect(screen.getByTestId('panel')).toHaveAttribute('data-collapsed', '');
+    act(() => ctx.shell.showPanel('b'));
+    expect(screen.getByTestId('panel')).not.toHaveAttribute('data-collapsed');
+    expect(screen.getByTestId('panel-tab-b')).toHaveAttribute('aria-selected', 'true');
+    expect(screen.getByTestId('panel-b')).toBeVisible();
+  });
+
+  it('setPanelBadge shows a badge; 0 and undefined remove it; one set while collapsed shows once expanded', () => {
+    const ctx = harness();
+    twoPanelEntries(ctx);
+    render(<Shell ctx={ctx} />);
+    act(() => ctx.shell.setPanelBadge('a', 3));
+    expect(screen.getByTestId('panel-badge-a')).toHaveTextContent('3');
+    act(() => ctx.shell.setPanelBadge('a', 0));
+    expect(screen.queryByTestId('panel-badge-a')).toBeNull();
+    act(() => ctx.shell.setPanelBadge('a', 3));
+    act(() => ctx.shell.setPanelBadge('a', undefined));
+    expect(screen.queryByTestId('panel-badge-a')).toBeNull();
+
+    fireEvent.click(screen.getByTestId('panel-toggle'));
+    act(() => ctx.shell.setPanelBadge('b', 5));
+    expect(screen.getByTestId('panel-badge-b')).toHaveTextContent('5');
+    fireEvent.click(screen.getByTestId('panel-toggle'));
+    expect(screen.getByTestId('panel-badge-b')).toHaveTextContent('5');
   });
 
   it('a dirty tab shows a dot, and its close asks first', async () => {

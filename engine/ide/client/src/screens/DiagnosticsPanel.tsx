@@ -197,13 +197,11 @@ export function DiagnosticsPanel({
 
   return (
     <section className="e8-diagnostics-panel" data-testid="diagnostics-panel">
-      {/* The panel's header row (DESIGN.md §2, `Diagnostics (3)`): the
-          heading keeps its own accessible name, the count sits beside it. */}
-      <div className="e8-diagnostics-panel-header">
-        <h2>Diagnostics</h2>
-        <span className="e8-badge">{rows.length}</span>
-      </div>
-
+      {/* No heading and no count of its own (Task 4): the panel tab strip
+          in `Shell.tsx` now carries this entry's title, and its count is
+          `App.tsx`'s own `ctx.shell.setPanelBadge('diagnostics', …)` — this
+          used to repeat both here, one place to look becoming two the
+          moment a tab sat right above it. */}
       {rows.length > 0 && (
         <ul className="e8-diagnostics-panel-list">
           {rows.map((row, index) => {
