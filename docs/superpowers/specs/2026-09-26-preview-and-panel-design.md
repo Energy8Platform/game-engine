@@ -40,8 +40,9 @@ the toolbar has screen + rotate, language, currency + balance, social.
 - `packages/*` is not edited.
 - No `@energy8platform/game-engine` under `engine/` (slice 37's guard).
 - Every change carries a test in its package.
-- The two `main.ts`/`index.html` copies (first-slot, slot-basic) stay
-  byte-identical.
+- The two `main.ts` copies (first-slot, slot-basic) stay byte-identical;
+  the two `index.html` copies differ only in `<title>` (amended while
+  planning: they already differed in more).
 
 ## 2. The composition shows the composition
 
@@ -49,6 +50,16 @@ the toolbar has screen + rotate, language, currency + balance, social.
 editor's rows, the game's rows and the `composition.card` slot — nothing
 else. The game is on the Preview document; an open document stays mounted
 while hidden (`Shell.tsx`'s panes), so switching tabs does not restart it.
+
+**The game always runs while a project is open** (amended mid-run, Task
+8b and the final review's C1). The composition used to guarantee a
+running game, and the IDE depends on it: the node-type registry, the flow
+node kinds, transitions, the status item and the `e8-server` dot all come
+from the running game's `ide-bridge`. So whenever a project is active the
+IDE opens the Preview in the background (`openContributed('preview',
+{ background: true })` — a tab added without navigating), on a fresh load
+and on a reload or deep link alike; a hidden (`display: none`) Preview
+boots its game.
 
 ## 3. Preview: one frame, a harness toolbar
 
@@ -66,13 +77,20 @@ component the `preview` document registers.
     committed on blur/Enter; a value that is not a finite number ≥ 0 is
     refused in the field (not sent);
   - social — a toggle.
-- **The address**: `previewUrl` plus `game=preview`, `lang`, `currency`,
+- **The address**: `previewUrl` plus `lang`, `currency`,
   `balance` (omitted when empty), `social=1` (omitted when off),
   `device=mobile` for a preset whose name starts with `Mobile` (omitted
-  otherwise). A pure `previewAddress(base, state)` builds it.
-- **Relaunch**: any toolbar change yields a new address, and the iframe's
-  key includes it — a real navigation, as the harness relaunches. The key
-  also keeps `reloads` and the active project, as today.
+  otherwise). A pure `previewAddress(base, state)` builds it. No `game`
+  identity (amended while planning): a named game loses its retained
+  diagnostics when its socket closes and every row is labelled; the one
+  frame is the anonymous game, as the composition's Preview was.
+- **Relaunch vs resize** (amended mid-run): a change of the address
+  (language, currency, balance, social, device) relaunches — the iframe's
+  key includes the address, a real navigation. A screen or Rotate change
+  within the same address RESIZES the running game, as the harness's
+  `applyScreen` does, exercising its responsive layout without resetting
+  its session. The key also keeps `reloads` and the active project.
+- **Accessible**: every toolbar control has a visible label.
 - **Remembered**: the toolbar state is per-viewer, in
   `localStorage['e8.preview']`, read and written inside try/catch; a stored
   preset name the list no longer has falls back to the first preset.
@@ -123,6 +141,12 @@ button and its skip-on-second-click, the turbo checkbox, the mechanic
 A boot failure still renders through `boot.renderFailure` into `#mount`,
 as today.
 
+`e8 shot` moves to the hooks too (amended while planning): readiness is
+`window.__e8` defined, and `--spin` is `__e8.spin()`'s port. `__e8.spin()`
+answers `{ out, kind }` (the node that settled it), and `__e8.session()`
+answers the game's `session.init` — how the e2e reads the toolbar's
+choices back.
+
 ## 6. The game's status in the IDE status bar
 
 - **`ide-bridge`** reports `GameStatusMessage { type: 'game-status', state:
@@ -139,7 +163,13 @@ as today.
     the next `spinning` replaces it.
   Node kinds come from the flow document the bridge already reads. Sent
   only when the state or message changes; re-armed on a re-provided `flow`
-  as the trace forwarding is.
+  as the trace forwarding is (each new watch starts at `loading`).
+  Amended by the final review — the status never sticks on `spinning`:
+  a trace entry from an earlier run number (a `replace` restarted the
+  interpreter) reads `ready`; while `spinning`, a bounded poll reads
+  `ready` once the flow is no longer busy (a thrown or timed-out node, a
+  stopped run); a flow disposed with no replacement reads `ready` /
+  `no flow row`; `flow.ready` rejecting reads `failed` with its reason.
 - **The host** (`rpc.ts`) accepts `game-status` from the game socket, keeps
   the last one, relays it to every `/ide` socket, sends the last one in the
   greeting, and forgets it (relaying `{ state: 'offline' }` — a host-only
@@ -147,7 +177,8 @@ as today.
 - **The client**: `gameComposition` (`plugins/game-composition.tsx`, the
   service that already takes `game-transitions` off its own socket) gains
   `status: GameStatusMessage | null`, and `GameStatus` — a `shell.status`
-  entry, right side, first: `● ready`, `◌ spinning…`, `✕ <message>`
+  entry, right side, first: `● ready` (`● ready — <message>` when the
+  frame carries one, e.g. `no flow row`), `◌ spinning…`, `✕ <message>`
   (`failed`), `… loading`, `○ no game` (`offline`, or no frame yet). When
   `failed`, a click calls `ctx.shell.showPanel('diagnostics')`.
 
