@@ -1098,6 +1098,14 @@ export function apply(ctx: Context, config: IdeBridgeConfig): void {
   // `spin` entered → spinning; `present` left by `next` → ready; either
   // left by `failed` → failed. Sent only on a change; the last one goes out
   // when the socket opens, since boot happens before it does.
+  // A spin can also end with no port at all (the final review's I3), and
+  // each such way reads `ready` again: a `replace` restarted the run
+  // numbering (an entry whose `run` is below the last one seen — the old
+  // run is gone; below, not equal, since every entry of one run carries
+  // its number); a node threw or timed out, or `stop()` aborted the run
+  // (`!flow.busy()` while spinning); the flow went away with nothing in its
+  // place (`no flow row`). A flow whose `ready` rejects — its boot GET
+  // failed — never started: `failed`, with the reason.
   type Status = { state: GameStatusState; message?: string };
   let status: Status | null = null;
   const sendStatus = (next: Status) => {
@@ -1123,36 +1131,66 @@ export function apply(ctx: Context, config: IdeBridgeConfig): void {
   type StatusFlow = {
     ready?: Promise<void>;
     doc?(): { nodes: { id: string; kind: string }[] } | null;
+    busy?(): boolean;
     onTrace(fn: (e: FlowTraceEntry) => void): () => void;
   };
   let unwatchStatus: (() => void) | undefined;
+  /** Watches whatever flow is provided now — a fresh one boots, so `loading` until its `ready` settles. */
   const watchStatus = () => {
     unwatchStatus?.();
+    unwatchStatus = undefined;
     const flow = currentFlow() as StatusFlow | undefined;
     if (!flow) {
       sendStatus({ state: 'ready', message: 'no flow row' });
-      unwatchStatus = undefined;
       return;
     }
+    sendStatus({ state: 'loading' });
     let alive = true;
-    void flow.ready?.then(() => {
-      if (alive && (status === null || status.state === 'loading')) sendStatus({ state: 'ready' });
-    });
+    // ponytail: polls `busy()` every 250 ms, and only while spinning — the
+    // interpreter emits nothing when its last branch ends without a trace
+    // entry (a throw, a timeout, `stop()`). A busy-change event on the flow
+    // service would replace the poll.
+    let idlePoll: ReturnType<typeof setInterval> | undefined;
+    const set = (next: Status) => {
+      sendStatus(next);
+      if (next.state !== 'spinning') {
+        clearInterval(idlePoll);
+        idlePoll = undefined;
+      } else if (idlePoll === undefined && flow.busy) {
+        idlePoll = setInterval(() => {
+          if (!flow.busy!()) set({ state: 'ready' });
+        }, 250);
+      }
+    };
+    flow.ready?.then(
+      () => {
+        if (alive && status?.state === 'loading') set({ state: 'ready' });
+      },
+      (error: unknown) => {
+        if (!alive) return;
+        const message =
+          error instanceof Error && error.message ? error.message : 'the flow did not start';
+        set({ state: 'failed', message });
+      },
+    );
+    let lastRun = 0;
     const off = flow.onTrace((e) => {
+      if (e.run < lastRun) set({ state: 'ready' });
+      lastRun = e.run;
       const kind = flow.doc?.()?.nodes.find((n) => n.id === e.node)?.kind;
-      if (kind === 'spin' && e.out === null) sendStatus({ state: 'spinning' });
+      if (kind === 'spin' && e.out === null) set({ state: 'spinning' });
       else if (kind === 'spin' && e.out === 'failed')
-        sendStatus({ state: 'failed', message: 'spin failed' });
-      else if (kind === 'present' && e.out === 'next') sendStatus({ state: 'ready' });
+        set({ state: 'failed', message: 'spin failed' });
+      else if (kind === 'present' && e.out === 'next') set({ state: 'ready' });
       else if (kind === 'present' && e.out === 'failed')
-        sendStatus({ state: 'failed', message: 'presentation failed' });
+        set({ state: 'failed', message: 'presentation failed' });
     });
     unwatchStatus = () => {
       alive = false;
+      clearInterval(idlePoll);
       off();
     };
   };
-  sendStatus({ state: 'loading' });
   watchStatus();
 
   // The boot run traces before this socket is open, and `flushTrace` drops
@@ -1172,7 +1210,21 @@ export function apply(ctx: Context, config: IdeBridgeConfig): void {
   });
 
   let readFromFlow = currentFlow();
-  ctx.inject(['flow'], () => {
+  ctx.inject(['flow'], (withFlow) => {
+    // The flow gone (its row disabled or removed — or mid hot re-apply,
+    // which disposes before it provides again): with no `flow` nothing
+    // below re-arms, so the old status watch is dropped here and the
+    // status says why. A re-apply's fresh flow follows at once, and its
+    // re-arm reads `loading`, then `ready`. Still provided means this
+    // module is the one being disposed, not the flow: nothing to say.
+    withFlow.effect(
+      () => () => {
+        if (currentFlow()) return;
+        readFromFlow = undefined;
+        watchStatus();
+      },
+      'ide-bridge-flow-gone',
+    );
     const fresh = currentFlow();
     if (!fresh || fresh === readFromFlow) return;
     readFromFlow = fresh;
