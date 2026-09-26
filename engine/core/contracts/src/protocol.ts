@@ -288,6 +288,22 @@ export interface GameTransitionsMessage {
   ids: string[];
 }
 
+/** What a running game is doing, as the IDE's status bar shows it (slice 39). */
+export type GameStatusState = 'loading' | 'ready' | 'spinning' | 'failed' | 'offline';
+
+/**
+ * Up from the game's `ide-bridge` (never `offline` — that one is the
+ * host's: the game socket that last reported closed, or the project
+ * changed), relayed down to every `/ide` socket, and the last one greets a
+ * socket connecting later.
+ */
+export interface GameStatusMessage {
+  type: 'game-status';
+  state: GameStatusState;
+  /** Why, for `failed` (`spin failed`, `presentation failed`) and `ready` with no flow row. */
+  message?: string;
+}
+
 /** One node of a scene document — see spec §3. `children` mount into the node's view. */
 export interface SceneNode {
   id: string;
@@ -501,6 +517,7 @@ export type ServerMessage =
   | GameCompositionMessage
   | ScenePreviewMessage
   | GameTransitionsMessage
+  | GameStatusMessage
   | ScenesMessage
   | NodeTypesMessage
   | SceneSelectMessage
@@ -515,6 +532,7 @@ export type ClientMessage =
   | { type: 'update'; id: string; config: unknown }
   | GameDiagnosticsMessage
   | GameTransitionsMessage
+  | GameStatusMessage
   | NodeTypesMessage
   | FlowKindsMessage
   | FlowTraceMessage;

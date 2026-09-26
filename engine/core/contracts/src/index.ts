@@ -1,3 +1,4 @@
+export * from './dev-currencies';
 export * from './diagnostic';
 export * from './expression';
 export * from './files';

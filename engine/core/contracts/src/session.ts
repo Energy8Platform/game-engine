@@ -40,6 +40,8 @@ export interface SessionInit {
   /** Absent when the provider has no opinion; the shell keeps its own default. */
   language?: string;
   device?: 'desktop' | 'mobile';
+  /** Social-casino wording in the shell (`isSocial`). Absent when the provider has no opinion. */
+  social?: boolean;
   /**
    * The bet multiplier per action name (`{ spin: 1, tournament: 100 }`) —
    * what a dev wallet charges on an opening play. Absent when the provider
