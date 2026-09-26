@@ -10,9 +10,12 @@
  * palette's node kinds and edges, transitions, `game-status` (the status
  * bar's `status-game`), and it is the first speaker on `/ide` that turns
  * `status-session` from `e8-server ○` to `e8-server ●`. So `App.tsx`'s
- * fresh-project default now opens the Preview too, in the BACKGROUND
+ * `decide()` opens the Preview in the BACKGROUND whenever a project is open
  * (`ctx.shell.openContributed('preview', { background: true })` — see that
- * method's own doc in `shell.tsx`): mounted, never shown.
+ * method's own doc in `shell.tsx`): mounted, never shown. Not only on a
+ * fresh load — the fresh-load default writes `#/doc/composition`, so every
+ * F5 is a deep link, and the deep-link cases below are the final review's
+ * C1: the game has to run after a reload too.
  *
  * Both tests below are written to go RED without that default — see
  * `task-8b-report.md` for the revert-and-confirm-red check on each — and
@@ -64,6 +67,24 @@ test('the project\'s game runs from the moment it opens — the hidden Preview b
   await expect(page.getByTestId('doc-pane-composition')).toBeVisible();
   await expect(page.getByTestId('doc-pane-preview')).toBeHidden();
 });
+
+// C1: every reload is a deep link — the fresh-load default itself wrote
+// `#/doc/composition` — and a link to another document (the Flow one here)
+// is the other everyday way in. Neither is the empty address the
+// composition default answers, and neither may leave the IDE without a game.
+for (const doc of ['composition', 'flow']) {
+  test(`a deep link to #/doc/${doc} runs the game too — the background Preview does not ride on the fresh-load default`, async ({
+    page,
+  }) => {
+    await page.goto(`${IDE_URL}#/doc/${doc}`);
+    await expect(page.getByTestId(`doc-pane-${doc}`)).toBeVisible({ timeout: 30_000 });
+    // Never clicked, as above.
+    await expect(page.getByTestId('status-game')).toHaveText('● ready', { timeout: 30_000 });
+    await expect(page.getByTestId('status-session')).toHaveText('e8-server ●', { timeout: 30_000 });
+    await expect(page.getByTestId('doc-preview')).toBeAttached();
+    await expect(page.getByTestId('doc-pane-preview')).toBeHidden();
+  });
+}
 
 interface FlowDoc {
   nodes: { id: string; kind: string }[];

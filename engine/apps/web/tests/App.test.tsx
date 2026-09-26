@@ -270,9 +270,9 @@ describe('App', () => {
     expect(screen.getByTestId('doc-none')).toHaveTextContent('open a project from Projects');
   });
 
-  // --- Task 8b: the composition default's own doc explains why — the
-  // Preview opens too, in the background, so its game is running the
-  // moment a project opens, whether or not anyone ever looks at the tab.
+  // --- Task 8b: `decide()`'s own doc explains why — the Preview opens
+  // too, in the background, so its game is running whenever a project is
+  // open, whether or not anyone ever looks at the tab.
 
   it('a fresh load with a project open opens composition, then preview in the background, composition active', async () => {
     const { ctx } = await harness(undefined, OPEN_PROJECT);
@@ -283,17 +283,19 @@ describe('App', () => {
     expect(ctx.shell.active()?.key).toBe('composition');
   });
 
-  it('a deep link that already named a document opens neither default — not composition, not preview', async () => {
-    location.hash = '#/doc/preview';
+  it('a deep link opens no composition default, but the Preview still opens in the background — F5 runs the game too', async () => {
+    // The final review's C1: the default writes `#/doc/composition`, so
+    // every reload is a deep link — and the background Preview used to
+    // ride on the composition default, so after F5 no game ran at all.
+    location.hash = '#/doc/flow';
     const { ctx } = await harness(undefined, OPEN_PROJECT);
     render(<App ctx={ctx} />);
     await waitFor(() => expect(ctx.shell.sidebar()).toBe('explorer'));
-    expect(ctx.shell.active()?.key).toBe('preview');
-    // Only the one document a person actually named — the composition
-    // default's own preview-in-background call never runs because the
-    // whole default block is skipped (an address already resolves to
-    // something).
-    expect(ctx.shell.documents().map((d) => d.key)).toEqual(['preview']);
+    expect(ctx.shell.active()?.key).toBe('flow');
+    // The document the address named, and the Preview behind it — never
+    // the composition, which only a fresh load with nothing named opens.
+    expect(ctx.shell.documents().map((d) => d.key)).toEqual(['flow', 'preview']);
+    expect(location.hash).toBe('#/doc/flow');
   });
 
   it('a switch between two projects adds no second preview tab', async () => {
@@ -303,9 +305,9 @@ describe('App', () => {
       expect(ctx.shell.documents().map((d) => d.key)).toEqual(['composition', 'preview']),
     );
     // Back past both, so the composition default's own condition
-    // (`ctx.shell.active() === undefined`) can re-fire on the next project
-    // — the one case where `decide()` calls `openContributed('preview', {
-    // background: true })` a second time, and it has to be a no-op: the
+    // (`ctx.shell.active() === undefined`) can re-fire on the next project.
+    // `decide()` asks for the background Preview on every frame with a
+    // project open, and every ask after the first has to be a no-op: the
     // tab is already there.
     act(() => {
       location.hash = '';
@@ -396,7 +398,9 @@ describe('App', () => {
     await waitFor(() => expect(ctx.shell.sidebar()).toBe('explorer'));
     expect(ctx.shell.pending()).toBe('demo');
     expect(ctx.shell.active()).toBeUndefined();
-    expect(ctx.shell.documents()).toEqual([]);
+    // Only the background Preview — mounted, not navigated to, so the
+    // wait on `demo` is untouched.
+    expect(ctx.shell.documents().map((d) => d.key)).toEqual(['preview']);
   });
 
   it('a sidebar the person chose before the workspace answered is left alone', async () => {
