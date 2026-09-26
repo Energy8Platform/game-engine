@@ -298,9 +298,11 @@ export function Shell({ ctx }: { ctx: Context }) {
   const panelSize = useResize(SIZE_KEYS.panel, 'y', -1);
 
   // The five slot lists below are read straight off `ctx.slots` on every
-  // render, and `useShell` only hears from `ctx.shell` — so a contribution
-  // landing AFTER mount (a plugin's client half, imported by `modules` once
-  // the snapshot names it) needs this to be drawn at all.
+  // render. `useShell` subscribes to `ctx.slots` too, but for its own
+  // reads (`documents()`, `panel()`); this subscription is the one that
+  // exists for the lists, so a contribution landing AFTER mount (a plugin's
+  // client half, imported by `modules` once the snapshot names it) is drawn
+  // without depending on what that hook happens to read.
   const [, bump] = useReducer((n: number) => n + 1, 0);
   useEffect(() => ctx.slots.subscribe(bump), [ctx]);
 

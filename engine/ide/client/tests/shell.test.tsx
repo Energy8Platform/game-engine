@@ -859,21 +859,67 @@ describe('Shell', () => {
   it('collapsing hides both entries without unmounting them — a component inside keeps its own state', async () => {
     // Same shape as "typed text survives a tab switch" above, for the
     // identical reason: `hidden`, not removed, is what keeps the SAME
-    // `<input>` node (and whatever it holds) alive across a collapse.
+    // `<input>` node (and whatever it holds) alive across a collapse — the
+    // selected entry's AND the inactive one's.
+    localStorage.removeItem('e8.panel-tab');
     const ctx = harness();
-    ctx.slots.register({ name: 'shell.panel', key: 'a', title: 'A' }, () => (
+    ctx.slots.register({ name: 'shell.panel', key: 'a', title: 'A', order: 0 }, () => (
       <input data-testid="panel-input" />
+    ));
+    ctx.slots.register({ name: 'shell.panel', key: 'b', title: 'B', order: 1 }, () => (
+      <input data-testid="panel-input-b" />
     ));
     render(<Shell ctx={ctx} />);
     const input = screen.getByTestId<HTMLInputElement>('panel-input');
+    const inactive = screen.getByTestId<HTMLInputElement>('panel-input-b');
+    expect(inactive).not.toBeVisible(); // `a` is the selected tab
     await userEvent.type(input, 'hello');
     await userEvent.click(screen.getByTestId('panel-toggle'));
     expect(screen.getByTestId('panel-a')).not.toBeVisible();
+    expect(screen.getByTestId('panel-b')).not.toBeVisible();
     expect(input).not.toBeVisible();
+    // Both still mounted while collapsed — the inactive entry too.
+    expect(input.isConnected).toBe(true);
+    expect(inactive.isConnected).toBe(true);
     await userEvent.click(screen.getByTestId('panel-toggle'));
     expect(screen.getByTestId('panel-a')).toBeVisible();
+    expect(screen.getByTestId('panel-b')).not.toBeVisible();
     expect(screen.getByTestId('panel-input')).toBe(input); // the same node, not a fresh mount
+    expect(screen.getByTestId('panel-input-b')).toBe(inactive);
     expect(input.value).toBe('hello');
+  });
+
+  it('a `shell.panel` entry registered after mount — how a project plugin’s client half arrives — gets its tab, the fallback selection and its badge', () => {
+    localStorage.removeItem('e8.panel-tab');
+    const ctx = harness();
+    // Something to draw, so the shell is not the all-empty explanation.
+    ctx.shell.open({ key: 'doc', title: 'D', component: () => <div>D</div>, closable: true });
+    render(<Shell ctx={ctx} />);
+    expect(screen.queryByTestId('panel-tab-late')).toBeNull();
+
+    act(() => {
+      ctx.slots.register({ name: 'shell.panel', key: 'late', title: 'Late', order: 1 }, () => (
+        <div>LATE-BODY</div>
+      ));
+    });
+    // The only entry: `panel()` falls back to it.
+    expect(ctx.shell.panel()).toBe('late');
+    expect(screen.getByTestId('panel-tab-late')).toHaveAttribute('aria-selected', 'true');
+    expect(screen.getByTestId('panel-late')).toBeVisible();
+    act(() => ctx.shell.setPanelBadge('late', 2));
+    expect(screen.getByTestId('panel-badge-late')).toHaveTextContent('2');
+
+    // A second late entry ordered ahead of it: with nothing chosen by hand,
+    // the fallback is the first by order, and the strip draws it first.
+    act(() => {
+      ctx.slots.register({ name: 'shell.panel', key: 'early', title: 'Early', order: 0 }, () => (
+        <div>EARLY-BODY</div>
+      ));
+    });
+    const tabs = within(screen.getByTestId('panel')).getAllByRole('tab');
+    expect(tabs.map((t) => t.dataset.testid)).toEqual(['panel-tab-early', 'panel-tab-late']);
+    expect(screen.getByTestId('panel-tab-early')).toHaveAttribute('aria-selected', 'true');
+    expect(screen.getByTestId('panel-badge-late')).toHaveTextContent('2');
   });
 
   it('ctx.shell.showPanel expands a collapsed panel and selects the named tab', () => {
