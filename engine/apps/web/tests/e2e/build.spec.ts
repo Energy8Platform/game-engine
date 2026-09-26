@@ -162,16 +162,14 @@ test('a bare static server: the bundled rows compose, base_game and the shell ar
   page,
 }) => {
   await bootedPage(page, bare.url);
-  // The toolbar and the log are the editor's — a built page hides both.
-  await expect(page.locator('#controls')).toBeHidden();
-  await expect(page.locator('#log')).toBeHidden();
 
   expect(await page.evaluate(() => (window as any).__e8.scenesVisible())).toContain('base_game');
   // `session-host`'s fallback init (`/api/session` was a 404) still mounts the shell.
   expect(await page.evaluate(() => (window as any).__e8.shell())).not.toBeNull();
 
+  // `kind: 'spin'`: the host call failed, not the presentation after it.
   const spin = await page.evaluate(() => (window as any).__e8.spin());
-  expect(spin).toEqual({ out: 'failed' });
+  expect(spin).toEqual({ out: 'failed', kind: 'spin' });
   const diagnostics = JSON.stringify(
     await page.evaluate(() => (window as any).__e8.liveDiagnostics()),
   );
@@ -191,7 +189,7 @@ test('the same dist with /api/session and /api/spin proxied to a running host: a
   expect(before.balance).toBe(1000);
 
   const spin = await page.evaluate(() => (window as any).__e8.spin());
-  expect(spin).toEqual({ out: 'next' });
+  expect(spin).toEqual({ out: 'next', kind: 'present' });
   expect(await pairs(page)).toContain('spin:result');
 
   // The dev wallet's accounting, read off the spin log the bundled

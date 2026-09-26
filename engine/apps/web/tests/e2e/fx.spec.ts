@@ -7,17 +7,24 @@
  * has reported them.
  *
  * Same fixture and idioms as `flow.spec.ts`: a private `projectCopy()`
- * served by `startDevHost`, the composition document's `Preview`
+ * served by `startDevHost`, the Preview document's game frame
  * (`iframe[title="game preview"]`) and the game's own `window.__e8`.
  */
 import { readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { expect, test, type Frame, type Page } from '@playwright/test';
 import { IDE_WEB_PORT } from '../../e2e-ports';
-import { projectCopy, startDevHost, type DevHost } from './project-fixture';
+import {
+  bootStatus,
+  gameBooted,
+  previewFrame,
+  projectCopy,
+  spinOnce,
+  startDevHost,
+  type DevHost,
+} from './project-fixture';
 
 const IDE_URL = `http://127.0.0.1:${IDE_WEB_PORT}/`;
-const PREVIEW = 'iframe[title="game preview"]';
 
 /**
  * `start(boot) → base(show base_game) → move(tween base_game/logo, x:100,
@@ -56,19 +63,11 @@ test.afterEach(async () => {
   if (dir) rmSync(dir, { recursive: true, force: true });
 });
 
-async function gameFrame(page: Page): Promise<Frame> {
-  const handle = await page.locator(PREVIEW).elementHandle();
-  const frame = await handle?.contentFrame();
-  if (!frame) throw new Error('preview iframe has no content frame');
-  return frame;
-}
-
-/** The composition's preview, booted to `ready` — same reader as `flow.spec.ts`'s `readyFrame`. */
+/** The Preview's game, booted to `ready` — same reader as `flow.spec.ts`'s `readyFrame`. */
 async function readyFrame(page: Page): Promise<Frame> {
-  const frame = await gameFrame(page);
-  await expect
-    .poll(() => frame.locator('#status').textContent(), { timeout: 20_000 })
-    .toBe('ready');
+  const frame = await previewFrame(page);
+  await gameBooted(frame);
+  expect(await bootStatus(frame)).toBe('ready');
   return frame;
 }
 
@@ -76,7 +75,7 @@ test('a tween node moves a scene node, driven by flow.yml alone', async ({ page 
   writeFileSync(join(dir, 'flow.yml'), TWEEN_FLOW);
   host = await startDevHost(dir);
 
-  await page.goto(`${IDE_URL}#/doc/composition`);
+  await page.goto(IDE_URL);
   const frame = await readyFrame(page);
   // `logo` starts at x:240 (`scenes/base_game.scene.yml`); the boot chain's
   // own `move` node tweens it to x:100 with no `ui.spin` needed.
@@ -96,12 +95,11 @@ test('the example flow: click leaves by next through a sound node, and the palet
   // (`flow1`/`fx1` rows, both in `e8-base`) — a direct visit before the
   // IDE, same idiom as `flow.spec.ts`'s `openComposition`.
   await page.goto(host.gameUrl);
-  await expect(page.locator('#status')).not.toHaveText('', { timeout: 20_000 });
-  await page.goto(`${IDE_URL}#/doc/composition`);
+  await gameBooted(page);
+  await page.goto(IDE_URL);
 
   const frame = await readyFrame(page);
-  const outcome = await frame.evaluate(() => (window as any).__e8.spin());
-  expect(outcome).toEqual({ out: 'next' });
+  expect(await spinOnce(frame)).toBe('done');
   const trace = (await frame.evaluate(() => (window as any).__e8.flowTrace())) as {
     node: string;
     out: string | null;

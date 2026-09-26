@@ -31,7 +31,7 @@
  *
  * Same fixture and idioms as `fx.spec.ts`/`scenes.spec.ts`: a private
  * `projectCopy()`, its files edited BEFORE `startDevHost` (the running
- * host reads them once, at boot), the composition document's `Preview`
+ * host reads them once, at boot), the Preview document's game frame
  * (`iframe[title="game preview"]`) and the game's own `window.__e8`.
  */
 import { readFileSync, rmSync, writeFileSync } from 'node:fs';
@@ -39,10 +39,17 @@ import { join } from 'node:path';
 import { dump, load } from 'js-yaml';
 import { expect, test, type Frame, type Page } from '@playwright/test';
 import { IDE_WEB_PORT } from '../../e2e-ports';
-import { projectCopy, startDevHost, type DevHost } from './project-fixture';
+import {
+  bootStatus,
+  gameBooted,
+  previewFrame,
+  projectCopy,
+  spinOnce,
+  startDevHost,
+  type DevHost,
+} from './project-fixture';
 
 const IDE_URL = `http://127.0.0.1:${IDE_WEB_PORT}/`;
-const PREVIEW = 'iframe[title="game preview"]';
 
 let dir: string;
 let host: DevHost;
@@ -56,19 +63,11 @@ test.afterEach(async () => {
   if (dir) rmSync(dir, { recursive: true, force: true });
 });
 
-async function gameFrame(page: Page): Promise<Frame> {
-  const handle = await page.locator(PREVIEW).elementHandle();
-  const frame = await handle?.contentFrame();
-  if (!frame) throw new Error('preview iframe has no content frame');
-  return frame;
-}
-
-/** The composition's preview, booted to `ready` — same reader as `fx.spec.ts`/`scenes.spec.ts`. */
+/** The Preview's game, booted to `ready` — same reader as `fx.spec.ts`/`scenes.spec.ts`. */
 async function readyFrame(page: Page): Promise<Frame> {
-  const frame = await gameFrame(page);
-  await expect
-    .poll(() => frame.locator('#status').textContent(), { timeout: 20_000 })
-    .toBe('ready');
+  const frame = await previewFrame(page);
+  await gameBooted(frame);
+  expect(await bootStatus(frame)).toBe('ready');
   return frame;
 }
 
@@ -97,9 +96,9 @@ test('a spin records its request — betLevel and action — in the durable spin
   writeFileSync(flowFile, dump(flow, { noRefs: true }));
   host = await startDevHost(dir);
 
-  await page.goto(`${IDE_URL}#/doc/composition`);
+  await page.goto(IDE_URL);
   const frame = await readyFrame(page);
-  expect(await frame.evaluate(() => (window as any).__e8.spin())).toEqual({ out: 'next' });
+  expect(await spinOnce(frame)).toBe('done');
 
   const spins = (await frame.evaluate(() => (window as any).__e8.spins())) as {
     request: Record<string, unknown>;
@@ -129,7 +128,7 @@ test('the stage scales the design into the renderer — `stageScale()` off `scen
   writeFileSync(patchFile, dump(patch, { noRefs: true }));
   host = await startDevHost(dir);
 
-  await page.goto(`${IDE_URL}#/doc/composition`);
+  await page.goto(IDE_URL);
   const frame = await readyFrame(page);
   await expect
     .poll(() => frame.evaluate(() => (window as any).__e8.stageScale()), { timeout: 10_000 })
@@ -191,7 +190,7 @@ nodes:
   );
   host = await startDevHost(dir);
 
-  await page.goto(`${IDE_URL}#/doc/composition`);
+  await page.goto(IDE_URL);
   const frame = await readyFrame(page);
 
   // `width`/`height` on an `image` mounted before its texture loads settle

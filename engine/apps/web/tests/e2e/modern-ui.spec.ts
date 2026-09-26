@@ -8,7 +8,7 @@
 import { rmSync } from 'node:fs';
 import { expect, test, type Page } from '@playwright/test';
 import { IDE_WEB_PORT } from '../../e2e-ports';
-import { projectCopy, startDevHost, type DevHost } from './project-fixture';
+import { gameBooted, projectCopy, startDevHost, type DevHost } from './project-fixture';
 
 const IDE_URL = `http://127.0.0.1:${IDE_WEB_PORT}/`;
 
@@ -21,7 +21,7 @@ test.beforeEach(async ({ page }) => {
 
 async function openIde(page: Page, host: DevHost, hash = ''): Promise<void> {
   await page.goto(host.gameUrl);
-  await expect(page.locator('#status')).not.toHaveText('', { timeout: 20_000 });
+  await gameBooted(page);
   await page.goto(`${IDE_URL}${hash}`);
   await expect(page.getByTestId('activity-explorer')).toBeVisible({ timeout: 20_000 });
 }

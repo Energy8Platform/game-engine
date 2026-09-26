@@ -37,7 +37,14 @@
 import { rmSync } from 'node:fs';
 import { expect, test } from '@playwright/test';
 import { IDE_WEB_PORT } from '../../e2e-ports';
-import { projectCopy, startDevHost } from './project-fixture';
+import {
+  bootStatus,
+  gameBooted,
+  gameLog,
+  projectCopy,
+  spinOnce,
+  startDevHost,
+} from './project-fixture';
 
 /** The IDE app — vite on 5680, proxying `/api` and `/ide` to the host on 5679. */
 const IDE_URL = `http://127.0.0.1:${IDE_WEB_PORT}/`;
@@ -53,9 +60,10 @@ const IDE_URL = `http://127.0.0.1:${IDE_WEB_PORT}/`;
  * production check (`createGame`'s post-composition `requires` pass, task
  * 2) by a genuinely different road: the row is missing from the very FIRST
  * composition the host ever resolves — no healthy boot, no reload, nothing
- * to race — and what is read is `#log`, the live diagnostics list itself
- * (`ctx.diagnostics`, the same list `ide-bridge` forwards to the IDE
- * verbatim), not the failure screen's prose. Kept rather than folded into
+ * to race — and what is read is the game's live diagnostics list itself
+ * (`ctx.diagnostics` through `__e8.liveDiagnostics()`, the same list
+ * `ide-bridge` forwards to the IDE verbatim), not the failure screen's
+ * prose. Kept rather than folded into
  * the existing test because a fresh-boot composition and a hot-reloaded one
  * are handled by different code paths on the host (`resolveComposition` at
  * `createIdeHost` startup vs. `ctx.loader`'s config-update path), and this
@@ -66,12 +74,13 @@ test('a row that requires a missing service says so, naming both', async ({ page
   const host = await startDevHost(project);
   try {
     await page.goto(host.gameUrl);
-    const log = page.locator('#log');
+    await gameBooted(page);
+    const log = () => gameLog(page);
     // The service `reels1` no longer provides, and the row that declared
     // it could not do without one — `@energy8engine/play-loop`'s own
     // `package.json` (`the "playloop1" row requires "board"…`).
-    await expect(log).toContainText('board', { timeout: 20_000 });
-    await expect(log).toContainText('playloop1', { timeout: 20_000 });
+    await expect.poll(log, { timeout: 20_000 }).toContain('board');
+    await expect.poll(log, { timeout: 20_000 }).toContain('playloop1');
   } finally {
     await host.stop();
     rmSync(project, { recursive: true, force: true });
@@ -87,7 +96,7 @@ test('a row that requires a missing service says so, naming both', async ({ page
  * was NOT true for this one producer: `/api/spin` runs in the HOST process
  * (`dev-game.ts`'s route, a different process from the browser tab
  * entirely), and before task 6 that failure reached the IDE over `/ide`
- * and stopped there — the running game's own `#log` never heard about it,
+ * and stopped there — the running game's own list never heard about it,
  * because nothing told the game's `ide-bridge` connection to listen for a
  * frame the HOST itself originated rather than relayed. Task 6 is exactly
  * that one missing line: the bridge now accepts a `game-diagnostics` frame
@@ -104,13 +113,14 @@ test("a /api/spin failure appears in the game's own log, not only in the IDE", a
     // The game itself boots fine — `not-a-game` is only consulted once a
     // spin is actually played, so this is a clean `ready`, not a boot
     // failure that would prove a different path than the one under test.
-    await expect(page.locator('#status')).toHaveText('ready', { timeout: 20_000 });
-    await page.locator('#spin').click();
+    await gameBooted(page);
+    expect(await bootStatus(page)).toBe('ready');
+    await spinOnce(page);
     // `session-dev`'s own message (`spin failed: unknown game "…"`),
-    // read off the GAME's log — not `#status`'s "the host reported it to
-    // the IDE" sentence, which is the page's OWN words about the click and
+    // read off the GAME's list — not `spinOnce`'s "the host reported it to
+    // the IDE" sentence, which is the page's OWN words about the spin and
     // would say the same thing whether or not the fix in this test exists.
-    await expect(page.locator('#log')).toContainText('spin failed', { timeout: 20_000 });
+    await expect.poll(() => gameLog(page), { timeout: 20_000 }).toContain('spin failed');
   } finally {
     await host.stop();
     rmSync(project, { recursive: true, force: true });
@@ -163,7 +173,7 @@ test("the editor's own trouble appears in the panel, and nowhere else", async ({
   const host = await startDevHost(project);
   try {
     await page.goto(host.gameUrl);
-    await expect(page.locator('#status')).not.toHaveText('', { timeout: 20_000 });
+    await gameBooted(page);
 
     await page.goto(IDE_URL);
     await expect(page.getByTestId('diagnostics-panel')).toContainText(/editor/i, {

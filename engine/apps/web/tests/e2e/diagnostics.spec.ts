@@ -16,8 +16,9 @@
  *     with its own phrasing of the same trouble — a summary, a truncation,
  *     a severity count — would pass a `toContainText('failed')` check and
  *     break §8's promise, which is about one list rather than two views
- *     that agree in spirit. So the game's own line is read off `#log`,
- *     and the panel is required to contain it whole, `fix` clause and all.
+ *     that agree in spirit. So the game's own line is read off its live
+ *     list (`gameLog`: `__e8.liveDiagnostics()`, one line each), and the
+ *     panel is required to contain it whole, `fix` clause and all.
  *  2. **Two namespaces, two rows.** `Diagnostic.plugin` is drawn from two
  *     disjoint namespaces (its own doc spells them out): a composition row
  *     id, and a running game's seam or mechanic id. A human is entitled to
@@ -49,7 +50,14 @@ import { appendFileSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { expect, test } from '@playwright/test';
 import { IDE_WEB_PORT } from '../../e2e-ports';
-import { projectCopy, startDevHost } from './project-fixture';
+import {
+  bootStatus,
+  gameBooted,
+  gameLog,
+  projectCopy,
+  spinOnce,
+  startDevHost,
+} from './project-fixture';
 
 /** The IDE app — vite on 5680, proxying `/api` and `/ide` to the host on 5679. */
 const IDE_URL = `http://127.0.0.1:${IDE_WEB_PORT}/`;
@@ -65,8 +73,8 @@ const IDE_URL = `http://127.0.0.1:${IDE_WEB_PORT}/`;
  * at by paraphrase.
  *
  * It begins with `presentation failed` because that is what the game's own
- * page calls this state in `#status`, so the two surfaces of the GAME
- * agree as well.
+ * page calls this state after a spin (`presentation failed — see log`,
+ * `spinOnce`'s answer), so the two surfaces of the GAME agree as well.
  */
 const THROWN = 'presentation failed: reel-step refused this board (fixture 7f3a)';
 
@@ -105,10 +113,11 @@ test('a failure inside the running game reaches the IDE panel, word for word', a
     await game.goto(host.gameUrl);
     // 20s, the same wait every spec in this suite gives a first load: the
     // copy excludes `node_modules`, so vite's dependency optimizer is cold.
-    await expect(game.locator('#status')).toHaveText('ready', { timeout: 20_000 });
-    await game.locator('#spin').click(); // the fixture's bound mechanic fails to present
-    await expect(game.locator('#log')).toContainText('presentation failed', { timeout: 20_000 });
-    const onTheGame = await game.locator('#log').textContent();
+    await gameBooted(game);
+    expect(await bootStatus(game)).toBe('ready');
+    await spinOnce(game); // the fixture's bound mechanic fails to present
+    await expect.poll(() => gameLog(game), { timeout: 20_000 }).toContain('presentation failed');
+    const onTheGame = await gameLog(game);
 
     // Now the editor, which was never told anything directly.
     await page.goto(IDE_URL);
@@ -155,15 +164,22 @@ test('one id in both namespaces renders as two rows, not one', async ({ page }) 
     // The page shows a failure screen here, and that is correct rather than
     // incidental: a patch row nothing can place is an `error`, and a
     // composition with an error in it is not a game a player should be
-    // looking at. Spin still works — the button is not in the mount — which
-    // is all this test needs from it.
+    // looking at. Spin still works — the failure screen replaced the
+    // mount's children, not the flow — which is all this test needs from it.
     await page.goto(host.gameUrl);
-    await expect(page.locator('#status')).not.toHaveText('', { timeout: 20_000 });
-    await page.locator('#spin').click();
-    await expect(page.locator('#status')).toContainText('spin failed', { timeout: 20_000 });
+    await gameBooted(page);
+    expect(await spinOnce(page)).toContain('spin failed');
 
     await page.goto(IDE_URL);
-    const rows = page.getByTestId(/^diag-/);
+    // The rows whose PLUGIN is `session` (`<plugin> · <where>`). The game's
+    // own bridge also reports the same failure under its `spin` node
+    // (`flow · spin: spin failed: [session-dev] …`) once its frame lands —
+    // a third row, correct, and neither side of the collision this test is
+    // about. Counting every row made the test depend on whether that frame
+    // had landed before the page moved on: it had not in the runs this file
+    // passed with through the old Spin button (two rows), and it had in the
+    // first run through `__e8.spin()` (three).
+    const rows = page.getByTestId(/^diag-/).filter({ hasText: /\bsession · / });
     await expect(rows).toHaveCount(2, { timeout: 20_000 });
     await expect(rows.nth(0)).toContainText(/project/i);
     await expect(rows.nth(1)).toContainText(/game/i);
@@ -211,13 +227,13 @@ test('a host-side failure does not erase what the game already reported', async 
   try {
     const game = await context.newPage();
     await game.goto(host.gameUrl);
-    await expect(game.locator('#status')).toHaveText('ready', { timeout: 20_000 });
-    await expect(game.locator('#log')).toContainText('first-unbound', { timeout: 10_000 });
-    await expect(game.locator('#log')).toContainText('second-unbound');
+    await gameBooted(game);
+    expect(await bootStatus(game)).toBe('ready');
+    await expect.poll(() => gameLog(game), { timeout: 10_000 }).toContain('first-unbound');
+    await expect.poll(() => gameLog(game)).toContain('second-unbound');
 
     // …and THEN the host reports one of its own, on the same wire.
-    await game.locator('#spin').click();
-    await expect(game.locator('#status')).toContainText('spin failed', { timeout: 20_000 });
+    expect(await spinOnce(game)).toContain('spin failed');
 
     // The editor arrives afterwards and must be told all three — the two the
     // game said and the one the host said.
@@ -256,15 +272,16 @@ test('a project failure appears once, on the project side', async ({ page, conte
   try {
     const game = await context.newPage();
     await game.goto(host.gameUrl);
-    await expect(game.locator('#status')).not.toHaveText('', { timeout: 20_000 });
+    await gameBooted(game);
 
     // Half one: the game's own list is still complete. The project's
     // complaint is in it, where `boot` and this page both need it.
-    await expect(
-      game.locator('#log'),
-      "the game's own list must still carry what the host said about the project",
-    ).toContainText('which no bundle placed');
-    await expect(game.locator('#log')).toContainText('unbound-stage', { timeout: 10_000 });
+    await expect
+      .poll(() => gameLog(game), {
+        message: "the game's own list must still carry what the host said about the project",
+      })
+      .toContain('which no bundle placed');
+    await expect.poll(() => gameLog(game), { timeout: 10_000 }).toContain('unbound-stage');
 
     await page.goto(IDE_URL);
     const rows = page.getByTestId(/^diag-/);
@@ -306,8 +323,8 @@ test('a project failure appears once, on the project side', async ({ page, conte
  * Measured on a live host before the fix, on a project plugin whose `apply`
  * throws:
  *
- *     GAME #status: composition has errors — see log
- *     GAME #log:    [error] reelstep1 (runtime): …boot-failure-probe…
+ *     GAME status:  composition has errors — see log
+ *     GAME log:     [error] reelstep1 (runtime): …boot-failure-probe…
  *     IDE PANEL:    Diagnostics  no game connected yet
  *     IDE ROWS:     0
  *
@@ -393,11 +410,10 @@ for (const failure of BOOT_FAILURES) {
       await game.goto(host.gameUrl);
       // Not `ready`: this game did not start. The page says so, which was
       // never the problem — the problem was that only the page said so.
-      await expect(game.locator('#status')).toHaveText('composition has errors — see log', {
-        timeout: 20_000,
-      });
-      await expect(game.locator('#log')).toContainText(failure.fragment);
-      const onTheGame = await game.locator('#log').textContent();
+      await gameBooted(game);
+      expect(await bootStatus(game)).toBe('composition has errors — see log');
+      await expect.poll(() => gameLog(game)).toContain(failure.fragment);
+      const onTheGame = await gameLog(game);
 
       await page.goto(IDE_URL);
       const panel = page.getByTestId('diagnostics-panel');
@@ -444,7 +460,8 @@ test('a failure that has been fixed stops being shown', async ({ page, context }
   try {
     const game = await context.newPage();
     await game.goto(host.gameUrl);
-    await expect(game.locator('#log')).toContainText('boot-failure-probe', { timeout: 20_000 });
+    await gameBooted(game);
+    await expect.poll(() => gameLog(game), { timeout: 20_000 }).toContain('boot-failure-probe');
 
     // The editor sees it — the state this test is about undoing.
     await page.goto(IDE_URL);
@@ -455,10 +472,11 @@ test('a failure that has been fixed stops being shown', async ({ page, context }
     // open, exactly as a person would leave it.
     writeFileSync(pluginEntry, healthy);
     await game.reload();
-    await expect(game.locator('#status')).toHaveText('ready', { timeout: 20_000 });
-    await expect(game.locator('#log'), "the game's own list is clean now").not.toContainText(
-      'boot-failure-probe',
-    );
+    await gameBooted(game);
+    expect(await bootStatus(game)).toBe('ready');
+    await expect
+      .poll(() => gameLog(game), { message: "the game's own list is clean now" })
+      .not.toContain('boot-failure-probe');
 
     await expect(
       panel,

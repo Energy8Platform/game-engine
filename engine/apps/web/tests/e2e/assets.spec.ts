@@ -109,7 +109,7 @@ import { request as httpRequest } from 'node:http';
 import { join } from 'node:path';
 import { expect, test } from '@playwright/test';
 import { IDE_WEB_PORT } from '../../e2e-ports';
-import { PNG_BYTES, projectCopy, startDevHost, type DevHost } from './project-fixture';
+import { gameBooted, PNG_BYTES, projectCopy, startDevHost, type DevHost } from './project-fixture';
 
 /**
  * The IDE app — vite on 5680, proxying `/api`, `/plugin-client` and `/ide`
@@ -145,7 +145,7 @@ test('the assets screen shows the real project on disk', async ({ page }) => {
   const host = await startDevHost(dir);
   try {
     await page.goto(host.gameUrl);
-    await expect(page.locator('#status')).not.toHaveText('', { timeout: 20_000 });
+    await gameBooted(page);
 
     await page.goto(IDE_URL);
     await expect(page.getByTestId('explorer-game/script.spin')).toBeVisible({ timeout: 20_000 });
@@ -164,7 +164,7 @@ test('a file uploaded through the screen is on disk afterwards', async ({ page }
   const host = await startDevHost(dir);
   try {
     await page.goto(host.gameUrl);
-    await expect(page.locator('#status')).not.toHaveText('', { timeout: 20_000 });
+    await gameBooted(page);
 
     await page.goto(IDE_URL);
     await expect(page.getByTestId('explorer-game/script.spin')).toBeVisible({ timeout: 20_000 });
@@ -186,7 +186,7 @@ test('a file deleted through the screen is gone from disk', async ({ page }) => 
   const host = await startDevHost(dir);
   try {
     await page.goto(host.gameUrl);
-    await expect(page.locator('#status')).not.toHaveText('', { timeout: 20_000 });
+    await gameBooted(page);
 
     await page.goto(IDE_URL);
     await expect(page.getByTestId('explorer-bye.txt')).toBeVisible({ timeout: 20_000 });
@@ -228,7 +228,7 @@ test('a path that climbs out of the project is refused, and says why', async ({ 
   const host = await startDevHost(dir);
   try {
     await page.goto(host.gameUrl);
-    await expect(page.locator('#status')).not.toHaveText('', { timeout: 20_000 });
+    await gameBooted(page);
 
     const res = await rawGet(host, ESCAPE_PATH);
     expect(res.status).toBe(400);

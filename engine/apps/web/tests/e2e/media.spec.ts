@@ -16,11 +16,17 @@ import { readFileSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { expect, test, type Frame, type Page } from '@playwright/test';
 import { IDE_WEB_PORT } from '../../e2e-ports';
-import { projectCopy, startDevHost, type DevHost } from './project-fixture';
+import {
+  bootStatus,
+  gameBooted,
+  previewFrame,
+  projectCopy,
+  startDevHost,
+  type DevHost,
+} from './project-fixture';
 
 const IDE_URL = `http://127.0.0.1:${IDE_WEB_PORT}/`;
 const CANVAS = 'iframe[title="scene canvas"]';
-const PREVIEW = 'iframe[title="game preview"]';
 
 type Bounds = { x: number; y: number; w: number; h: number };
 
@@ -39,8 +45,15 @@ test.afterEach(async () => {
 
 const sceneFile = () => readFileSync(join(dir, 'scenes', 'base_game.scene.yml'), 'utf8');
 
+/**
+ * `canvas.spec.ts`'s own: the Preview's game booted first (it stays
+ * mounted behind the scene tab) — the node types, their schemas and the
+ * `accept` table arrive from the running game, and the composition
+ * document no longer embeds one.
+ */
 async function openSceneTab(page: Page): Promise<void> {
-  await page.goto(`${IDE_URL}#/doc/composition`);
+  await page.goto(IDE_URL);
+  await gameBooted(await previewFrame(page));
   await page.getByTestId('activity-scenes').click();
   await expect(page.getByTestId('scene-base_game')).toBeVisible();
   await page.getByTestId('scene-base_game').dblclick();
@@ -147,11 +160,10 @@ test('Properties: fps a number, sheet a select of .json files; a dropped .json i
 });
 
 test('the Preview shows the coin on base_game', async ({ page }) => {
-  await page.goto(`${IDE_URL}#/doc/composition`);
-  const frame = await frameOf(page, PREVIEW);
-  await expect
-    .poll(() => frame.locator('#status').textContent(), { timeout: 20_000 })
-    .toBe('ready');
+  await page.goto(IDE_URL);
+  const frame = await previewFrame(page);
+  await gameBooted(frame);
+  expect(await bootStatus(frame)).toBe('ready');
   await expect
     .poll(
       () =>

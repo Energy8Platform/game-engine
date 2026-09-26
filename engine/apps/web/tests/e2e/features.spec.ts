@@ -31,7 +31,7 @@ import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { dump, load } from 'js-yaml';
 import { expect, test } from '@playwright/test';
-import { projectCopy, startDevHost, type DevHost } from './project-fixture';
+import { bootStatus, gameBooted, projectCopy, startDevHost, type DevHost } from './project-fixture';
 
 /** The board both spins land on, `[col][row]` — symbols `1`..`5`, all `first-slot` image art (no orb `6`: its scene wants a band). */
 const BOARD = [
@@ -200,7 +200,8 @@ test('all nine feature steps play from a mechanic’s plan: the board, a sticky 
   host = await startDevHost(dir);
 
   await page.goto(host.gameUrl);
-  await expect.poll(() => page.locator('#status').textContent(), { timeout: 20_000 }).toBe('ready');
+  await gameBooted(page);
+  expect(await bootStatus(page)).toBe('ready');
   expect(await page.evaluate(() => (window as any).__e8.bound('base_game'))).toBe('feature-probe');
 
   const spin = () => page.evaluate(() => (window as any).__e8.spin());
@@ -222,7 +223,7 @@ test('all nine feature steps play from a mechanic’s plan: the board, a sticky 
   // ── spin 1: BOARD, then the nine steps. The diagnostics first: they say WHY a spin failed.
   const first = await spin();
   expect(await errors()).toEqual([]);
-  expect(first).toEqual({ out: 'next' });
+  expect(first).toEqual({ out: 'next', kind: 'present' });
   expect(await symbols()).toEqual(AFTER);
   expect(await multipliers()).toEqual(MULTIPLIERS);
   expect(await overlays()).toEqual({ sticky: 2, giant: 1 });
@@ -230,7 +231,7 @@ test('all nine feature steps play from a mechanic’s plan: the board, a sticky 
   // ── spin 2: BOARD alone — the rings stay until a `sticky { on: false }`, the giant goes at spin start
   const second = await spin();
   expect(await errors()).toEqual([]);
-  expect(second).toEqual({ out: 'next' });
+  expect(second).toEqual({ out: 'next', kind: 'present' });
   expect(await symbols()).toEqual(BOARD.map((col) => col.map(String)));
   // a fresh board: no cell keeps the last spin's multiplier
   expect(await multipliers()).toEqual(BOARD.map((col) => col.map(() => null)));
@@ -239,6 +240,6 @@ test('all nine feature steps play from a mechanic’s plan: the board, a sticky 
   // ── spin 3: a fresh giant, then `giant { clear: true }` and `sticky { clear: true }` — both gone before the spin ends
   const third = await spin();
   expect(await errors()).toEqual([]);
-  expect(third).toEqual({ out: 'next' });
+  expect(third).toEqual({ out: 'next', kind: 'present' });
   expect(await overlays()).toEqual({ sticky: 0, giant: 0 });
 });

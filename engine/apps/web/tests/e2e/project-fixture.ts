@@ -18,6 +18,7 @@ import { appendFileSync, cpSync, mkdtempSync, readFileSync, writeFileSync } from
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { dump, load } from 'js-yaml';
+import type { Frame, Page } from '@playwright/test';
 import { createIdeHost, type IdeHost } from '@energy8engine/ide-host';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -242,9 +243,11 @@ export const PNG_BYTES = Buffer.from(
 );
 
 /**
- * How long a game may take to come up: `page.goto(gameUrl)` → `#status`
- * holds text (spec §9's readiness — the same span `e8 shot` reports as
- * `loadMs`). A number from a measurement, not from a head (spec §3):
+ * How long a game may take to come up: `page.goto(gameUrl)` → `window.__e8`
+ * is defined (spec §9's readiness — `gameBooted` below, and the same span
+ * `e8 shot` reports as `loadMs`; measured when the page still wrote
+ * `#status` at that exact point, which is where `main.ts` now installs
+ * `__e8`). A number from a measurement, not from a head (spec §3):
  * `runtime.spec.ts`'s first test, run three times alone on 2026-09-16
  * (Apple M4 Max, 36 GB, macOS 26.6.2, node 22.16, Playwright 1.63.0,
  * the checked-in `first-slot` with a warm vite cache): **819, 808, 809
@@ -312,8 +315,8 @@ export async function startDevHost(dir: string): Promise<DevHost> {
  *  - `index.html`'s `<title>` becomes `Second Slot — e8 dev` — the one
  *    thing the running GAME shows that a spec field does not drive:
  *    `spec.json` is "not read by e8-server or this task's runtime" (its
- *    own `note`), `#status` reads `ready`/`done` for both, and the only
- *    spec field the scope forwards (`betLevels[0]`) is never rendered.
+ *    own `note`), both games boot and spin to the same status, and the
+ *    only spec field the scope forwards (`betLevels[0]`) is never rendered.
  */
 const TSCONFIGS = ['tsconfig.json', 'plugins/reel-step/tsconfig.json'];
 
@@ -409,4 +412,84 @@ export function serverPids(): number[] {
   } catch {
     return []; // pgrep exits 1 when nothing matches
   }
+}
+
+/**
+ * The game page's test hooks — `window.__e8`, which `main.ts` installs
+ * exactly where it used to write `#status` at boot. The page draws no dev
+ * toolbar or log any more (`#controls`, `#spin`, `#status`, `#log` are
+ * gone), so every spec reads and drives the game through these, on the
+ * game's own `Page` (a spec on `host.gameUrl`) or on the Preview
+ * document's game `Frame` (`previewFrame`).
+ */
+type GameTarget = Page | Frame;
+type E8 = {
+  diagnostics: { severity: string }[];
+  liveDiagnostics(): {
+    severity: string;
+    plugin: string;
+    where: string;
+    message: string;
+    fix?: string;
+  }[];
+  spin(opts?: { turbo?: boolean }): Promise<{ out: string; kind: 'present' | 'spin' }>;
+  skip(): void;
+};
+
+/** The game booted: `main.ts` installs `window.__e8` exactly where `#status` used to be written. */
+export async function gameBooted(target: GameTarget, timeout = 20_000): Promise<void> {
+  await target.waitForFunction(() => (window as { __e8?: unknown }).__e8 !== undefined, undefined, {
+    timeout,
+  });
+}
+
+/** What `#status` said at boot, from the same list it was computed from (`__e8.diagnostics`). */
+export async function bootStatus(target: GameTarget): Promise<string> {
+  return target.evaluate(() => {
+    const list = (window as unknown as { __e8: E8 }).__e8.diagnostics;
+    if (list.length === 0) return 'ready';
+    return list.some((d) => d.severity === 'error')
+      ? 'composition has errors — see log'
+      : 'composition has warnings — see log';
+  });
+}
+
+/** The game's own diagnostics, one line each, exactly as `#log` printed them. */
+export async function gameLog(target: GameTarget): Promise<string> {
+  return target.evaluate(() =>
+    (window as unknown as { __e8: E8 }).__e8
+      .liveDiagnostics()
+      .map(
+        (d) =>
+          `[${d.severity}] ${d.plugin} (${d.where}): ${d.message}${d.fix ? ` — ${d.fix}` : ''}`,
+      )
+      .join('\n'),
+  );
+}
+
+/**
+ * A spin, and what `#status` said after it: `done`, or one of its two
+ * failure texts — told apart by `kind`, the node that settled the spin
+ * (both failures leave by a port named `failed`).
+ */
+export async function spinOnce(target: GameTarget, opts?: { turbo?: boolean }): Promise<string> {
+  const { out, kind } = await target.evaluate(
+    (o) => (window as unknown as { __e8: E8 }).__e8.spin(o),
+    opts ?? {},
+  );
+  if (kind === 'spin') return 'spin failed — the host reported it to the IDE';
+  if (out === 'next') return 'done';
+  if (out === 'failed') return 'presentation failed — see log';
+  return `left by ${out}`;
+}
+
+/** The Preview document, opened and active (a hidden pane's frame may not paint), and its game frame. */
+export async function previewFrame(page: Page): Promise<Frame> {
+  await page.getByTestId('activity-preview').click();
+  const handle = await page
+    .locator('iframe[title="game preview"]')
+    .elementHandle({ timeout: 20_000 });
+  const frame = await handle?.contentFrame();
+  if (!frame) throw new Error('no game preview frame');
+  return frame;
 }

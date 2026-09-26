@@ -29,7 +29,7 @@
 import { readFileSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { expect, test, type Page } from '@playwright/test';
-import { projectCopy, startDevHost, type DevHost } from './project-fixture';
+import { bootStatus, gameBooted, projectCopy, startDevHost, type DevHost } from './project-fixture';
 
 test.describe.configure({ mode: 'serial' });
 
@@ -75,18 +75,15 @@ test.afterAll(async () => {
 });
 
 /**
- * The game's own page, booted to `ready` — `tempo.spec.ts`'s reader — AND
- * its hooks installed: since `e8 build` (2bc9d73c) `main.ts` imports
- * `ide-bridge` dynamically after `#status` reads `ready` and before it
- * sets `window.__e8`, so a cold first load answers `ready` with no hooks
- * yet (measured: `__e8` undefined on this file's first evaluate).
+ * The game's own page, booted to `ready` — `tempo.spec.ts`'s reader — with
+ * its hooks installed: `main.ts` installs `window.__e8` at the point it
+ * used to write its boot status, so the one wait answers both (it once
+ * took two — a cold first load wrote `ready` before the hooks existed).
  */
 async function readyPage(page: Page): Promise<void> {
   await page.goto(host.gameUrl);
-  await expect.poll(() => page.locator('#status').textContent(), { timeout: 20_000 }).toBe('ready');
-  await expect
-    .poll(() => page.evaluate(() => typeof (window as any).__e8), { timeout: 20_000 })
-    .toBe('object');
+  await gameBooted(page);
+  expect(await bootStatus(page)).toBe('ready');
 }
 
 const shellState = (page: Page): Promise<ShellState | null> =>

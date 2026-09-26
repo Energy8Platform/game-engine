@@ -37,10 +37,10 @@
  * own doc for why) — and hash the PNG bytes before and after
  * `__e8.spin()`. A quadrant-of-the-whole-canvas version of this used to
  * stand in for "the board is drawn", comparing the four quarters of a
- * full-canvas screenshot to each other; that is vacuous, because the
- * in-canvas chrome around the board (the shell's bar along the bottom,
- * the floating dev toolbar along the top) makes the four quarters differ
- * even over an EMPTY board. Clipped to the grid and compared before/after
+ * full-canvas screenshot to each other; that is vacuous, because what
+ * surrounds the board (the shell's bar along the bottom, the scene's logo
+ * and looping coin along the top) makes the four quarters differ even
+ * over an EMPTY board. Clipped to the grid and compared before/after
  * a spin, the hashes can only match if the spin drew nothing there — an
  * exact comparison, not a tolerance, measured across two screenshot
  * passes of the identical region rather than within one.
@@ -88,7 +88,14 @@ import { rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { expect, test, type Page } from '@playwright/test';
 import { IDE_WEB_PORT } from '../../e2e-ports';
-import { projectCopy, startDevHost } from './project-fixture';
+import {
+  bootStatus,
+  gameBooted,
+  gameLog,
+  projectCopy,
+  spinOnce,
+  startDevHost,
+} from './project-fixture';
 
 /**
  * The fixture's own patch with exactly ONE row changed: `reels1` stops
@@ -215,13 +222,28 @@ const PATCH_WITHOUT_MECHANICS = `rows:
 `;
 
 /**
- * Waits for the game to have finished composing. `src/main.ts` writes
- * `#status` exactly once `createGame` has resolved, so an empty `#status`
- * means "still booting" — and asserting on the canvas before that point
- * is how a reload race quietly turns into a green "the board is gone".
+ * Waits for the game to have finished composing. `src/main.ts` installs
+ * `window.__e8` exactly once `createGame` has resolved, so no `__e8` means
+ * "still booting" — and asserting on the canvas before that point is how
+ * a reload race quietly turns into a green "the board is gone".
  */
 async function settled(page: Page): Promise<void> {
-  await expect(page.locator('#status')).not.toHaveText('', { timeout: 20_000 });
+  await gameBooted(page);
+}
+
+/**
+ * Spin pressed and NOT waited on — what a click on the page's old Spin
+ * button did. For the two compositions below whose `present` node THROWS
+ * (a missing service), the interpreter reports the throw and ends that
+ * branch with no exit port (`fail` in `@energy8engine/flow`'s
+ * `interpreter.ts`), so there is nothing for `spinOnce` to wait on; those
+ * tests read what the node reported instead. The in-page `catch` swallows
+ * `__e8.spin()`'s own 20 s rejection, which is the same fact.
+ */
+async function pressSpin(page: Page): Promise<void> {
+  await page.evaluate(() => {
+    void (window as any).__e8.spin().catch(() => {});
+  });
 }
 
 /**
@@ -232,18 +254,15 @@ async function settled(page: Page): Promise<void> {
  * around wherever `nodeProps('base_game', 'board')` says the node itself
  * sits, and row 2 (the third and last row) is y 156..252 of that.
  *
- * Only row 2, not the whole grid — measured, not guessed. `first-slot`'s
- * own `index.html` floats the dev toolbar and the diagnostics log over the
- * TOP of the canvas (`#controls` then `#log`, `top: 3.75rem` + `max-height:
- * 6rem` — up to 156 screen px of chrome, however little or much is
- * logged), and row 0 sits right under it: `board`'s own y is 0, so row 0's
- * local -48..48 is the first 48 design px of the scene, no safe-area inset
- * carves any of that out for the toolbar. Two `base_game.scene.yml` nodes
- * — `logo` (a static image, harmless) and `coin` (an 8fps spritesheet that
- * keeps looping with no spin at all — confirmed by diffing two idle
- * screenshots 300ms apart) — sit in that same band too. Row 2 is clear of
- * all three, so a hash of just it can only differ between two shots if a
- * spin drew something there.
+ * Only row 2, not the whole grid — measured, not guessed. `board`'s own y
+ * is 0, so row 0's local -48..48 is the first 48 design px of the scene,
+ * and two `base_game.scene.yml` nodes sit in that same band: `logo` (a
+ * static image, harmless) and `coin` (an 8fps spritesheet that keeps
+ * looping with no spin at all — confirmed by diffing two idle screenshots
+ * 300ms apart). (The page used to float a dev toolbar and log over that
+ * band too; it draws nothing over the game any more.) Row 2 is clear of
+ * both, so a hash of just it can only differ between two shots if a spin
+ * drew something there.
  */
 const BOARD_LOCAL = { left: -48, top: 156, right: 456, bottom: 252 };
 
@@ -319,12 +338,16 @@ test('an unmodified project boots and spins with nothing thrown on the page', as
   try {
     await page.goto(host.gameUrl);
     await settled(page);
-    await expect(page.locator('#status')).toHaveText('ready');
+    expect(await bootStatus(page)).toBe('ready');
 
     // The click is the point: the fault this guards against needed a
-    // pointer event over the canvas to appear at all.
-    await page.locator('#spin').click();
-    await expect(page.locator('#status')).toHaveText('done', { timeout: 20_000 });
+    // pointer event over the canvas to appear at all. The page has no Spin
+    // button of its own any more, so the click lands on the canvas itself
+    // (its top-left corner — with nothing in flight, the stage's `ui.tap`
+    // has nothing to skip), and the spin goes through `__e8.spin()` — the
+    // shell's own Spin, pressed.
+    await page.locator('canvas').click({ position: { x: 5, y: 5 } });
+    expect(await spinOnce(page)).toBe('done');
 
     expect(pageErrors, 'a spin should raise nothing on the page').toEqual([]);
   } finally {
@@ -346,7 +369,7 @@ test('removing the reels row from the patch takes the board off the screen', asy
     // `renderer1` ROW attached it, and every row — `reels1` included —
     // composed without an error.
     await expect(page.locator('canvas')).toBeVisible();
-    await expect(page.locator('#status')).toHaveText('ready');
+    expect(await bootStatus(page)).toBe('ready');
 
     // The board CHANGES: a hash of the reel grid's bottom row, taken
     // before and after ONE spin, has to differ. The board is a node of
@@ -354,11 +377,10 @@ test('removing the reels row from the patch takes the board off the screen', asy
     // `flow.yml`'s `show` node puts up at boot with its cells still
     // empty; the spin is what fills them, so a hash of only that board
     // region — not the whole canvas, which also carries the shell's bar
-    // and the floating dev toolbar — can only come out the same if the
+    // and the scene's looping coin — can only come out the same if the
     // spin drew nothing.
     const beforeSpin = await boardRegionHash(page);
-    await page.locator('#spin').click();
-    await expect(page.locator('#status')).toHaveText('done', { timeout: 20_000 });
+    expect(await spinOnce(page)).toBe('done');
     const afterSpin = await boardRegionHash(page);
     expect(afterSpin, 'the board should change on the canvas after a spin').not.toBe(beforeSpin);
 
@@ -381,11 +403,10 @@ test('removing the reels row from the patch takes the board off the screen', asy
     // true of a game that had never drawn a board in the first place.
     await expect(page.locator('canvas'), 'the board should be gone from the screen').toHaveCount(0);
 
-    // And the game still RUNS. It did not hang, it did not blank the
-    // page, and nothing escaped as an uncaught error: the composition
+    // And the game still RUNS. It did not hang — its boot script ran to
+    // the end and installed `__e8` (`settled`, above) — it did not blank
+    // the page, and nothing escaped as an uncaught error: the composition
     // simply came out one row lighter.
-    await expect(page.locator('#spin')).toBeEnabled();
-    await expect(page.locator('#status')).not.toHaveText('');
     expect(pageErrors, 'the page should degrade, not throw').toEqual([]);
   } finally {
     await host.stop();
@@ -467,7 +488,7 @@ test('a misspelled package name on a row says so, naming the row and the package
     await page.goto(host.gameUrl);
     await settled(page);
     await expect(page.locator('canvas')).toBeVisible();
-    await expect(page.locator('#status')).toHaveText('ready');
+    expect(await bootStatus(page)).toBe('ready');
 
     writeFileSync(join(dir, 'e8.patch.yml'), PATCH_WITH_MISSPELLED_REELS);
     await page.reload();
@@ -524,16 +545,16 @@ test('removing the mechanics row says so instead of booting to ready', async ({ 
   try {
     await page.goto(host.gameUrl);
     await settled(page);
-    await expect(page.locator('#status')).toHaveText('ready');
+    expect(await bootStatus(page)).toBe('ready');
 
     writeFileSync(join(dir, 'e8.patch.yml'), PATCH_WITHOUT_MECHANICS);
     await page.reload();
     await settled(page);
 
-    await expect(
-      page.locator('#status'),
+    expect(
+      await bootStatus(page),
       'a composition with no mechanic registry must not read as ready',
-    ).not.toHaveText('ready');
+    ).not.toBe('ready');
     const mount = page.locator('#mount');
     await expect(mount).toContainText('This game could not start');
     await expect(
@@ -541,21 +562,21 @@ test('removing the mechanics row says so instead of booting to ready', async ({ 
       'the screen must name the row that normally provides the registry',
     ).toContainText('mechanics1');
 
-    // And a click on Spin still fails — the flow's `present` node asks
-    // for the registry and there is none — but the reason is not repeated
-    // from scratch: the boot diagnostic naming `mechanics1` is still
-    // sitting in the same bounded log, above the node's own report,
-    // exactly where it landed before the click.
-    await page.locator('#spin').click();
-    const log = page.locator('#log');
-    await expect(log).toContainText('mechanics1', { timeout: 20_000 });
-    await expect(log, 'the diagnostic names the missing service, not just the throw').toContainText(
-      'nothing in the composition provided "mechanics"',
-    );
+    // And a spin still fails — the flow's `present` node asks for the
+    // registry and there is none — but the reason is not repeated from
+    // scratch: the boot diagnostic naming `mechanics1` is still sitting in
+    // the same bounded list, above the node's own report, exactly where it
+    // landed before the spin.
+    await pressSpin(page);
+    const log = () => gameLog(page);
+    await expect.poll(log, { timeout: 20_000 }).toContain('mechanics1');
+    await expect
+      .poll(log, { message: 'the diagnostic names the missing service, not just the throw' })
+      .toContain('nothing in the composition provided "mechanics"');
     // The node's own words travel too (`plugin: 'flow'`, `where: draw`):
     // they are what tells "failed for the reason we predicted" apart from
     // "failed for another reason while a row happened to be missing".
-    await expect(log).toContainText("flow (draw): no 'mechanics' service in this composition");
+    await expect.poll(log).toContain("flow (draw): no 'mechanics' service in this composition");
   } finally {
     await host.stop();
     rmSync(dir, { recursive: true, force: true });
@@ -587,10 +608,10 @@ test('removing the play loop row says so at boot, and the first click names the 
     await page.goto(host.gameUrl);
     await settled(page);
 
-    await expect(
-      page.locator('#status'),
+    expect(
+      await bootStatus(page),
       'a composition with no play loop must not read as ready',
-    ).not.toHaveText('ready');
+    ).not.toBe('ready');
     const mount = page.locator('#mount');
     await expect(mount).toContainText('This game could not start');
     await expect(
@@ -598,13 +619,13 @@ test('removing the play loop row says so at boot, and the first click names the 
       'the row whose step handler had nowhere to register names itself',
     ).toContainText('the "cascade1" row requires "steps"');
 
-    // The spin still runs — the button is not in the mount — and its
-    // `present` says which service the presentation needed.
-    await page.locator('#spin').click();
-    await expect(page.locator('#log')).toContainText(
-      "flow (draw): no 'play' service in this composition",
-      { timeout: 20_000 },
-    );
+    // The spin still runs — the failure screen replaced the mount's
+    // children, not the flow — and its `present` says which service the
+    // presentation needed.
+    await pressSpin(page);
+    await expect
+      .poll(() => gameLog(page), { timeout: 20_000 })
+      .toContain("flow (draw): no 'play' service in this composition");
   } finally {
     await host.stop();
     rmSync(dir, { recursive: true, force: true });
@@ -623,7 +644,7 @@ test('removing the play loop row says so at boot, and the first click names the 
  *
  * `declared.spec.ts`'s "a row that requires a missing service says so,
  * naming both" already proves the ROW's half of this — `playloop1`'s own
- * `e8.runtime.requires: ["board"]`, read off `#log` right after boot. This
+ * `e8.runtime.requires: ["board"]`, read off the game's own diagnostics right after boot. This
  * test proves the other half, the one this task added: the PAGE's own
  * words, on the failure screen, naming `reels1` as what normally provides
  * `board` — independent of whatever any other row happens to declare.
@@ -671,23 +692,19 @@ test('a spin that could not be presented does not report itself as done', async 
 
     // The registry is there, so nothing is missing and the page is not a
     // failure screen — this is a working game with an unbound stage.
-    await expect(page.locator('#status')).toHaveText('ready');
+    expect(await bootStatus(page)).toBe('ready');
 
-    await page.locator('#spin').click();
-    const log = page.locator('#log');
+    const status = await spinOnce(page);
+    const log = () => gameLog(page);
     // The words the REGISTRY wrote, not a sentence the page wrapped around
-    // them. `#log` used to be a place `main.ts` printed to, and what it
-    // printed here was its own "could not present this stage: <the
-    // diagnostics, as JSON>"; the element renders `ctx.diagnostics` now, so
-    // what a person reads is `MechanicsService.check`'s own message — which
-    // names the actual cause (nothing is bound) where the page's wrapper
-    // only said that presenting had failed.
-    await expect(log).toContainText('cannot check stage "base_game"', { timeout: 20_000 });
-    await expect(log).toContainText('nothing is bound to it');
-    await expect(
-      page.locator('#status'),
-      'a spin that never reached the board must not read as done',
-    ).not.toHaveText('done');
+    // them. The page once printed its own "could not present this stage:
+    // <the diagnostics, as JSON>"; the game's list is `ctx.diagnostics`
+    // now, so what a person reads is `MechanicsService.check`'s own
+    // message — which names the actual cause (nothing is bound) where the
+    // page's wrapper only said that presenting had failed.
+    await expect.poll(log, { timeout: 20_000 }).toContain('cannot check stage "base_game"');
+    await expect.poll(log).toContain('nothing is bound to it');
+    expect(status, 'a spin that never reached the board must not read as done').not.toBe('done');
   } finally {
     await host.stop();
     rmSync(dir, { recursive: true, force: true });
@@ -710,8 +727,15 @@ test('the composition screen lists the rows the profile resolved to', async ({ p
   const dir = projectCopy();
   const host = await startDevHost(dir);
   try {
-    // Through the IDE on 5680, not the game on the preview origin — the screen under
-    // test is the editor's, and it reaches the host through vite's proxy.
+    // The game first, though nothing here is about it: `startDevHost`
+    // pre-bundles every row in the background, and `host.stop()` tearing
+    // that down mid-build leaves files landing in the copy while `rmSync`
+    // removes it (measured: ENOTEMPTY). The composition document used to
+    // load the game itself; it no longer embeds one.
+    await page.goto(host.gameUrl);
+    await settled(page);
+    // Then the IDE on 5680 — the screen under test is the editor's, and it
+    // reaches the host through vite's proxy.
     await page.goto(`http://127.0.0.1:${IDE_WEB_PORT}/`);
     for (const id of ['boot1', 'renderer1', 'scenes1', 'reels1']) {
       await expect(

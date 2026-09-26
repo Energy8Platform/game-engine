@@ -19,10 +19,11 @@
  * `pressSpin`.
  *
  * Same fixture and readers as `scenes.spec.ts`: a private `projectCopy()`
- * served by `startDevHost`, the composition document's `Preview`
+ * served by `startDevHost`, the Preview document's game frame
  * (`iframe[title="game preview"]`) and the game's own `window.__e8` —
- * here `spin()` (presses the shell's Spin, resolves `{ out }` from the
- * `present` node's exit), `spins()`, `flowTrace()` and `scenesVisible()`.
+ * here `spin()` (presses the shell's Spin, resolves `{ out, kind }` from
+ * the `present` node's exit — `spinOnce`), `spins()`, `flowTrace()` and
+ * `scenesVisible()`.
  *
  * What lands in the file arrives asynchronously (a canvas edit → `PUT
  * /api/flow` → disk), and what lands in the canvas from a spin does too
@@ -36,10 +37,17 @@ import { join } from 'node:path';
 import { expect, test, type Frame, type Page } from '@playwright/test';
 import { IDE_WEB_PORT } from '../../e2e-ports';
 import { load } from 'js-yaml';
-import { projectCopy, startDevHost, type DevHost } from './project-fixture';
+import {
+  bootStatus,
+  gameBooted,
+  previewFrame,
+  projectCopy,
+  spinOnce,
+  startDevHost,
+  type DevHost,
+} from './project-fixture';
 
 const IDE_URL = `http://127.0.0.1:${IDE_WEB_PORT}/`;
-const PREVIEW = 'iframe[title="game preview"]';
 
 interface Doc {
   nodes: { id: string; kind: string; props?: Record<string, unknown> }[];
@@ -66,11 +74,18 @@ const flowFile = (): Doc => load(readFileSync(join(dir, 'flow.yml'), 'utf8')) as
  * (as `scenes.spec.ts`). The first visit is what reports the game's node
  * KINDS to the host — retained there, so the IDE's boot `GET /api/flow`
  * carries them, the palette has its buttons and every node its ports.
+ *
+ * Then the game running IN the IDE, as the composition document used to
+ * guarantee by embedding it — the Preview's, which stays mounted behind
+ * the Flow tab. Without one, an edit to the flow redraws the canvas with
+ * the `sound`/`count` nodes' edges missing (measured: `click → spin` and
+ * `show_win → win`, 25 of 27, after the palette test's add and connect).
  */
 async function openComposition(page: Page): Promise<void> {
   await page.goto(host.gameUrl);
-  await expect(page.locator('#status')).not.toHaveText('', { timeout: 20_000 });
+  await gameBooted(page);
   await page.goto(`${IDE_URL}#/doc/composition`);
+  await gameBooted(await previewFrame(page));
 }
 
 /** The Flow document in front, its twenty-two nodes drawn with ports. */
@@ -81,19 +96,11 @@ async function openFlow(page: Page): Promise<void> {
   await expect(page.getByTestId('flow-port-draw-next')).toBeVisible({ timeout: 10_000 });
 }
 
-async function gameFrame(page: Page): Promise<Frame> {
-  const handle = await page.locator(PREVIEW).elementHandle();
-  const frame = await handle?.contentFrame();
-  if (!frame) throw new Error('preview iframe has no content frame');
-  return frame;
-}
-
-/** The composition's preview, booted to `ready`. */
+/** The Preview's game, booted to `ready`. */
 async function readyFrame(page: Page): Promise<Frame> {
-  const frame = await gameFrame(page);
-  await expect
-    .poll(() => frame.locator('#status').textContent(), { timeout: 20_000 })
-    .toBe('ready');
+  const frame = await previewFrame(page);
+  await gameBooted(frame);
+  expect(await bootStatus(frame)).toBe('ready');
   return frame;
 }
 
@@ -236,18 +243,18 @@ test('the Preview boots with base_game shown, spins through the flow, and the ru
   const frame = await readyFrame(page);
 
   // `boot → show base_game`: the scene is up before anyone spins. A poll,
-  // since `#status` reads `ready` before the boot GET has answered.
+  // since `__e8` is installed (and reads `ready`) before the boot GET has
+  // answered.
   await expect
     .poll(() => frame.evaluate(() => (window as any).__e8.scenesVisible()), { timeout: 10_000 })
     .toEqual(['base_game']);
   expect(await frame.evaluate(() => (window as any).__e8.spins().length)).toBe(0);
 
-  // The shell's Spin in, the `present` node's exit out — the page has no
-  // loop of its own any more: nothing in it posts a spin or executes a plan.
-  const outcome = await frame.evaluate(() => (window as any).__e8.spin());
-  expect(outcome).toEqual({ out: 'next' });
+  // The shell's Spin in, the `present` node's exit out (`next` → `done`)
+  // — the page has no loop of its own any more: nothing in it posts a spin
+  // or executes a plan.
+  expect(await spinOnce(frame)).toBe('done');
   expect(await frame.evaluate(() => (window as any).__e8.spins().length)).toBe(1);
-  await expect(frame.locator('#status')).toHaveText('done');
   const trace = (await frame.evaluate(() => (window as any).__e8.flowTrace())) as {
     run: number;
     node: string;

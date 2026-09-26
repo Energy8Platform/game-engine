@@ -22,11 +22,18 @@ import { join } from 'node:path';
 import { expect, test, type Frame, type Locator, type Page } from '@playwright/test';
 import { IDE_WEB_PORT } from '../../e2e-ports';
 import { load } from 'js-yaml';
-import { projectCopy, startDevHost, type DevHost } from './project-fixture';
+import {
+  bootStatus,
+  gameBooted,
+  previewFrame,
+  projectCopy,
+  spinOnce,
+  startDevHost,
+  type DevHost,
+} from './project-fixture';
 
 const IDE_URL = `http://127.0.0.1:${IDE_WEB_PORT}/`;
 const CANVAS = 'iframe[title="scene canvas"]';
-const PREVIEW = 'iframe[title="game preview"]';
 
 type Bounds = { x: number; y: number; w: number; h: number };
 
@@ -45,9 +52,17 @@ test.afterEach(async () => {
 
 const sceneFile = () => readFileSync(join(dir, 'scenes', 'base_game.scene.yml'), 'utf8');
 
-/** The IDE on its composition document, the Scenes sidebar shown, `base_game` opened as a tab. */
+/**
+ * The IDE with its game running, the Scenes sidebar shown, `base_game`
+ * opened as a tab. The game runs in the Preview document (which stays
+ * mounted behind the scene tab): the scene document learns which node type
+ * a dropped file makes from the running game (`no node type for .png — the
+ * game has not reported its node types yet` without one), and the
+ * composition document no longer embeds a game to report them.
+ */
 async function openSceneTab(page: Page): Promise<void> {
-  await page.goto(`${IDE_URL}#/doc/composition`);
+  await page.goto(IDE_URL);
+  await gameBooted(await previewFrame(page));
   await page.getByTestId('activity-scenes').click();
   await expect(page.getByTestId('scene-base_game')).toBeVisible();
   await page.getByTestId('scene-base_game').dblclick();
@@ -224,14 +239,11 @@ test('dropping assets/logo.png from the Explorer adds an image node', async ({ p
 test('the Preview still plays', async ({ page }) => {
   await openSceneTab(page);
   await readyCanvas(page);
-  // The Preview is the composition document's (`scenes.spec.ts`'s readers);
-  // brought back in FRONT, since a hidden iframe's ticker never finishes a spin.
-  await page.getByTestId('doc-composition').click();
-  const frame = await frameOf(page, PREVIEW);
-  await expect
-    .poll(() => frame.locator('#status').textContent(), { timeout: 20_000 })
-    .toBe('ready');
-  await frame.evaluate(() => (window as any).__e8.spin().then(() => null));
+  // The Preview is its own document; `previewFrame` brings it in FRONT,
+  // since a hidden iframe's ticker never finishes a spin.
+  const frame = await previewFrame(page);
+  await gameBooted(frame);
+  expect(await bootStatus(frame)).toBe('ready');
+  expect(await spinOnce(frame)).toBe('done');
   expect(await frame.evaluate(() => (window as any).__e8.spins().length)).toBe(1);
-  await expect(frame.locator('#status')).not.toHaveText('');
 });

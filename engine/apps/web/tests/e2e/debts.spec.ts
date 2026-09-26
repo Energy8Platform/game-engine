@@ -16,6 +16,8 @@ import { join } from 'node:path';
 import { expect, test, type Page } from '@playwright/test';
 import { IDE_WEB_PORT } from '../../e2e-ports';
 import {
+  gameBooted,
+  previewFrame,
   projectCopy,
   serverPids,
   startDevHost,
@@ -43,7 +45,7 @@ test.beforeEach(async ({ page }) => {
 /** Visits the game until it settles, then the IDE at `hash` — `shell.spec.ts`'s own wait, for the same reason. */
 async function openIde(page: Page, host: DevHost, hash = ''): Promise<void> {
   await page.goto(host.gameUrl);
-  await expect(page.locator('#status')).not.toHaveText('', { timeout: 20_000 });
+  await gameBooted(page);
   await page.goto(`${IDE_URL}${hash}`);
 }
 
@@ -91,6 +93,11 @@ test('a dead engine is named in the status bar and the panel, and a save revives
   const host = await startDevHost(dir);
   try {
     await openIde(page, host);
+    // The dot fills once anything has spoken on the `/ide` stream
+    // (`SessionStatus`: no group yet reads "not connected"), and what
+    // speaks first is the game running IN the IDE — the Preview's, now
+    // that the composition document no longer embeds one.
+    await gameBooted(await previewFrame(page));
     await expect(sessionStatus(page)).toHaveText('e8-server ●', { timeout: 20_000 });
     const pids = serverPids();
     expect(pids).toHaveLength(1);
