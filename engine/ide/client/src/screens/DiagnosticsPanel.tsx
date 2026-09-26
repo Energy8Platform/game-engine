@@ -40,10 +40,11 @@ import type { GameDiagnosticsGroup } from '../plugins/diagnostics';
  * GameDiagnosticsGroup[]`, one entry per game that has spoken (see that
  * type's own doc) — not because a game is a new origin to render alongside
  * `project`/`game`/`editor`, but because more than one game can now be
- * talking to the host at once (the preview wall, a later task), and this
- * panel must not flatten them back into one indistinguishable list, which
- * is the exact defect the host-side half of this task closes one layer
- * down. `GAME_DIAGNOSTIC_SOURCES` (which SPEAKER) and this panel's
+ * talking to the host at once (a game opened at a `?game=` address beside
+ * the Preview's anonymous one — the preview wall's tiles were the first),
+ * and this panel must not flatten them back into one indistinguishable
+ * list, which is the exact defect the host-side half of this task closes
+ * one layer down. `GAME_DIAGNOSTIC_SOURCES` (which SPEAKER) and this panel's
  * `project → game → editor` order (which NAMESPACE) are two separate axes
  * already; which GAME is a third, and it only ever refines a `game` row —
  * it never reorders or relabels a `project` or `editor` one.
@@ -154,7 +155,7 @@ interface Row {
  * The host is named because it is NOT one of the games, and before this it
  * rendered as the one unlabelled row among labelled ones: a host presented
  * as a game, in the panel whose whole job is saying where a failure came
- * from. A named game is named because a wall has several. And a game that
+ * from. A named game is named because it is one of several. And a game that
  * named no game says nothing extra — the ordinary single-project case,
  * which must read exactly as it did before there could be more than one.
  */

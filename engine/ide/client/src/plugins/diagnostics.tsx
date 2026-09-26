@@ -15,8 +15,10 @@ import type { ConnectionConfig, WebSocketLike } from './connection';
  * speakers share that message type and each sends a whole list, so this
  * store keeps one list per source (see `GameDiagnosticsSource`) — and, one
  * axis finer, one list per GAME within the `game` speaker (see
- * `GameDiagnosticsGroup`), because the preview wall (a later task) can have
- * several games talking to the same host at once. Neither axis absorbs the
+ * `GameDiagnosticsGroup`), because several games can be talking to the
+ * same host at once — a game opened at a `?game=` address names itself
+ * beside the Preview's anonymous one (the preview wall's tiles did, until
+ * slice 39 made the Preview one frame). Neither axis absorbs the
  * other: `byGame` below nests a per-source map INSIDE each game's own
  * entry, the same shape `rpc.ts`'s own retention took on the host side —
  * see that file's doc on `lastGameDiagnostics` for the identical rule
@@ -67,7 +69,7 @@ declare module 'cordis' {
 export interface GameDiagnosticsGroup {
   /**
    * Which game. `undefined` when only one game ever spoke — the common
-   * case, a project opened the ordinary way with no wall in play — and
+   * case, a project opened the ordinary way, the Preview alone — and
    * also where a HOST frame's contribution lands, since the host has no
    * game identity of its own to be grouped by.
    */

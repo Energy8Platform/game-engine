@@ -120,9 +120,12 @@ describe('protocol — scenes: a preview push down, a transitions mirror up', ()
 describe('protocol — game-status: the IDE status bar', () => {
   it('game-status goes both ways, and the host adds offline', () => {
     // Compile-time claims: `game-status` with `spinning` type-checks as
-    // both `ClientMessage` and `ServerMessage`; `offline` only as
-    // `ServerMessage` (the host is the only one that can report a game
-    // socket gone).
+    // both `ClientMessage` and `ServerMessage`, and so does `offline` —
+    // one `GameStatusMessage` type serves both directions. `offline` is
+    // the host's word alone (it is the only one that can report a game
+    // socket gone), but that is enforced at RUNTIME: `rpc.ts` drops a
+    // game's own `offline` frame (`rpc.test.ts`'s "ignores a frame with
+    // state "offline"…"), not the type.
     const gameToHost: ClientMessage = { type: 'game-status', state: 'spinning' };
     const hostMirror: ServerMessage = gameToHost;
     const hostAdds: ServerMessage = { type: 'game-status', state: 'offline' };

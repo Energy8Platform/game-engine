@@ -195,15 +195,17 @@ export function apply(ctx: Context, config: IdeRpcConfig = {}) {
    *     opened tab, not two different games. That is still exactly right
    *     for a socket that names no game: every such socket shares the one
    *     `undefined` key, most-recent-wins, unchanged. It stopped being
-   *     right the moment a socket COULD name itself: the preview wall (a
-   *     later task) opens several tiles against this one host at once,
-   *     each its own socket, each its own `game` id, and the old single
-   *     slot let the second tile's whole-list frame silently erase the
-   *     first's — measured directly against this file before this fix,
+   *     right the moment a socket COULD name itself: the preview wall
+   *     opened several tiles against this one host at once (until slice
+   *     39 made the Preview one anonymous frame — a game opened at a
+   *     `?game=` address still names itself), each its own socket, each
+   *     its own `game` id, and the old single slot let the second tile's
+   *     whole-list frame silently erase the first's — measured directly
+   *     against this file before this fix,
    *     two sockets reporting as `a` and `b` left a later client told only
    *     about `b`. A socket that DOES send an id is trusted at its word
    *     and gets a slot of its own, because that id is the one thing that
-   *     tells two tiles apart at all.
+   *     tells two named games apart at all.
    *  2. **The source is decided HERE, from where the frame entered — never
    *     read off the frame.** Unchanged, and still about `source` only:
    *     `game` is the opposite, carried through exactly as the sender
@@ -225,8 +227,9 @@ export function apply(ctx: Context, config: IdeRpcConfig = {}) {
    *     for a named game, because the reasoning that made "never clear"
    *     SAFE does not survive either: that reasoning was "there are two
    *     slots, full stop" (the old version of decision 1, above), and a
-   *     key the wall can mint without limit breaks it completely — an
-   *     entry per tile ever opened, kept for the life of the host process,
+   *     key that can be minted without limit (the wall's tiles did; a
+   *     `?game=` address still can) breaks it completely — an entry per
+   *     named game ever opened, kept for the life of the host process,
    *     is a leak, not a stale-but-true fact held a while longer. So a
    *     named entry is deleted when the socket that owns it closes
    *     (`gameSocket` below is the ownership record that makes "the socket
@@ -237,10 +240,10 @@ export function apply(ctx: Context, config: IdeRpcConfig = {}) {
    *     its life holds that many entries until IT closes (see
    *     `gameSocket`'s own doc) — the actual guarantee is narrower, "no
    *     entry outlives the socket that claimed it", which is not a hard
-   *     cap on how many can exist at any one instant. It is the wall's own
-   *     discipline of closing a tile's socket when the tile closes that
-   *     keeps this map from becoming a growing history of every id the
-   *     host has ever seen.
+   *     cap on how many can exist at any one instant. It is a named
+   *     game's page closing its socket when it goes that keeps this map
+   *     from becoming a growing history of every id the host has ever
+   *     seen.
    */
   const lastGameDiagnostics = new Map<string | undefined, RetainedFrame>();
 

@@ -139,8 +139,10 @@ export interface IdeBridgeConfig extends IdeBridgeSettableConfig {
    * `Config` below stays `stage` + `mechanic` only, because a human does
    * not type a game's identity into a form — the address this game was
    * OPENED AT already carries it, and that address is the one thing
-   * distinguishing two tiles of a preview wall running the SAME project,
-   * the SAME composition, in two different iframes.
+   * distinguishing two games running the SAME project, the SAME
+   * composition, in two different pages. The Preview names none — it is
+   * the anonymous game; the preview wall's tiles, which this was built
+   * for, each named one until slice 39 made the Preview one frame.
    *
    * **Optional, and undecided is legitimate — the ordinary case, not a
    * broken one.** A project opened the ordinary way, one game against one

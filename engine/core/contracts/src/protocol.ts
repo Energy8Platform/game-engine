@@ -53,14 +53,16 @@ export interface Snapshot {
  *
  *  - `game` — a running game's own `ctx.diagnostics`, forwarded by
  *    `ide-bridge` from the browser. Several connected game sockets are
- *    NOT one game seen several ways: a preview wall opens a tile per
- *    device preset, each its own page and its own socket, and each names
- *    itself in `GameDiagnosticsMessage.game`. So this field says WHICH
- *    SPEAKER, and `game` says which of the speaker's several selves —
- *    two axes, neither absorbing the other. This doc used to say the
- *    opposite (one game, most-recent-wins, the way `Snapshot` is shared),
- *    which was true of the model this protocol started in and is exactly
- *    the assumption the wall broke.
+ *    NOT one game seen several ways: each is its own page and its own
+ *    socket, and a game opened at an address with `?game=` names itself
+ *    in `GameDiagnosticsMessage.game` (the Preview names none — it is the
+ *    anonymous game). So this field says WHICH SPEAKER, and `game` says
+ *    which of the speaker's several selves — two axes, neither absorbing
+ *    the other. This doc used to say the opposite (one game,
+ *    most-recent-wins, the way `Snapshot` is shared), which was true of
+ *    the model this protocol started in and is exactly the assumption the
+ *    preview wall broke — a tile per device preset, each its own socket,
+ *    until slice 39 made the Preview one frame.
  *  - `host` — the host speaking for itself, for the one producer that is
  *    not in a browser at all: `dev-game.ts`'s `/api/spin` route, which
  *    runs in the host process and has no `ctx.diagnostics` to write into.
@@ -152,27 +154,29 @@ export interface GameDiagnosticsMessage {
   /**
    * Which running game this list belongs to — see `IdeBridgeConfig.game`
    * (`@energy8engine/ide-bridge`) for where a bridge gets one: a URL
-   * parameter, because the address a game was opened at is the one thing
-   * that tells two tiles of a preview wall apart. Absent on a host frame —
+   * parameter (`?game=`), because the address a game was opened at is the
+   * one thing that tells two games of the same project apart. The Preview
+   * sends none — it is the anonymous game. Absent on a host frame —
    * the host is one speaker, not one of several games, so it has none of
    * its own to stamp.
    *
    * **Absent on a GAME frame is legal too, and means "the only game" — the
    * ordinary case, not a broken frame.** The same rule `source`'s own doc
-   * states for itself. This field did not exist before a preview wall
-   * could run several games against one host at once, and a project opened
-   * the ordinary way still sends exactly one whole-list frame with nothing
-   * else to be told apart from. It starts to matter only once that stops
-   * being true — several tiles, each its own socket, each sending its OWN
-   * whole list — and a reader keying retention only by `source` (`'game'`,
-   * shared by every one of them) would let the second tile's list silently
-   * replace the first's: the exact failure `source` itself exists to
+   * states for itself. This field was added for the preview wall, which
+   * ran several games against one host at once until slice 39 made the
+   * Preview one frame, and a project opened the ordinary way still sends
+   * exactly one whole-list frame with nothing else to be told apart from.
+   * It starts to matter only once that stops being true — several named
+   * games, each its own socket, each sending its OWN whole list — and a
+   * reader keying retention only by `source` (`'game'`, shared by every
+   * one of them) would let the second game's list silently replace the
+   * first's: the exact failure `source` itself exists to
    * prevent one level up, reached again one level down.
    *
    * **Stamped by the sender, unlike `source`.** The host can always tell a
    * game's socket from its own process — that is what `source` records —
    * but it has no way to tell two game sockets apart; only the bridge
-   * itself knows which tile it is running in, so this travels client→host
+   * itself knows which game it is, so this travels client→host
    * exactly as the bridge set it, carried rather than invented by whatever
    * relays it onward.
    */
@@ -199,8 +203,9 @@ export interface GameDiagnosticsMessage {
  * `game` at all, the ordinary single-project case — is never announced
  * gone, exactly as the host never releases its retained frame: a game
  * going quiet BECAUSE it crashed is the case retention exists for, and
- * there is only ever one of those. It is the ids a wall can mint without
- * limit that have to be releasable.
+ * there is only ever one of those. It is the named ids — which a wall
+ * could mint without limit, and `?game=` addresses still can — that have
+ * to be releasable.
  */
 export interface GameGoneMessage {
   type: 'game-gone';
