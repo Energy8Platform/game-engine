@@ -1473,6 +1473,49 @@ describe('ide rpc — the game reports its status', () => {
     late.close();
   });
 
+  it('a relaunch race: the OLD game socket closing after the new one reported sends no offline — the owner is whoever reported last', async () => {
+    // The Preview relaunching (a toolbar change): the new game's socket
+    // reports before the old one's close reaches the host. That close is
+    // not the held status's any more, so it must not blank it.
+    const url = `${host.url.replace('http', 'ws')}/ide`;
+    const old = new WebSocket(url);
+    const fresh = new WebSocket(url);
+    await Promise.all([
+      new Promise((resolve) => old.once('open', resolve)),
+      new Promise((resolve) => fresh.once('open', resolve)),
+    ]);
+
+    old.send(JSON.stringify({ type: 'game-status', state: 'spinning' }));
+    expect(await inbox.waitFor((m) => m.type === 'game-status')).toEqual({
+      type: 'game-status',
+      state: 'spinning',
+    });
+    fresh.send(JSON.stringify({ type: 'game-status', state: 'ready' }));
+    expect(await inbox.waitFor((m) => m.type === 'game-status')).toEqual({
+      type: 'game-status',
+      state: 'ready',
+    });
+
+    old.close();
+    await new Promise((resolve) => old.once('close', resolve));
+    const offline = await Promise.race([
+      inbox.waitFor((m) => m.type === 'game-status').then(() => true),
+      new Promise<false>((resolve) => setTimeout(() => resolve(false), 50)),
+    ]);
+    expect(offline, 'a non-owner closing says nothing').toBe(false);
+
+    // …and the held status is still the new game's.
+    const late = new WebSocket(url);
+    const lateInbox = createInbox(late);
+    await new Promise((resolve) => late.once('open', resolve));
+    expect(await lateInbox.waitFor((m) => m.type === 'game-status')).toEqual({
+      type: 'game-status',
+      state: 'ready',
+    });
+    late.close();
+    fresh.close();
+  });
+
   it('ignores a frame with state "offline", an unknown state, or a non-string message', async () => {
     socket.send(JSON.stringify({ type: 'game-status', state: 'offline' }));
     socket.send(JSON.stringify({ type: 'game-status', state: 'bogus' }));
