@@ -1,8 +1,9 @@
 /**
  * `e8 shot` — a PNG of the running game (or of the IDE shell, `--ide`),
  * plus how long the game took to come up. Boots the same host `e8 dev`
- * does over `cwd`, opens its `previewUrl` in Chromium, waits for `#status`
- * to hold text (spec §9's readiness), and shoots.
+ * does over `cwd`, opens its `previewUrl` in Chromium, waits for
+ * `window.__e8` (the game's own test hooks — spec §9's readiness) to be
+ * defined, and shoots.
  *
  * `playwright` is the CLI's dependency, not this package's: it is loaded
  * here dynamically, and a `launch` can be injected instead (tests). The
@@ -26,19 +27,15 @@ import { IDE_BUILD_HINT, createIdeHost } from '../index';
 /** The slice of Playwright's `Page` this module uses — what a test fakes. */
 export interface PageLike {
   goto(url: string): Promise<{ status(): number } | null>;
-  locator(selector: string): { textContent(): Promise<string | null>; click(): Promise<void> };
   waitForFunction(
     pageFunction: (arg: string) => unknown,
     arg: string,
     options: { timeout: number },
   ): Promise<unknown>;
-  addStyleTag(options: { content: string }): Promise<unknown>;
+  evaluate<T>(fn: () => T | Promise<T>): Promise<T>;
   screenshot(options: { path: string; fullPage: boolean }): Promise<unknown>;
   close(): Promise<void>;
 }
-
-/** The dev toolbar and the diagnostics log a game page draws under `import.meta.env.DEV` — not the game. */
-const HIDE_DEV_CHROME = '#controls,#log{display:none}';
 
 export interface BrowserLike {
   newPage(options: { viewport: { width: number; height: number } }): Promise<PageLike>;
@@ -52,7 +49,7 @@ export interface ShotInput {
   out?: string;
   /** Default 480×288. */
   viewport?: { width: number; height: number };
-  /** Click `#spin` and wait for `#status` to settle (`done` or a failure text) before shooting. */
+  /** Call `window.__e8.spin()` and wait for it to settle before shooting. */
   spin?: boolean;
   /** Shoot the IDE shell at the host's root instead of the game (needs `dist`); refused with `spin`. */
   ide?: boolean;
@@ -95,6 +92,25 @@ async function within(p: Promise<unknown>, ms: number): Promise<boolean> {
       ),
       late,
     ]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/**
+ * `within`'s cousin for a promise whose fulfilled VALUE is wanted, not just
+ * whether it settled in time: `{ value }` when `p` fulfills within `ms`,
+ * `undefined` on a miss — a rejection is not a miss, and propagates out of
+ * this `await` same as it would out of a bare `await p`, for the caller's
+ * own `catch` to report.
+ */
+async function withinValue<T>(p: Promise<T>, ms: number): Promise<{ value: T } | undefined> {
+  let timer: NodeJS.Timeout | undefined;
+  const late = new Promise<undefined>((r) => {
+    timer = setTimeout(() => r(undefined), ms);
+  });
+  try {
+    return await Promise.race([p.then((value) => ({ value })), late]);
   } finally {
     clearTimeout(timer);
   }
@@ -189,11 +205,9 @@ export async function shot(input: ShotInput): Promise<ShotResult> {
       ? page.waitForFunction((sel) => !!document.querySelector(sel), IDE_READY, {
           timeout: budgetMs,
         })
-      : page.waitForFunction(
-          (sel) => !!document.querySelector(sel)?.textContent?.trim(),
-          '#status',
-          { timeout: budgetMs },
-        );
+      : page.waitForFunction(() => (window as { __e8?: unknown }).__e8 !== undefined, '', {
+          timeout: budgetMs,
+        });
     const loadMs = (await within(ready, budgetMs)) ? Date.now() - t0 : null;
     if (loadMs === null) {
       diagnostics.push(
@@ -203,30 +217,22 @@ export async function shot(input: ShotInput): Promise<ShotResult> {
 
     if (input.spin) {
       try {
-        const before = (await page.locator('#status').textContent()) ?? '';
-        await page.locator('#spin').click();
-        // Settled: neither what it said before the click nor `spinning…`
-        // — `done`, or one of the game's failure texts.
-        const settled = page.waitForFunction(
-          (prev) => {
-            const text = document.querySelector('#status')?.textContent ?? '';
-            return text !== prev && !text.startsWith('spinning');
-          },
-          before,
-          { timeout: budgetMs },
+        const settled = page.evaluate(() =>
+          (window as unknown as { __e8: { spin(): Promise<{ out: string }> } }).__e8.spin(),
         );
-        if (await within(settled, budgetMs)) {
-          const after = (await page.locator('#status').textContent()) ?? '';
-          if (after !== 'done')
-            diagnostics.push(diagnostic('warning', 'compute', '#status', after));
-        } else {
+        const raced = await withinValue(settled, budgetMs);
+        if (!raced) {
           diagnostics.push(
             diagnostic(
               'warning',
               'compute',
-              '#spin',
-              `#status did not settle within ${budgetMs}ms`,
+              '__e8.spin',
+              `the spin did not settle within ${budgetMs}ms`,
             ),
+          );
+        } else if (raced.value.out !== 'next') {
+          diagnostics.push(
+            diagnostic('warning', 'compute', '__e8.spin', `the spin left by "${raced.value.out}"`),
           );
         }
       } catch (error) {
@@ -234,7 +240,7 @@ export async function shot(input: ShotInput): Promise<ShotResult> {
           diagnostic(
             'warning',
             'compute',
-            '#spin',
+            '__e8.spin',
             `spin failed: ${error instanceof Error ? error.message : String(error)}`,
           ),
         );
@@ -247,9 +253,6 @@ export async function shot(input: ShotInput): Promise<ShotResult> {
     );
     try {
       await mkdir(dirname(path), { recursive: true });
-      // After the spin settled (its `#status` was read above), before the
-      // shot: the PNG is the game, not the page's dev chrome.
-      await page.addStyleTag({ content: HIDE_DEV_CHROME });
       await page.screenshot({ path, fullPage: true });
     } catch (error) {
       diagnostics.push(

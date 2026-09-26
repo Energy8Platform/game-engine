@@ -72,7 +72,7 @@ export const USAGE = [
   '         hit the 500-step cap or answered no next action before completing',
   '  shot   { path, width, height, loadMs, diagnostics }',
   '         width/height: the viewport (the PNG is the whole page); loadMs: navigation →',
-  '         #status non-empty, null when that missed --budget',
+  '         window.__e8 installed, null when that missed --budget',
   '  build  { out, files, diagnostics }',
   '         out: the absolute dist/ (--out, default dist; emptied first — never the project or',
   '         a folder containing it); files: every file in it, relative;',

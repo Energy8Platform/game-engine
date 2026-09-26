@@ -22,7 +22,7 @@ cpSync(FIRST_SLOT, cwd, {
 });
 afterAll(() => {
   rmSync(cwd, { recursive: true, force: true });
-  delete (globalThis as { document?: unknown }).document;
+  delete (globalThis as { window?: unknown }).window;
 });
 
 /** Live `e8-server` processes serving this copy's `game/` — 0 when none. */
@@ -54,23 +54,37 @@ interface Fake {
   shots: string[];
   /** The `fullPage` option of every screenshot, in order. */
   fullPages: boolean[];
-  /** What `#status` read each time a wait resolved. */
-  resolvedOn: string[];
+  /** The predicate (and its `arg`) the last `waitForFunction` call was handed — so a test can re-run it directly against a `window` of its own. */
+  readinessFn?: (arg: string) => unknown;
+  readinessArg?: string;
 }
 
 /**
  * Records every call. `goto` really fetches (so a 503 from the host is
- * real). `waitForFunction` really runs the page function — against a
- * `document` stub whose `#status` steps through `statuses` on each
- * false answer — so the predicate `shot` sends to the browser is the
- * thing under test; out of statuses (or `hang`), it never resolves.
+ * real). Both `waitForFunction` and `evaluate` really run the function
+ * they're handed — against a real `globalThis.window` this function sets
+ * up, `__e8` included, so the predicate and the `__e8.spin()` call `shot`
+ * sends to the browser are the thing under test, not a stand-in for them.
+ * `waitForFunction` also records what it was handed on `readinessFn`/
+ * `readinessArg`, so a test can re-run the predicate under a `window` it
+ * controls itself, `__e8` present or not.
  */
-function fake(options: { hang?: boolean; statuses?: string[]; gotoThrows?: string } = {}): Fake {
-  const f: Fake = { calls: [], gotos: [], shots: [], fullPages: [], resolvedOn: [], launch };
-  const statuses = [...(options.statuses ?? ['ready'])];
-  let status = statuses.shift() ?? '';
-  (globalThis as { document?: unknown }).document = {
-    querySelector: () => ({ textContent: status }),
+function fake(
+  options: {
+    hang?: boolean;
+    gotoThrows?: string;
+    /** What `window.__e8.spin()` resolves to; an `Error` makes it reject instead. */
+    spinResult?: { out: string } | Error;
+  } = {},
+): Fake {
+  const f: Fake = { calls: [], gotos: [], shots: [], fullPages: [], launch };
+  (globalThis as { window?: unknown }).window = {
+    __e8: {
+      spin: () =>
+        options.spinResult instanceof Error
+          ? Promise.reject(options.spinResult)
+          : Promise.resolve(options.spinResult ?? { out: 'next' }),
+    },
   };
   async function launch(): Promise<BrowserLike> {
     f.calls.push('launch');
@@ -81,31 +95,16 @@ function fake(options: { hang?: boolean; statuses?: string[]; gotoThrows?: strin
         const res = await fetch(url);
         return { status: () => res.status };
       },
-      locator(selector) {
-        return {
-          async textContent() {
-            f.calls.push(`text ${selector}`);
-            return status;
-          },
-          async click() {
-            f.calls.push(`click ${selector}`);
-          },
-        };
-      },
       waitForFunction(fn, arg) {
         f.calls.push('wait');
+        f.readinessFn = fn;
+        f.readinessArg = arg;
         if (options.hang) return new Promise(() => {});
-        for (;;) {
-          if (fn(arg)) {
-            f.resolvedOn.push(status);
-            return Promise.resolve(true);
-          }
-          if (!statuses.length) return new Promise(() => {});
-          status = statuses.shift()!;
-        }
+        return Promise.resolve(fn(arg));
       },
-      async addStyleTag({ content }) {
-        f.calls.push(`style ${content}`);
+      async evaluate(fn) {
+        f.calls.push('evaluate');
+        return fn();
       },
       async screenshot({ path, fullPage }) {
         f.shots.push(path);
@@ -152,8 +151,19 @@ describe('shot over a real host, with a fake browser', () => {
     expect(await portFree(f.gotos[0])).toBe(true);
   }, 30_000);
 
-  it('`out` and `viewport` are honoured; `spin` clicks #spin and waits until #status settles', async () => {
-    const f = fake({ statuses: ['ready', 'spinning…', 'done'] });
+  it('readiness resolves once `window.__e8` is defined (and not before)', async () => {
+    const f = fake();
+    await shot({ cwd, launch: f.launch });
+    const fn = f.readinessFn!;
+    const arg = f.readinessArg!;
+    (globalThis as { window?: unknown }).window = {};
+    expect(fn(arg)).toBeFalsy();
+    (globalThis as { window?: unknown }).window = { __e8: {} };
+    expect(fn(arg)).toBeTruthy();
+  });
+
+  it('`out` and `viewport` are honoured; `spin: true` calls `__e8.spin()` through `evaluate`, no `addStyleTag`', async () => {
+    const f = fake({ spinResult: { out: 'next' } });
     const out = join(cwd, 'custom', 'a.png');
     const r = await shot({
       cwd,
@@ -170,28 +180,40 @@ describe('shot over a real host, with a fake browser', () => {
       'launch',
       'newPage',
       'wait',
-      'text #status',
-      'click #spin',
-      'wait',
-      'text #status',
-      // The dev chrome goes after the spin settled and before the shot.
-      'style #controls,#log{display:none}',
+      'evaluate',
       'screenshot',
       'page.close',
       'browser.close',
     ]);
-    // Readiness resolved on `ready`; the spin wait only once past `spinning…`.
-    expect(f.resolvedOn).toEqual(['ready', 'done']);
   }, 30_000);
 
-  it('a spin that settles on a failure text is a warning carrying that text; the shot is still taken', async () => {
-    const f = fake({ statuses: ['ready', 'spinning…', 'error — see log'] });
+  it('`{ out: "failed" }` from `__e8.spin()` is a warning naming the port; the shot is still taken', async () => {
+    const f = fake({ spinResult: { out: 'failed' } });
     const r = await shot({ cwd, out: 'custom/b.png', spin: true, launch: f.launch });
-    expect(f.resolvedOn).toEqual(['ready', 'error — see log']);
     expect(r.path).toBe(join(cwd, 'custom', 'b.png'));
     expect(f.shots).toHaveLength(1);
     expect(r.diagnostics).toEqual([
-      { severity: 'warning', plugin: 'compute', where: '#status', message: 'error — see log' },
+      {
+        severity: 'warning',
+        plugin: 'compute',
+        where: '__e8.spin',
+        message: 'the spin left by "failed"',
+      },
+    ]);
+  }, 30_000);
+
+  it('a rejected `__e8.spin()` is a warning carrying the error message; the shot is still taken', async () => {
+    const f = fake({ spinResult: new Error('flow is broken') });
+    const r = await shot({ cwd, out: 'custom/c.png', spin: true, launch: f.launch });
+    expect(r.path).toBe(join(cwd, 'custom', 'c.png'));
+    expect(f.shots).toHaveLength(1);
+    expect(r.diagnostics).toEqual([
+      {
+        severity: 'warning',
+        plugin: 'compute',
+        where: '__e8.spin',
+        message: 'spin failed: flow is broken',
+      },
     ]);
   }, 30_000);
 

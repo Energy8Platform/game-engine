@@ -12,89 +12,19 @@
         color: #e8e8f0;
         font-family: system-ui, sans-serif;
       }
-      /* The canvas fills the window (`#mount` below); the dev toolbar and
-         the log float over it, both at the top, on a translucent band —
-         never over the shell's bar at the bottom. */
-      #controls {
-        position: fixed;
-        top: 0;
-        left: 0;
-        right: 0;
-        z-index: 2;
-        display: flex;
-        align-items: center;
-        gap: 0.75rem;
-        padding: 0.75rem 1rem;
-        background: rgba(16, 18, 26, 0.75);
-      }
-      /* A built page (`e8 build`) sets `hidden` on the toolbar; the
-         `display: flex` above would otherwise outrank the attribute. */
-      #controls[hidden] {
-        display: none;
-      }
       /* The renderer row follows this box (`renderer1` names no size), so
-         this is what makes the game fill the window. */
+         this is what makes the game fill the window — and nothing floats
+         over it: Spin and turbo are the shell's own bar now, and status
+         and diagnostics live in the IDE, not on this page. */
       #mount {
         position: fixed;
         inset: 0;
         line-height: 0;
       }
-      /* Docked under the toolbar (its height: 0.75rem padding twice around
-         a button line), not at the bottom, where the shell's bar is. */
-      #log {
-        position: fixed;
-        top: 3.75rem;
-        left: 0;
-        right: 0;
-        z-index: 2;
-        margin: 0;
-        padding: 0.5rem 0.75rem;
-        background: rgba(26, 29, 41, 0.85);
-        font: 12px/1.5 ui-monospace, monospace;
-        white-space: pre-wrap;
-        max-height: 6rem;
-        overflow: auto;
-      }
-      /* Nothing to say: no band at all. */
-      #log:empty {
-        display: none;
-      }
-      button {
-        font: inherit;
-        padding: 0.4rem 1rem;
-        cursor: pointer;
-      }
     </style>
   </head>
   <body>
-    <div id="controls">
-      <button id="spin">Spin</button>
-      <label>
-        <input id="turbo" type="checkbox" />
-        turbo
-      </label>
-      <label>
-        mechanic:
-        <!-- `reel-step` is not one of the engine's own: it comes from this
-             project's plugins/reel-step. Which of the three is selected at
-             boot is not decided here — src/main.ts reads it off the
-             composition, so e8.patch.yml stays the one place that says. -->
-        <select id="mechanic">
-          <option value="classic">classic</option>
-          <option value="cascade">cascade</option>
-          <option value="reel-step">reel-step</option>
-        </select>
-      </label>
-      <span id="status"></span>
-    </div>
     <div id="mount"></div>
-    <!-- The game's own diagnostics list, rendered. NOT a place anything on
-         this page writes to: src/main.ts reads `ctx.diagnostics` and
-         re-renders this element on every report, so what a person reads
-         here is the same list `ide-bridge` forwards to the IDE's
-         diagnostics panel — same entries, same text, same order. See
-         `renderDiagnostics` in src/main.ts. -->
-    <pre id="log" aria-label="diagnostics"></pre>
     <script type="module" src="/src/main.ts"></script>
   </body>
 </html>

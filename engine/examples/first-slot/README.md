@@ -21,7 +21,8 @@ to `present` to draw the response — dormant on `first-slot`'s own math, where
 every round completes on the first spin. `e8-base`'s `flow1` row
 (`@energy8engine/flow`) reads it from the host (`GET /api/flow`), interprets
 it, and traces every node it enters and leaves; `src/main.ts` holds no spin
-loop any more, and `#status` is read back off the trace.
+loop any more, and its status lives in the IDE's status bar, off the same
+trace, not on this page.
 
 The shell is a row — `shell1` in `e8.patch.yml` (`@energy8engine/shell-pixi`:
 the bar with Spin, the bet stepper, balance, win, turbo and autoplay, drawn
@@ -39,16 +40,14 @@ leaves by `failed` into `shell { autoplay: stop, balance: $session.balance }`
 and then that same `shell { busy: false }`: a failure ends an autoplay
 rather than retrying against a dead host, shows the wallet as the session
 row now has it (a failed play is still charged), and never leaves the bar
-disabled. The page's own `Spin` button
-and `#turbo` checkbox (`index.html`) are a dev proxy for the bar's:
-`src/main.ts` presses the
-shell's Spin and sets its turbo level, and emits `ui.spin` as well, for a flow
-with no shell to listen to. A tap on the canvas during a presentation skips it
-— `playloop1`'s `skipEvents: [ui.skip, ui.tap]` in `e8.patch.yml`; `scenes1`
-emits `ui.tap` off the stage, and a tap on the shell's bar bubbles there too,
-so any tap skips. The page's second click while the flow is busy emits
-`ui.skip`, caught the same way — directly by `playloop1`, never by a node,
-since a skip has to land while a run is already going.
+disabled. The game page draws only the game — Spin and turbo are the
+shell's own bar's, and `src/main.ts` reaches them only through
+`window.__e8.spin()`/`shellAction()`, for tests. A tap on the canvas during
+a presentation skips it — `playloop1`'s `skipEvents: [ui.skip, ui.tap]` in
+`e8.patch.yml`; `scenes1` emits `ui.tap` off the stage, and a tap on the
+shell's bar bubbles there too, so any tap skips; `window.__e8.skip()` does
+the same, caught directly by `playloop1`, never by a node, since a skip has
+to land while a run is already going.
 
 The IDE's Flow document edits this file (`PUT /api/flow`); node
 kinds come from the game's own registry (`ctx.flowNodes`), so a project
@@ -223,9 +222,10 @@ refused). `--target platform` bakes `import.meta.env.E8_TARGET`, which is
 how the `session` seam picks `@energy8engine/session-sdk` over the dev host's
 `session-host`. `--base` moves the page's own assets only: the rows fetch
 `/api/*` at the origin root whatever the base, so a base other than `/` is a
-warning — serve `dist/api` at the root, or proxy it. A built page hides the
-`#controls` toolbar and `#log` and never imports `ide-bridge` (both are
-behind `import.meta.env.DEV`); the `window.__e8` hooks stay. Nothing serves
+warning — serve `dist/api` at the root, or proxy it. A built page never
+imports `ide-bridge` either (behind `import.meta.env.DEV`); the
+`window.__e8` hooks stay — tests drive the page through them either way.
+Nothing serves
 `dist/` — any static server does; without `--target platform`, proxy
 `/api/session` and `/api/spin` to a running `e8 dev` host. `dist/` is in
 `.gitignore`.

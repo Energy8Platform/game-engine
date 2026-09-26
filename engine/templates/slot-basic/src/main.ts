@@ -49,23 +49,22 @@
  * composition ever reads, so a service only this file touches is nobody
  * else's to check. Leaving it unchecked was measured, not assumed: with
  * `reelstep1` also out of the patch — no row left declaring `mechanics`
- * — dropping `mechanics1` left `#status` reading `ready`, `#log` empty
- * and not one word anywhere on the page, over a board that could never
- * present anything; the first click then gave `Cannot read properties of
- * undefined (reading 'forStage')`. That is the silence the whole `boot`
- * design exists to prevent, reached by an edit the composition considers
- * legal. So the check is narrowed to what only this page knows, not
- * restored wholesale — and narrowed a second way now too: `need()` is the
- * only way this file reaches either of the two, enforced in the type
- * system (see `PageCtx` below), so a third one cannot start being read
- * here without being declared here first.
+ * — dropping `mechanics1` left the page silently reporting nothing wrong,
+ * over a board that could never present anything; the first click then
+ * gave `Cannot read properties of undefined (reading 'forStage')`. That is
+ * the silence the whole `boot` design exists to prevent, reached by an
+ * edit the composition considers legal. So the check is narrowed to what
+ * only this page knows, not restored wholesale — and narrowed a second
+ * way now too: `need()` is the only way this file reaches either of the
+ * two, enforced in the type system (see `PageCtx` below), so a third one
+ * cannot start being read here without being declared here first.
  *
- * **`<pre id="log">` is a reader, not a destination.** Everything this page
- * shows about what has gone wrong comes off `ctx.diagnostics` — the live
- * list the `diagnostics1` row provides — and every failure this page itself
- * discovers is written back into it. There is no second record kept here;
- * see `renderDiagnostics` below for why that matters and for what the
- * element used to be.
+ * **This page keeps no diagnostics reader of its own.** Everything it
+ * finds is still written into `ctx.diagnostics` — the live list the
+ * `diagnostics1` row provides, through the same `reportAll` call as
+ * always — but nothing here renders it: the IDE's Diagnostics tab is
+ * `ide-bridge`'s forward of that same list, so what a person reads there
+ * is exactly what this page and every other producer wrote.
  *
  * `@energy8engine/ide-bridge` (Task 12) is composed directly into
  * `game.ctx` below — the "hot fork to the game": it opens the SAME `/ide`
@@ -95,11 +94,11 @@
  *    by `e8 build --target <name>` (the `session` seam picks
  *    `@energy8engine/session-sdk` under `platform`); unset under `e8 dev`,
  *    so the default candidate wins there.
- *  - `import.meta.env.DEV` — the dev toolbar (`#controls`, `#log`) and
- *    `ide-bridge` are the editor's, not the game's: a built page hides the
- *    two elements and never imports the bridge. What a built page KEEPS is
- *    everything else — the flow, the shell, and the `window.__e8` hooks at
- *    the bottom, which are how `build.spec.ts` proves the bundle plays.
+ *  - `import.meta.env.DEV` — `ide-bridge` is the editor's, not the game's:
+ *    reached only under dev, by a dynamic import, so a built page never
+ *    carries it. What a built page KEEPS is everything else — the flow,
+ *    the shell, and the `window.__e8` hooks at the bottom, which are how
+ *    `build.spec.ts` proves the bundle plays.
  */
 import { createGame } from '@energy8engine/game-runtime';
 import { reportAll, type DiagnosticsService } from '@energy8engine/diagnostics';
@@ -126,21 +125,6 @@ import type {} from '@energy8engine/reels/runtime';
 import type {} from '@energy8engine/spin-log/runtime';
 
 const mount = document.getElementById('mount')!;
-const controlsEl = document.getElementById('controls')!;
-const logEl = document.getElementById('log')!;
-const statusEl = document.getElementById('status')!;
-const spinBtn = document.getElementById('spin') as HTMLButtonElement;
-const turboCheckbox = document.getElementById('turbo') as HTMLInputElement;
-const mechanicSelect = document.getElementById('mechanic') as HTMLSelectElement;
-
-// A built page (see the module doc): the toolbar and the log are the
-// editor's. Hidden before the first frame rather than after boot, so
-// nothing flashes; their handlers below still attach — `__e8` presses the
-// same `pressSpin` the button does.
-if (!import.meta.env.DEV) {
-  controlsEl.hidden = true;
-  logEl.hidden = true;
-}
 
 const game = await createGame({
   mount,
@@ -238,7 +222,7 @@ need({
   service: 'mechanics',
   row: 'mechanics1',
   pkg: '@energy8engine/game-runtime',
-  what: 'a mechanic registry for the mechanic <select> to read and rebind base_game through',
+  what: 'a mechanic registry to bind base_game through, at boot from e8.patch.yml and live while editing',
 });
 
 /**
@@ -283,22 +267,23 @@ const currentBoard = () =>
   game.ctx.reflect.get('board', false) as typeof game.ctx.board | undefined;
 
 /**
- * The game's own live diagnostics list — the service the `diagnostics1` row
- * provides (`@energy8engine/diagnostics`). Everything this page shows in
- * `<pre id="log">` is read from here, and there is no second list, no
- * private channel: `game.diagnostics` — which now includes any row's unmet
- * `e8.runtime.requires` (see the module doc above) — is already merged
- * into it by the time `createGame` returns `game`. If the composition was
- * missing something a row needed, the mount is already showing the
- * failure screen by the time this line runs; `createGame` draws it
- * itself, the same `boot`-or-fallback logic it always has.
+ * The service `reportAll` below writes the page's own findings into — the
+ * `diagnostics1` row (`@energy8engine/diagnostics`). There is no reader on
+ * this page any more: the IDE's Diagnostics tab is `ide-bridge`'s forward
+ * of the same list, so what a person reads there is exactly what this
+ * page and every other producer — the play loop, the mechanics registry,
+ * the bridge — wrote here. `game.diagnostics` — which now includes any
+ * row's unmet `e8.runtime.requires` (see the module doc above) — is
+ * already merged into it by the time `createGame` returns `game`. If the
+ * composition was missing something a row needed, the mount is already
+ * showing the failure screen by the time this line runs; `createGame`
+ * draws it itself, the same `boot`-or-fallback logic it always has.
  *
  * Through `ctx.reflect.get(name, false)`: `diagnostics1` is an optional row
  * (see `e8-base`'s own bundle file), a composition without it is legal,
  * and cordis throws on a property read of a registered service this
- * module never injected. `renderDiagnostics` below says so on screen
- * rather than silently showing an empty log — "there is no list" and "the
- * list is empty" are different news.
+ * module never injected. `reportAll` below is a no-op with `undefined`
+ * rather than throwing.
  */
 const diagnosticsLog = ctx.reflect.get('diagnostics', false) as DiagnosticsService | undefined;
 
@@ -351,124 +336,19 @@ if (unmet.length > 0) {
   }
 }
 
-// "errors" and "warnings" are not the same news and must not read as the
-// same news. A composition carrying only warnings STILL PLAYS — the game
-// is on screen, Spin works, and the only thing that happened is that
-// something (an unreadable `game/script.spin`, most likely) could not be
-// fully read. Calling that "errors" told a developer their game was
-// broken when it was running in front of them.
-if (diagnostics.length > 0) {
-  const errors = diagnostics.filter((d) => d.severity === 'error').length;
-  statusEl.textContent =
-    errors > 0 ? 'composition has errors — see log' : 'composition has warnings — see log';
-} else {
-  statusEl.textContent = 'ready';
-}
-
-/**
- * `<pre id="log">` — a READER of the diagnostics service, and nothing else.
- *
- * It used to be a destination: four different places in this file called a
- * local `log()` that pushed a formatted string into the element, which made
- * this page a second, private record of what had gone wrong — visible only
- * to whoever had this tab open, and different from what the IDE was shown.
- * That is the exact shape §8 of the design spec rules out ("the game, the
- * IDE and the agent see the same list"), and it is why the recorded defect
- * was possible at all: six healthy rows on the composition screen next to a
- * game lying under a failure screen.
- *
- * So the element now renders `ctx.diagnostics` and re-renders on
- * `subscribe`. Everything it shows was reported by whichever producer
- * actually saw the failure — the play loop, the mechanics registry, the
- * bridge, this page — and the same list is what `ide-bridge` forwards to
- * the IDE panel, verbatim. Nothing is formatted for one surface and not the
- * other: this line and `DiagnosticsPanel`'s row render the same four fields
- * in the same order.
- *
- * Oldest first, which is `list()`'s own order — the newest entry is at the
- * bottom, and the element is scrolled to it, so a bounded viewport still
- * shows the thing that just happened. (The old `log()` prepended, with a
- * wall-clock timestamp per line; a `Diagnostic` carries no time, and
- * inventing one here would have been this page's phrasing of the service's
- * data again, in miniature.)
- *
- * `dropped()` is rendered rather than ignored for the same reason the panel
- * renders it: the list is bounded, and a reader that shows only the
- * survivors while saying nothing about the rest looks complete while it
- * isn't.
- */
-function renderDiagnostics(): void {
-  if (!diagnosticsLog) {
-    logEl.textContent =
-      'no "diagnostics1" row in this composition, so this game keeps no list to show';
-    return;
-  }
-  const lines = diagnosticsLog
-    .list()
-    .map(
-      (d) => `[${d.severity}] ${d.plugin} (${d.where}): ${d.message}${d.fix ? ` — ${d.fix}` : ''}`,
-    );
-  const dropped = diagnosticsLog.dropped();
-  if (dropped > 0) {
-    lines.push(`… and ${dropped} older ones this list has forgotten — it keeps a bounded history`);
-  }
-  logEl.textContent = lines.join('\n');
-  logEl.scrollTop = logEl.scrollHeight;
-}
-
-renderDiagnostics();
-diagnosticsLog?.subscribe(renderDiagnostics);
-
-/**
- * The `<select>` starts on whatever the COMPOSITION actually bound, not on
- * whichever `<option>` happens to be first in the HTML.
- *
- * It used to start on the HTML's first option and immediately bind that,
- * which silently overrode `e8.patch.yml`: the patch could say
- * `base_game: reel-step` and the page would rebind to `classic` before the
- * developer touched anything. Two files stating the default, one of them
- * always losing, and nothing on screen saying so. Reading it back off the
- * registry leaves `e8.patch.yml` the single place that decides, and leaves
- * this control what it always was — a way to change it afterwards.
- *
- * A stage bound to a mechanic nothing registered reads as `null` here (see
- * `MechanicsService.forStage`), and the `<select>`'s own current value
- * stands. That is not a case to paper over: `mechanics.check` reports it
- * with the whole story on the first spin, and it is the only report that
- * can, because only it knows whether the registration ever arrived.
- *
- * Through the `mechanics` handle `need()` captured above, optionally
- * chained rather than read fresh: a composition with no `mechanics1` row
- * is a legal edit — `need()`'s own boot-time check has already reported
- * it and drawn the failure screen by the time this line runs, and
- * `reelstep1` will have said the same about its own half if that row is
- * in the composition — and this line must not turn the absence into a
- * `TypeError` that stops the page before those reports are drawn.
- */
-const bound = currentMechanics()?.forStage('base_game')?.id;
-if (bound) mechanicSelect.value = bound;
-
 /**
  * The live channel from the IDE's composition screen — and NO stage or
- * mechanic is passed on purpose.
+ * mechanic is passed on purpose. The composition alone decides what
+ * `base_game` is bound to; `ide-bridge` rebinds it only when a human has
+ * actually written a value into its own `mechanic` field — see
+ * `IdeBridgeSettableConfig.mechanic`.
  *
- * This used to hand over `mechanicSelect.value`, so the page's own
- * `<option>` order re-bound the stage at boot and quietly overrode
- * `e8.patch.yml`. Both defaults are gone now: the composition decides what
- * is bound (the `<select>` above is seeded FROM it), and `ide-bridge` binds
- * only when a human has actually written a value into its row — see
- * `IdeBridgeSettableConfig.mechanic`. Whoever turns a knob last still
- * wins; what no longer happens is a knob turning itself.
- *
- * **No `onDiagnostic` callback any more.** This call used to pass one, and
- * it printed the bridge's complaints into this page's own log — the
- * callback exists because `ide-bridge` is composed HERE, by the page, and
- * for a while a caller's callback really was the only place it could put
- * one. It is not any more: `apply` is handed this game's `ctx`, and
+ * **No `onDiagnostic` callback.** `apply` is handed this game's `ctx`, and
  * `ide-bridge`'s own `report()` writes every diagnostic it raises into
- * `ctx.diagnostics` — the same list the `<pre>` above renders. Passing a
- * callback that wrote the same event into the same element a second way
- * would put this page back in the business of keeping its own record.
+ * `ctx.diagnostics` — the same list `reportAll` above writes the page's own
+ * findings into, and that the IDE's Diagnostics tab reads back. A callback
+ * that wrote the same event a second way would put this page back in the
+ * business of keeping its own record.
  *
  * Under `import.meta.env.DEV` only, and by a dynamic import: a static
  * `import * as ideBridge` would sit in a built page's module graph whether
@@ -476,16 +356,11 @@ if (bound) mechanicSelect.value = bound;
  * — when `DEV` is baked to `false` by `e8 build`.
  */
 // Not awaited: a top-level `await` here parks everything below it — the
-// `__e8` harness included — behind a cold-cache module fetch, while
-// `#status` already reads `ready` above. The bridge attaches when it lands;
-// nothing on this page reads it synchronously.
+// `__e8` harness included — behind a cold-cache module fetch. The bridge
+// attaches when it lands; nothing on this page reads it synchronously.
 if (import.meta.env.DEV) {
   void import('@energy8engine/ide-bridge').then((ideBridge) => ideBridge.apply(game.ctx, {}));
 }
-
-mechanicSelect.addEventListener('change', () => {
-  currentMechanics()!.bind('base_game', mechanicSelect.value);
-});
 
 /**
  * **The flow drives the game (slice 19), through the shell (slice 26).**
@@ -500,10 +375,12 @@ mechanicSelect.addEventListener('change', () => {
  * that were deleted from this file, one to one. The Spin the flow listens
  * to is the SHELL's: the `shell1` row (`@energy8engine/shell-pixi`, the
  * bar drawn over the canvas) re-emits every one of its events on the bus
- * as `shell.<name>`, and its live state is the flow's `$shell.*` root — so
- * this page's own `#controls` are a dev PROXY for that bar (`pressSpin`
- * below), not a second UI, and what this page still shows is what the
- * flow's trace says happened.
+ * as `shell.<name>`, and its live state is the flow's `$shell.*` root.
+ * `pressSpin` below used to be behind this page's own Spin button, a dev
+ * PROXY for that bar; the button is gone (the shell already has one) and
+ * `pressSpin` is now reached only by `__e8.spin()` — same shell, same
+ * `ui.spin` fallback, one caller fewer. What the flow does is shown in the
+ * IDE's status bar (`ide-bridge`), not on this page.
  *
  * **NOT `ctx.events`.** That name is cordis's OWN lifecycle emitter — a
  * plain own property every `Context` is born with, which the service
@@ -513,21 +390,14 @@ mechanicSelect.addEventListener('change', () => {
  * (see `@energy8engine/flow`'s `runtime.ts` for why the name is kept).
  *
  * Both read leniently, and per use: a composition without `flow1` is a
- * legal edit, and the page says so in `#status` instead of throwing on the
- * first click; and `flow1` is a HOT row, like `mechanics1` and `reels1`
- * above — a re-apply disposes the bus and the interpreter a capture would
- * hold and provides fresh ones. The one thing that cannot be read per use,
- * the `#status` trace listener, is an effect of a `ctx.inject(['flow'])`
- * fiber: cordis re-runs it per provide and disposes the old listener with
- * the old fiber.
+ * legal edit — nothing here throws on the first `spin()` — and `flow1` is
+ * a HOT row, like `mechanics1` and `reels1` above — a re-apply disposes
+ * the bus and the interpreter a capture would hold and provides fresh
+ * ones.
  *
- * **The `<select>` no longer follows the presentation.** It used to be
- * re-synced from `mechanics.forStage(stage)` inside `presentStage`, so a
- * rebind from the IDE's composition screen showed up here on the next
- * spin. The stage is now `vars.result.stage` inside a `present` node's
- * run, which the trace does not carry; the control shows what a person
- * picked in it, seeded once from the composition above, and a rebind from
- * the IDE is what `__e8.bound()` and the board itself report.
+ * A rebind of `base_game` from the IDE's composition screen is what
+ * `__e8.bound()` and the board itself report; nothing on this page's own
+ * UI follows it any more.
  */
 const currentEvents = () =>
   ctx.reflect.get('events', false) as unknown as EventsService | undefined;
@@ -539,7 +409,7 @@ const currentFlow = () => ctx.reflect.get('flow', false) as FlowService | undefi
  * imports nothing from that package, for the same reason it imports no
  * row. Read per use and leniently, like `events`/`flow` above: a
  * composition without `shell1` is a legal one (`editor.ts` composes
- * `without: ['ui.shell']` on purpose), and the button below still emits
+ * `without: ['ui.shell']` on purpose), and `pressSpin` below still emits
  * `ui.spin` for a flow with no shell to listen to.
  */
 interface PageShell {
@@ -550,14 +420,25 @@ interface PageShell {
 const currentShell = () => ctx.reflect.get('shell', false) as PageShell | undefined;
 
 /**
- * What pressing Spin means, for the button and for `__e8.spin()` alike:
- * the shell's turbo level follows the checkbox (`1`/`0` — the flow's
- * `draw` node reads `$shell.turbo`), the SHELL's own Spin is pressed
- * (`shell.actions.spin()` → `shell.spin` on the bus, which this project's
- * `flow.yml` listens to), and `ui.spin` goes out as well, for a flow that
- * listens to that instead — every e2e fixture flow, written before there
- * was a shell. Exactly one of the two has a listener in any given flow;
- * the other lands on nobody.
+ * What `__e8.spin()` presses, now its only caller: the shell's turbo level
+ * is set to `turbo` (`1`/`0` — the flow's `draw` node reads
+ * `$shell.turbo`), the SHELL's own Spin is pressed (`shell.actions.spin()`
+ * → `shell.spin` on the bus, which this project's `flow.yml` listens to),
+ * and `ui.spin` goes out as well, for a flow that listens to that instead
+ * — every e2e fixture flow, written before there was a shell. Exactly one
+ * of the two has a listener in any given flow; the other lands on nobody.
+ *
+ * **`ui.spin`'s payload.** A flow listening to it (every e2e fixture flow)
+ * reads it off `vars.event` — the flow's `on` node hands its `fire()` the
+ * emitted payload UNCHANGED (`@energy8engine/flow`'s `kinds.ts`, the `on`
+ * kind: `fire({ event })` with `event` the bus callback's own argument),
+ * so `$event` IS the payload emitted here. The `emit` flow node kind
+ * agrees: it sends `resolve(p.payload, vars)` as the event itself, with no
+ * envelope of its own — a flow-emitted `{ turbo: true }` arrives as
+ * `$event.turbo`, so a page that wrapped its own payload would make the
+ * two paths disagree. `{ turbo: ... }` it is, below. This project's own
+ * `flow.yml` reads neither: it listens to `shell.spin` and takes turbo off
+ * `$shell.turbo`.
  */
 function pressSpin(turbo: boolean): void {
   const shell = currentShell();
@@ -571,73 +452,6 @@ const kindOf = (node: string) =>
   currentFlow()
     ?.doc()
     ?.nodes.find((n) => n.id === node)?.kind;
-
-if (!currentEvents() || !currentFlow()) {
-  statusEl.textContent = 'no flow row — the spin button does nothing';
-}
-
-// No `disabled` while a spin is in flight: the `on` node drops a fire while
-// a run is live (`busy: ignore`, its default), which is the same click
-// swallowed one layer down — and a button this page disabled would stay
-// so for good under a document with no `present` node to re-enable it on.
-//
-// **A second click, while busy, skips instead of spinning.** `ui.skip` is
-// not a flow node (a skip has to land DURING a run, which an `on` trigger
-// with `busy: ignore` cannot) — it is caught directly by `play-loop`'s own
-// bus subscription (see that row's module doc), so emitting it here does
-// not wait on `flow1` the way a `present`/`spin` node would. `flow.busy()`
-// is the same read `__e8.spin()` below polls before firing, just used the
-// other way around: busy here means "hurry the run that's already going",
-// not "not yet".
-//
-// **`ui.spin`'s payload.** A flow listening to `ui.spin` (every e2e
-// fixture flow) reads it off `vars.event` — the flow's `on` node hands its
-// `fire()` the emitted payload UNCHANGED (`@energy8engine/flow`'s
-// `kinds.ts`, the `on` kind: `fire({ event })` with `event` the bus
-// callback's own argument), so `$event` IS the payload emitted here. The
-// `emit` flow node kind agrees: it sends `resolve(p.payload, vars)` as the
-// event itself, with no envelope of its own — a flow-emitted `{ turbo:
-// true }` arrives as `$event.turbo`, so a page that wrapped its own payload
-// would make the two paths disagree. `{ turbo: ... }` it is, in `pressSpin`
-// above. This project's own `flow.yml` reads neither: it listens to
-// `shell.spin` and takes turbo off `$shell.turbo`.
-spinBtn.addEventListener('click', () => {
-  const events = currentEvents();
-  if (!events) return;
-  if (currentFlow()?.busy()) {
-    statusEl.textContent = 'skipping…';
-    events.emit('ui.skip');
-    return;
-  }
-  statusEl.textContent = 'spinning…';
-  pressSpin(turboCheckbox.checked);
-});
-
-// The checkbox on its own, too: ticked, and then the SHELL's Spin pressed
-// rather than this page's, still means turbo — the same level the bar's
-// own turbo button would set.
-turboCheckbox.addEventListener('change', () => {
-  currentShell()?.setTurbo(turboCheckbox.checked ? 1 : 0);
-});
-
-// `#status` after a click, from the trace rather than from a return value
-// this page no longer has: `done`/`presentation failed — see log` are the
-// two `present` ports, and a `spin` that left by `failed` is the host's
-// non-2xx, which `dev-game`'s route has already broadcast to the IDE.
-ctx.inject(['flow'], (c) =>
-  c.effect(
-    () =>
-      currentFlow()!.onTrace((entry) => {
-        const kind = kindOf(entry.node);
-        if (kind === 'present' && entry.out === 'next') statusEl.textContent = 'done';
-        else if (kind === 'present' && entry.out === 'failed')
-          statusEl.textContent = 'presentation failed — see log';
-        else if (kind === 'spin' && entry.out === 'failed')
-          statusEl.textContent = 'spin failed — the host reported it to the IDE';
-      }),
-    'first-slot:status',
-  ),
-);
 
 /** `__e8.viewIds()`'s numbering: one id per view object, for the page's lifetime. */
 const viewIdOf = new WeakMap<object, number>();
@@ -660,11 +474,11 @@ let nextViewId = 0;
  * under a different mechanic" rebinds and spins again.
  */
 (window as unknown as { __e8: unknown }).__e8 = {
-  /** The composition this game actually ran with — how a test tells "the project composed it" apart from "the page hardcoded it". `createGame`'s own field plus what `need()` found unmet, which is the whole of what the boot screen and `#log` were given. */
+  /** The composition this game actually ran with — how a test tells "the project composed it" apart from "the page hardcoded it". `createGame`'s own field plus what `need()` found unmet, which is the whole of what the boot screen was given. */
   diagnostics,
   /**
-   * The SAME diagnostics service `<pre id="log">` renders, read fresh —
-   * unlike `diagnostics` above, a plain array snapshotted once at
+   * The SAME diagnostics service the IDE's Diagnostics tab reads, read
+   * fresh — unlike `diagnostics` above, a plain array snapshotted once at
    * boot-script-evaluation time (before the `scenes` row's own boot GET, or
    * anything a spin does, has had a chance to report anything). A test
    * that wants to know what a LATER event reported — a scene that mounted
@@ -675,22 +489,23 @@ let nextViewId = 0;
     return (ctx.reflect.get('diagnostics', false) as DiagnosticsService | undefined)?.list() ?? [];
   },
   /**
-   * Exactly what the button does when the flow is idle — `pressSpin(turbo)`:
-   * the shell's Spin plus `ui.spin` (see its own doc for why both) — and
-   * then the port the flow's `present` node left by (`next` or `failed`),
-   * or `failed` from its `spin` node when the host refused. One 20 s
-   * budget for the whole thing; a rejection names which half ran out.
+   * Exactly what pressing Spin does when the flow is idle —
+   * `pressSpin(turbo)`: the shell's Spin plus `ui.spin` (see its own doc
+   * for why both) — and then the port the flow's `present` node left by
+   * (`next` or `failed`), or `failed` from its `spin` node when the host
+   * refused. One 20 s budget for the whole thing; a rejection names which
+   * half ran out.
    *
-   * Unlike the button, it first waits for the flow to be able to hear it:
-   * `flow.ready` (the document is armed — `#status` reads `ready` before
-   * the boot GET has answered) and then `!flow.busy()`, because `on` drops
-   * a fire while a run is live (`busy: ignore`) — the boot run still on
-   * its way to `on`, or the previous spin's last branches unwinding, which
-   * they still are on the microtask a resolve of this promise lands on. A
-   * button pressed then is simply swallowed; a test awaiting a spin that
-   * never started would sit out the full 20 s instead. `opts.turbo`
-   * defaults to `false`, same as the flow's own `present.turbo` schema
-   * default resolves an absent var to.
+   * Unlike a direct press, it first waits for the flow to be able to hear
+   * it: `flow.ready` (the document is armed, ahead of the boot GET having
+   * answered) and then `!flow.busy()`, because `on` drops a fire while a
+   * run is live (`busy: ignore`) — the boot run still on its way to `on`,
+   * or the previous spin's last branches unwinding, which they still are
+   * on the microtask a resolve of this promise lands on. A press then is
+   * simply swallowed; a test awaiting a spin that never started would sit
+   * out the full 20 s instead. `opts.turbo` defaults to `false`, same as
+   * the flow's own `present.turbo` schema default resolves an absent var
+   * to.
    */
   async spin(opts?: { turbo?: boolean }): Promise<{ out: string }> {
     const events = currentEvents();
@@ -720,16 +535,7 @@ let nextViewId = 0;
       pressSpin(opts?.turbo ?? false);
     });
   },
-  /**
-   * A second tap of Spin, without the tap: `events.emit('ui.skip')` — the
-   * same bus `ui.spin` rides, but caught directly by `play-loop`'s own
-   * subscription (`@energy8engine/play-loop`'s `runtime.ts`), never by a
-   * flow node — a skip has to land WHILE a run is busy, which is the one
-   * moment a flow `on` trigger (`busy: ignore`) cannot fire. Fire-and-
-   * forget, exactly like the click handler's own `ui.skip`: what it
-   * collapses is the run a `spin()` call above is already waiting on, so
-   * there is nothing further here to wait for.
-   */
+  /** What the removed button's second click did: hurry the run already going (`ui.skip`, caught by `play-loop`). A no-op with no event bus. */
   skip(): void {
     currentEvents()?.emit('ui.skip');
   },
@@ -843,8 +649,9 @@ let nextViewId = 0;
   featureOverlays(): { sticky: number; giant: number } | null {
     const grid = liveGrid();
     if (!grid) return null;
-    const layer = (grid as unknown as { children: { label?: string; children: { label?: string }[] }[] }).children
-      .find((c) => c.label === 'reels-features');
+    const layer = (
+      grid as unknown as { children: { label?: string; children: { label?: string }[] }[] }
+    ).children.find((c) => c.label === 'reels-features');
     const count = (label: string) => layer?.children.filter((c) => c.label === label).length ?? 0;
     return { sticky: count('sticky'), giant: count('giant') };
   },
@@ -950,12 +757,11 @@ let nextViewId = 0;
    * Asks only about paths something is expected to have loaded: the loader
    * REPORTS a `get` for a path no batch ever asked for (`assetLoader`,
    * `@energy8engine/scenes`), so a probe for an absent path leaves a
-   * warning in `#log` behind it.
+   * warning behind it — in `ctx.diagnostics`, like everything else here.
    */
   loaded(path: string): boolean {
     const loader = ctx.reflect.get('assetLoader', false) as
-      | { get(url: string): unknown }
-      | undefined;
+      { get(url: string): unknown } | undefined;
     return loader?.get(path) != null;
   },
   /** Visible top-level scenes, as `scenes.visible()`; `[]` with no scenes row. */
@@ -983,8 +789,7 @@ let nextViewId = 0;
    */
   nodeMasked(scene: string, node: string): boolean | null {
     const s = ctx.reflect.get('scenes', false) as
-      | { view?(ref: { scene: string; node: string }): { mask: unknown } | undefined }
-      | undefined;
+      { view?(ref: { scene: string; node: string }): { mask: unknown } | undefined } | undefined;
     const v = s?.view?.({ scene, node });
     return v ? v.mask != null : null;
   },
@@ -999,8 +804,7 @@ let nextViewId = 0;
    */
   nodeText(scene: string, node: string): string | null {
     const s = ctx.reflect.get('scenes', false) as
-      | { view?(ref: { scene: string; node: string }): { text?: unknown } | undefined }
-      | undefined;
+      { view?(ref: { scene: string; node: string }): { text?: unknown } | undefined } | undefined;
     const v = s?.view?.({ scene, node });
     return v && typeof v.text === 'string' ? v.text : null;
   },
@@ -1011,7 +815,10 @@ let nextViewId = 0;
   ): { x: number; y: number; alpha: number; width: number; height: number; tint: number } | null {
     const s = ctx.reflect.get('scenes', false) as
       | {
-          view?(ref: { scene: string; node: string }):
+          view?(ref: {
+            scene: string;
+            node: string;
+          }):
             | { x: number; y: number; alpha: number; width: number; height: number; tint: number }
             | undefined;
         }
@@ -1050,8 +857,9 @@ let nextViewId = 0;
   /** The scenes runtime's verdict on the safe rect — `scenes.orientation()`; `null` with no `scenes` row. */
   orientation(): 'landscape' | 'portrait' | null {
     return (
-      (ctx.reflect.get('scenes', false) as { orientation?(): 'landscape' | 'portrait' } | undefined)
-        ?.orientation?.() ?? null
+      (
+        ctx.reflect.get('scenes', false) as { orientation?(): 'landscape' | 'portrait' } | undefined
+      )?.orientation?.() ?? null
     );
   },
 };
@@ -1097,7 +905,9 @@ function liveGrid():
       getCell(
         col: number,
         row: number,
-      ): { data: { symbol: string | null; multiplier?: unknown }; view: ViewNode | null } | undefined;
+      ):
+        | { data: { symbol: string | null; multiplier?: unknown }; view: ViewNode | null }
+        | undefined;
     }
   | undefined {
   return currentBoard()?.grid as unknown as ReturnType<typeof liveGrid>;

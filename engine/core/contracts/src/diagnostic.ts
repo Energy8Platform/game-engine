@@ -81,7 +81,8 @@ export interface Diagnostic {
    *     flag). `shot`'s `where` is likewise whatever it was working on:
    *     the PNG path it could not write, the url it could not open or
    *     that was not ready, `playwright` when there is no browser,
-   *     `#spin`/`#status` when the spin it clicked did not settle.
+   *     `__e8.spin` when the spin it called through `window.__e8` did not
+   *     settle.
    *     These arrived with the file service and fit none
    *     of the three above: a read of `art/logo.png` is about no
    *     composition row, no running seam and no editor key. The `where`
