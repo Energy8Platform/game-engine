@@ -108,9 +108,14 @@ test('status-game follows the game: ready, spinning, ready again, and no game on
     await route.continue();
   });
   const spun = spinOnce(frame);
-  await requested;
-  await expect(gameStatus(page)).toHaveText('◌ spinning…');
-  release();
+  try {
+    await requested;
+    await expect(gameStatus(page)).toHaveText('◌ spinning…');
+  } finally {
+    // Let go even when the read above failed: a route left held keeps the
+    // game's request — and the teardown behind it — waiting forever.
+    release();
+  }
   expect(await spun).toBe('done');
   await expect(gameStatus(page)).toHaveText('● ready');
 
