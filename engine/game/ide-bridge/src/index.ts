@@ -68,6 +68,7 @@ import {
   type Diagnostic,
   type FlowKindInfo,
   type FlowTraceEntry,
+  type GameStatusState,
   type NodeTypeAccept,
   type ServerMessage,
 } from '@energy8engine/contracts';
@@ -1092,6 +1093,68 @@ export function apply(ctx: Context, config: IdeBridgeConfig): void {
 
   subscribeTrace();
 
+  // The game's status for the IDE's status bar (slice 39) — what the
+  // project page's own `#status` used to say, derived here from the flow:
+  // `spin` entered → spinning; `present` left by `next` → ready; either
+  // left by `failed` → failed. Sent only on a change; the last one goes out
+  // when the socket opens, since boot happens before it does.
+  type Status = { state: GameStatusState; message?: string };
+  let status: Status | null = null;
+  const sendStatus = (next: Status) => {
+    if (status && status.state === next.state && status.message === next.message) return;
+    status = next;
+    if (socket.readyState !== WEBSOCKET_OPEN) return;
+    try {
+      const message: ClientMessage = { type: 'game-status', ...next };
+      socket.send(JSON.stringify(message));
+    } catch {
+      // as `flushTrace`
+    }
+  };
+  socket.addEventListener('open', () => {
+    if (!status) return;
+    try {
+      socket.send(JSON.stringify({ type: 'game-status', ...status } satisfies ClientMessage));
+    } catch {
+      // as `flushTrace`
+    }
+  });
+
+  type StatusFlow = {
+    ready?: Promise<void>;
+    doc?(): { nodes: { id: string; kind: string }[] } | null;
+    onTrace(fn: (e: FlowTraceEntry) => void): () => void;
+  };
+  let unwatchStatus: (() => void) | undefined;
+  const watchStatus = () => {
+    unwatchStatus?.();
+    const flow = currentFlow() as StatusFlow | undefined;
+    if (!flow) {
+      sendStatus({ state: 'ready', message: 'no flow row' });
+      unwatchStatus = undefined;
+      return;
+    }
+    let alive = true;
+    void flow.ready?.then(() => {
+      if (alive && (status === null || status.state === 'loading')) sendStatus({ state: 'ready' });
+    });
+    const off = flow.onTrace((e) => {
+      const kind = flow.doc?.()?.nodes.find((n) => n.id === e.node)?.kind;
+      if (kind === 'spin' && e.out === null) sendStatus({ state: 'spinning' });
+      else if (kind === 'spin' && e.out === 'failed')
+        sendStatus({ state: 'failed', message: 'spin failed' });
+      else if (kind === 'present' && e.out === 'next') sendStatus({ state: 'ready' });
+      else if (kind === 'present' && e.out === 'failed')
+        sendStatus({ state: 'failed', message: 'presentation failed' });
+    });
+    unwatchStatus = () => {
+      alive = false;
+      off();
+    };
+  };
+  sendStatus({ state: 'loading' });
+  watchStatus();
+
   // The boot run traces before this socket is open, and `flushTrace` drops
   // on a closed socket: on `open`, the interpreter's own backlog
   // (`flow.trace()`, the run so far) goes out as one frame. It holds
@@ -1114,8 +1177,10 @@ export function apply(ctx: Context, config: IdeBridgeConfig): void {
     if (!fresh || fresh === readFromFlow) return;
     readFromFlow = fresh;
     subscribeTrace();
+    watchStatus();
   });
   ctx.effect(() => () => unsubscribeTrace?.(), 'ide-bridge-flow-trace-forwarding');
+  ctx.effect(() => () => unwatchStatus?.(), 'ide-bridge-game-status');
 
   ctx.effect(() => () => socket.close(), 'ide-bridge-socket');
 }

@@ -10,6 +10,8 @@ import {
   type FlowMessage,
   type GameCompositionMessage,
   type GameDiagnosticsSource,
+  type GameStatusMessage,
+  type GameStatusState,
   type NodeTypeInfo,
   type ScenePreviewMessage,
   type ScenesMessage,
@@ -345,6 +347,25 @@ export function apply(ctx: Context, config: IdeRpcConfig = {}) {
   /** In wire order: the greeting sends them, and the departure clears them, in this order. */
   const mirrors = [transitions, nodeTypes, flowKinds];
 
+  /**
+   * The running game's own status (`game-status`, slice 39) — NOT a
+   * `mirror()`: there is exactly one game reporting (unlike a registry,
+   * there is no "list" to replace whole), and there is a THIRD writer no
+   * mirror has — the host itself, saying `offline` when the socket that
+   * reported closes or the project changes (see `socket.on('close', …)`
+   * and the `workspace/changed` listener below). Retained for the same
+   * reason `lastGameDiagnostics` is: a late-connecting IDE tab should see
+   * what the game is doing right now, not "nothing yet" until the next
+   * spin happens to move it.
+   *
+   * `owner` is the socket that reported the retained frame — the same
+   * ownership record `gameSocket` is for `game-diagnostics`, needed for
+   * the same reason: `state` says nothing about WHO said it, so there is
+   * no other way to tell "the socket that owns this closed" from "some
+   * OTHER socket closed" in the `close` handler below.
+   */
+  let lastStatus: { frame: GameStatusMessage; owner: WebSocket } | null = null;
+
   /** The active project's composition, or `null` between projects. Read at call time — the root has none. */
   const compositionOf = () => ctx.get('composition') ?? null;
   const emptySnapshot = (): Snapshot => ({ rows: [], diagnostics: [] });
@@ -478,6 +499,19 @@ export function apply(ctx: Context, config: IdeRpcConfig = {}) {
         const gone: ServerMessage = { type: 'game-gone', game };
         for (const other of clients) send(other, gone);
       }
+      // `game-status` is not keyed by game id at all (there is one slot,
+      // not a map — see `lastStatus`'s own doc), so its release is the
+      // simpler "was THIS the socket that owns it" check rather than the
+      // loop above's per-id one. `offline` is the host's own word, never
+      // the game's (`GameStatusMessage.state`'s own doc) — said here
+      // because the one thing this host knows for certain is that the
+      // socket that was reporting just stopped, which is a fact about the
+      // game whether or not it managed to say anything on its way out.
+      if (lastStatus?.owner === socket) {
+        lastStatus = null;
+        const offline: ServerMessage = { type: 'game-status', state: 'offline' };
+        for (const other of clients) send(other, offline);
+      }
     });
 
     socket.on('message', async (data) => {
@@ -497,7 +531,8 @@ export function apply(ctx: Context, config: IdeRpcConfig = {}) {
           type !== 'game-transitions' &&
           type !== 'node-types' &&
           type !== 'flow-kinds' &&
-          type !== 'flow-trace'
+          type !== 'flow-trace' &&
+          type !== 'game-status'
         ) {
           return;
         }
@@ -521,6 +556,33 @@ export function apply(ctx: Context, config: IdeRpcConfig = {}) {
           for (const other of clients) {
             if (other !== socket) send(other, relayed);
           }
+        }
+        return;
+      }
+
+      if (message.type === 'game-status') {
+        // The game's own account of what it is doing (`ide-bridge`, Task
+        // 3) — accepted only in the shapes `GameStatusState` actually
+        // allows a GAME to say: `offline` is the host's own word (see
+        // `lastStatus`'s own doc and the `close`/`workspace/changed`
+        // sites that speak it), never a claim the game itself gets to
+        // make, and an unrecognised state or a `message` that is not a
+        // plain string is more likely a future protocol version or a
+        // malformed frame than a fact worth relaying — silently dropped,
+        // the same leniency `mirror`'s own `item` check gives a malformed
+        // registry frame.
+        const state = message.state as unknown;
+        const allowed: GameStatusState[] = ['loading', 'ready', 'spinning', 'failed'];
+        if (typeof state !== 'string' || !allowed.includes(state as GameStatusState)) return;
+        if (message.message !== undefined && typeof message.message !== 'string') return;
+        const frame: GameStatusMessage = {
+          type: 'game-status',
+          state: state as GameStatusState,
+          ...(message.message !== undefined ? { message: message.message } : {}),
+        };
+        lastStatus = { frame, owner: socket };
+        for (const other of clients) {
+          if (other !== socket) send(other, frame);
         }
         return;
       }
@@ -617,6 +679,12 @@ export function apply(ctx: Context, config: IdeRpcConfig = {}) {
     // The last known registries, same reasoning: a client connecting after
     // the game reported them must not offer an empty pick list — see `mirror`.
     for (const m of mirrors) m.greet(socket);
+    // The last known status, same reasoning again: a client opening the
+    // IDE after the game has already been spinning for a while should not
+    // have its status bar say nothing until the next transition happens
+    // to move it. Held while a status IS held — the "offline" case has
+    // nothing to greet with, the same way an empty `mirror` list does not.
+    if (lastStatus) send(socket, lastStatus.frame);
   }
   service.attach(ctx.server, { origins: config.origins });
 
@@ -659,10 +727,19 @@ export function apply(ctx: Context, config: IdeRpcConfig = {}) {
       if (lastHostDiagnostics) {
         gone.push({ type: 'game-diagnostics', diagnostics: [], dropped: 0, source: 'host' });
       }
+      // A retained status was about the project that just left, exactly
+      // like every other retained frame above — `offline` is the honest
+      // word for it, the same one the game's own socket closing already
+      // sends, because from the IDE's point of view the two are the same
+      // fact: nothing here is reporting on THIS project any more.
+      if (lastStatus) {
+        gone.push({ type: 'game-status', state: 'offline' });
+      }
       lastGameDiagnostics.clear();
       gameSocket.clear();
       groups.clear();
       lastHostDiagnostics = null;
+      lastStatus = null;
       // Unlike the diagnostics/game-gone frames above (sent only when
       // something was actually retained), the registries' empty frames
       // always go: a client that connected before anything had ever been

@@ -1238,6 +1238,16 @@ describe('ide-bridge forwards the game diagnostics', () => {
       vi.unstubAllGlobals();
     });
 
+    // `last(socket)` is the whole socket's last SENT frame, and `apply()`
+    // now also sends `game-status` frames on this same socket (slice 39) —
+    // so these two identity assertions read the last `game-diagnostics`
+    // frame specifically, rather than assuming it is whatever was sent
+    // last.
+    const lastDiagnostics = (socket: { sent: string[] }) =>
+      frames(socket)
+        .filter((f) => f.type === 'game-diagnostics')
+        .at(-1);
+
     it("an explicit config.game wins over a ?game= in the page's own address", async () => {
       ctx = new Context();
       await ctx.plugin(diagnosticsRuntime);
@@ -1254,7 +1264,7 @@ describe('ide-bridge forwards the game diagnostics', () => {
         socketFactory: () => socket as never,
       });
 
-      expect(last(socket).game).toBe('from-config');
+      expect(lastDiagnostics(socket).game).toBe('from-config');
     });
 
     it("with no config.game, the page's own ?game= in the address is used", async () => {
@@ -1272,7 +1282,7 @@ describe('ide-bridge forwards the game diagnostics', () => {
         socketFactory: () => socket as never,
       });
 
-      expect(last(socket).game).toBe('from-url');
+      expect(lastDiagnostics(socket).game).toBe('from-url');
     });
   });
 });

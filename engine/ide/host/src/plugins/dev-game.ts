@@ -351,7 +351,14 @@ export async function apply(ctx: Context, config: DevGameConfig): Promise<void> 
   // What the page fetches same-origin besides this plugin's own routes.
   // The socket is send-restricted: a game reports, it does not edit e8.yml.
   ctx.ideRpc.attach(preview, {
-    accept: ['game-diagnostics', 'game-transitions', 'node-types', 'flow-kinds', 'flow-trace'],
+    accept: [
+      'game-diagnostics',
+      'game-transitions',
+      'node-types',
+      'flow-kinds',
+      'flow-trace',
+      'game-status',
+    ],
   });
   ctx.runtimeAssets.attachGameRoutes(preview);
   // Lenient: `scenes` applies before `dev-game` (project-scope.ts), but a

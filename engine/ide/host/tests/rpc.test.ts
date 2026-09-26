@@ -1394,6 +1394,127 @@ describe('ide rpc — the game reports its transitions', () => {
   });
 });
 
+/**
+ * `game-status` (slice 39): unlike `transitions`/`nodeTypes`/`flowKinds`
+ * above, this is not a `mirror()` — there is no public getter on
+ * `IdeRpcService` for it (the brief: "the host's `IdeRpcService` gains
+ * nothing public — the status lives inside `apply`"), so every assertion
+ * here reads the wire, never `host.ctx.ideRpc`. `socket` (the top-level
+ * connection `beforeEach` opens against the ROOT) plays the reporting game,
+ * exactly like the node-types/flow-kinds describes above — the root's own
+ * `service.attach(ctx.server, …)` passes no `accept`, so it takes every
+ * message type unrestricted, and `game-status` needs no `previewSocket`
+ * dance to reach it.
+ */
+describe('ide rpc — the game reports its status', () => {
+  it('relays a game-status frame from the game socket to the editor, and never echoes it back', async () => {
+    const editor = new WebSocket(`${host.url.replace('http', 'ws')}/ide`);
+    const editorInbox = createInbox(editor);
+    await new Promise((resolve) => editor.once('open', resolve));
+
+    socket.send(JSON.stringify({ type: 'game-status', state: 'spinning' }));
+    expect(await editorInbox.waitFor((m) => m.type === 'game-status')).toEqual({
+      type: 'game-status',
+      state: 'spinning',
+    });
+
+    const echoed = await Promise.race([
+      inbox.waitFor((m) => m.type === 'game-status').then(() => true),
+      new Promise<false>((resolve) => setTimeout(() => resolve(false), 50)),
+    ]);
+    expect(echoed).toBe(false);
+    editor.close();
+  });
+
+  it('greets a socket connecting later with the last status', async () => {
+    socket.send(JSON.stringify({ type: 'game-status', state: 'failed', message: 'spin failed' }));
+    await new Promise((resolve) => setTimeout(resolve, 20));
+
+    const late = new WebSocket(`${host.url.replace('http', 'ws')}/ide`);
+    const lateInbox = createInbox(late);
+    await new Promise((resolve) => late.once('open', resolve));
+    expect(await lateInbox.waitFor((m) => m.type === 'game-status')).toEqual({
+      type: 'game-status',
+      state: 'failed',
+      message: 'spin failed',
+    });
+    late.close();
+  });
+
+  it('says offline when the reporting game socket closes, and greets no later client with a status', async () => {
+    const game = new WebSocket(`${host.url.replace('http', 'ws')}/ide`);
+    const gameInbox = createInbox(game);
+    await new Promise((resolve) => game.once('open', resolve));
+    // `gameInbox` only proves the socket is live; the frame under test is
+    // read off the top-level `inbox`, which stays open past `game`'s close.
+    void gameInbox;
+
+    game.send(JSON.stringify({ type: 'game-status', state: 'spinning' }));
+    expect(await inbox.waitFor((m) => m.type === 'game-status')).toEqual({
+      type: 'game-status',
+      state: 'spinning',
+    });
+
+    game.close();
+    expect(await inbox.waitFor((m) => m.type === 'game-status')).toEqual({
+      type: 'game-status',
+      state: 'offline',
+    });
+
+    const late = new WebSocket(`${host.url.replace('http', 'ws')}/ide`);
+    const lateInbox = createInbox(late);
+    await new Promise((resolve) => late.once('open', resolve));
+    await lateInbox.waitFor((m) => m.type === 'snapshot'); // proves the greeting has run
+    const greeted = await Promise.race([
+      lateInbox.waitFor((m) => m.type === 'game-status').then(() => true),
+      new Promise<false>((resolve) => setTimeout(() => resolve(false), 50)),
+    ]);
+    expect(greeted).toBe(false);
+    late.close();
+  });
+
+  it('ignores a frame with state "offline", an unknown state, or a non-string message', async () => {
+    socket.send(JSON.stringify({ type: 'game-status', state: 'offline' }));
+    socket.send(JSON.stringify({ type: 'game-status', state: 'bogus' }));
+    socket.send(JSON.stringify({ type: 'game-status', state: 'ready', message: 42 }));
+    await new Promise((resolve) => setTimeout(resolve, 20));
+
+    const late = new WebSocket(`${host.url.replace('http', 'ws')}/ide`);
+    const lateInbox = createInbox(late);
+    await new Promise((resolve) => late.once('open', resolve));
+    await lateInbox.waitFor((m) => m.type === 'snapshot');
+    const greeted = await Promise.race([
+      lateInbox.waitFor((m) => m.type === 'game-status').then(() => true),
+      new Promise<false>((resolve) => setTimeout(() => resolve(false), 50)),
+    ]);
+    expect(greeted).toBe(false);
+    late.close();
+  });
+
+  it('a project switch sends offline when a status was held', async () => {
+    socket.send(JSON.stringify({ type: 'game-status', state: 'spinning' }));
+    await new Promise((resolve) => setTimeout(resolve, 20));
+
+    const b = new WebSocket(`${host.url.replace('http', 'ws')}/ide`);
+    const bInbox = createInbox(b);
+    await new Promise((resolve) => b.once('open', resolve));
+    // `b`'s own connection greeting already carries the held `spinning`
+    // status — read past it so the next `game-status` frame this test
+    // waits for is the departure's `offline`, not that greeting.
+    expect(await bInbox.waitFor((m) => m.type === 'game-status')).toEqual({
+      type: 'game-status',
+      state: 'spinning',
+    });
+
+    host.ctx.emit('workspace/changed', { ...host.ctx.workspace.state(), active: null });
+    expect(await bInbox.waitFor((m) => m.type === 'game-status')).toEqual({
+      type: 'game-status',
+      state: 'offline',
+    });
+    b.close();
+  });
+});
+
 describe('ide rpc — the game reports its node types', () => {
   it('mirrors node-types from one socket to the others, greets a late socket with it, and clears on project switch', async () => {
     expect(host.ctx.ideRpc.nodeTypes()).toEqual([]);
