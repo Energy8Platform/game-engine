@@ -493,8 +493,10 @@ let nextViewId = 0;
    * `pressSpin(turbo)`: the shell's Spin plus `ui.spin` (see its own doc
    * for why both) — and then the port the flow's `present` node left by
    * (`next` or `failed`), or `failed` from its `spin` node when the host
-   * refused. One 20 s budget for the whole thing; a rejection names which
-   * half ran out.
+   * refused. Both failures leave by a port named `failed`, so `kind` says
+   * which node settled it: a presentation that failed is not a spin the
+   * host refused. One 20 s budget for the whole thing; a rejection names
+   * which half ran out.
    *
    * Unlike a direct press, it first waits for the flow to be able to hear
    * it: `flow.ready` (the document is armed, ahead of the boot GET having
@@ -507,7 +509,7 @@ let nextViewId = 0;
    * the flow's own `present.turbo` schema default resolves an absent var
    * to.
    */
-  async spin(opts?: { turbo?: boolean }): Promise<{ out: string }> {
+  async spin(opts?: { turbo?: boolean }): Promise<{ out: string; kind: 'present' | 'spin' }> {
     const events = currentEvents();
     const flow = currentFlow();
     if (!events || !flow) throw new Error('no flow row in this composition');
@@ -525,12 +527,11 @@ let nextViewId = 0;
       }, deadline - Date.now());
       const off = flow.onTrace((entry) => {
         const kind = kindOf(entry.node);
-        const left =
-          kind === 'present' ? entry.out !== null : kind === 'spin' && entry.out === 'failed';
-        if (!left) return;
+        if (kind !== 'present' && kind !== 'spin') return;
+        if (kind === 'present' ? entry.out === null : entry.out !== 'failed') return;
         clearTimeout(timer);
         off();
-        resolve({ out: entry.out! });
+        resolve({ out: entry.out!, kind });
       });
       pressSpin(opts?.turbo ?? false);
     });
