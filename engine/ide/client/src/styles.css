@@ -1832,3 +1832,122 @@ input[type='radio'] {
     border-bottom: 1px solid var(--e8-border);
   }
 }
+
+/* Task 6: `SymbolChips` (a `fieldOverrides` entry for `triggerSymbols`/
+   `onlyOnSymbols`) — one small pill per chosen id, its own `×` inline, then
+   the add `<select>` (styled by the sheet's generic `select` rule already,
+   nothing extra needed here). An id gone from the project's known symbols
+   still draws — dashed border, muted text, same "flag it, don't hide it"
+   look `.e8-symbol-chip-empty` uses for an unset state elsewhere. */
+.e8-chips {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+}
+.e8-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 20px;
+  padding: 0 4px 0 8px;
+  border: 1px solid var(--e8-border);
+  border-radius: var(--e8-radius-sm);
+  background: var(--e8-surface);
+  color: var(--e8-fg);
+  font-size: var(--e8-size-small);
+}
+.e8-chip-unknown {
+  border-style: dashed;
+  color: var(--e8-fg-muted);
+}
+.e8-chip-remove {
+  height: 16px;
+  width: 16px;
+  padding: 0;
+  border: none;
+  background: none;
+  color: inherit;
+  font: inherit;
+  line-height: 1;
+}
+.e8-chip-remove:hover {
+  background: var(--e8-hover);
+}
+
+/* Board section: `BoardPainter` — clear/fit above an optional mismatch
+   line, then the grid, one flex column per reel (top row first) so a
+   per-reel row count (`rowsPerReel`, Megaways) needs no per-column CSS of
+   its own. A cell's popup menu is plain buttons stacked under it, same
+   shape as `.e8-segmented`'s options but vertical. */
+.e8-board-toolbar {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+.e8-board-toolbar button {
+  height: 22px;
+  padding: 0 8px;
+  border: 1px solid var(--e8-border);
+  border-radius: var(--e8-radius-sm);
+  background: var(--e8-surface);
+  color: var(--e8-fg);
+  font: inherit;
+  font-size: var(--e8-size-label);
+}
+.e8-board-mismatch {
+  margin: 0 0 8px;
+  color: var(--e8-warning);
+  font-size: var(--e8-size-label);
+}
+.e8-board-grid {
+  display: flex;
+  gap: 4px;
+}
+.e8-board-col {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.e8-board-cell-wrap {
+  position: relative;
+}
+.e8-board-cell {
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  border: 1px solid var(--e8-border);
+  border-radius: var(--e8-radius-sm);
+  background: var(--e8-surface);
+  color: var(--e8-fg);
+  font: inherit;
+  font-size: var(--e8-size-small);
+}
+.e8-board-cell:hover {
+  border-color: var(--e8-accent);
+}
+.e8-board-menu {
+  position: absolute;
+  z-index: 1;
+  top: calc(100% + 2px);
+  left: 0;
+  display: flex;
+  flex-direction: column;
+  min-width: 64px;
+  padding: 2px;
+  border: 1px solid var(--e8-border);
+  border-radius: var(--e8-radius-sm);
+  background: var(--e8-surface);
+}
+.e8-board-menu button {
+  padding: 4px 6px;
+  border: none;
+  background: none;
+  color: var(--e8-fg);
+  font: inherit;
+  font-size: var(--e8-size-label);
+  text-align: left;
+}
+.e8-board-menu button:hover {
+  background: var(--e8-hover);
+}

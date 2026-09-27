@@ -2,7 +2,7 @@ import { act, fireEvent, render, screen, waitFor, within } from '@testing-librar
 import { Context } from 'cordis';
 import Schema from 'schemastery';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import type { GameCompositionRow } from '@energy8engine/contracts';
+import type { GameCompositionRow, SymbolsDoc } from '@energy8engine/contracts';
 import * as slots from '../src/plugins/slots';
 import * as reels from '../src/plugins/reels';
 
@@ -10,18 +10,38 @@ import * as reels from '../src/plugins/reels';
  * Task 5's own harness — `symbols-harness.tsx`'s shape, trimmed to what
  * `reels.tsx` and `ReelsDocument` actually read: `slots` for real (the
  * plugin registers into it, the test reads it back the same way `Shell`
- * would), and bare `gameComposition`/`workspace` stubs — no socket, no
- * fetch, nothing else either ever touches. `reels.tsx` only injects
- * `gameComposition`/`slots`; `ReelsDocument` also reads `workspace`
- * directly (`useWorkspace`, same as `SymbolsDocument`), so that stub rides
- * along even though the plugin itself never declares it.
+ * would), and bare `gameComposition`/`workspace`/`symbols` stubs — no
+ * socket, no fetch, nothing else either ever touches. `reels.tsx` only
+ * injects `gameComposition`/`slots`; `ReelsDocument` also reads `workspace`
+ * and (Task 6) `symbols` directly (`useWorkspace`/`useSymbols`, same as
+ * `SymbolsDocument`), so those stubs ride along even though the plugin
+ * itself never declares either.
  */
 const json = (schema: Schema) => JSON.parse(JSON.stringify(schema.toJSON()));
 
+/** The chips override's and the board painter's `known` — a small, fixed
+ * set unless a test overrides it via `harness`'s `opts.known`. */
+const KNOWN_SYMBOLS = [
+  { id: 'scatter', name: 'Scatter' },
+  { id: 'wild', name: 'Wild' },
+];
+
 const REELS_SCHEMA = json(
   Schema.object({
-    grid: Schema.object({ cols: Schema.number().default(5), rows: Schema.number().default(3) }),
-    win: Schema.object({ glow: Schema.boolean().default(true) }),
+    grid: Schema.object({
+      cols: Schema.number().default(5),
+      rows: Schema.number().default(3),
+      rowsPerReel: Schema.array(Schema.number()),
+    }),
+    win: Schema.object({
+      glow: Schema.boolean().default(true),
+      frameShake: Schema.object({
+        enabled: Schema.boolean().default(false),
+        onlyOnSymbols: Schema.union([Schema.const(null), Schema.array(Schema.string())]).default(
+          null,
+        ),
+      }),
+    }),
     board: Schema.any(),
   }),
 );
@@ -72,6 +92,8 @@ async function harness(
       id: string,
       config: Record<string, unknown>,
     ) => Promise<{ reload: boolean; diagnostics: unknown[] }>;
+    known?: { id: string; name: string }[];
+    symbolsDoc?: SymbolsDoc | null;
   } = {},
 ) {
   const ctx = new Context();
@@ -89,6 +111,20 @@ async function harness(
     subscribe: () => () => {},
     open: async () => [],
     create: async () => [],
+  });
+  // Bare `useSymbols` shape, same reason `workspace` is stubbed rather than
+  // booting the real plugin (see this file's own top comment): the chips
+  // override and the board painter both read `ctx.symbols.known()`/`.doc()`
+  // through it, and neither `reels.tsx` nor this document need the rest of
+  // the real service (sockets, PUTs, selection).
+  ctx.provide('symbols', {
+    doc: () => opts.symbolsDoc ?? null,
+    known: () => opts.known ?? KNOWN_SYMBOLS,
+    diagnostics: () => [],
+    selected: () => null,
+    select: () => {},
+    update: async () => [],
+    subscribe: () => () => {},
   });
   const listeners = new Set<() => void>();
   const updateCalls: { id: string; config: Record<string, unknown> }[] = [];
@@ -176,7 +212,13 @@ function canvas() {
         source: iframe.contentWindow,
       }),
     );
-  return { iframe, posted, reqs, ready, setAnswer: (m: string, result: unknown) => answers.set(m, result) };
+  return {
+    iframe,
+    posted,
+    reqs,
+    ready,
+    setAnswer: (m: string, result: unknown) => answers.set(m, result),
+  };
 }
 
 describe('reels plugin — activity/document presence', () => {
@@ -274,6 +316,89 @@ describe('ReelsDocument — sections', () => {
   });
 });
 
+describe('ReelsDocument — symbol editors (Task 6)', () => {
+  it('the Anticipation sections triggerSymbols is drawn by chips, off ctx.symbols.known()', async () => {
+    const { ctx } = await harness([
+      row('reels1'),
+      row('anticipation1', { triggerSymbols: ['scatter'] }),
+    ]);
+    renderDocument(ctx);
+    const section = screen.getByTestId('reels-section-anticipation');
+    expect(within(section).getByTestId('symbol-chip-scatter')).toBeInTheDocument();
+    expect(within(section).getByTestId('symbol-chips-add')).toBeInTheDocument();
+  });
+
+  it('the Win sections frameShake.onlyOnSymbols, switched on, is drawn by chips', async () => {
+    const { ctx } = await harness([
+      row('reels1', { win: { frameShake: { onlyOnSymbols: ['wild'] } } }),
+    ]);
+    renderDocument(ctx);
+    const section = screen.getByTestId('reels-section-win');
+    expect(within(section).getByRole('checkbox', { name: 'onlyOnSymbols' })).toBeChecked();
+    expect(within(section).getByTestId('symbol-chip-wild')).toBeInTheDocument();
+  });
+
+  it('the Board section is the painter over reels1.board, shaped by grid.cols/rows', async () => {
+    const { ctx } = await harness([row('reels1', { grid: { cols: 2, rows: 2 } })]);
+    renderDocument(ctx);
+    const section = screen.getByTestId('reels-section-board');
+    for (const [c, r] of [
+      [0, 0],
+      [0, 1],
+      [1, 0],
+      [1, 1],
+    ]) {
+      expect(within(section).getByTestId(`board-cell-${c}-${r}`)).toHaveTextContent('·');
+    }
+    expect(within(section).queryByTestId('board-cell-2-0')).toBeNull();
+  });
+
+  it('the Board section shapes by rowsPerReel when set, not the uniform rows', async () => {
+    const { ctx } = await harness([
+      row('reels1', { grid: { cols: 2, rows: 3, rowsPerReel: [1, 2] } }),
+    ]);
+    renderDocument(ctx);
+    const section = screen.getByTestId('reels-section-board');
+    expect(within(section).getByTestId('board-cell-0-0')).toBeInTheDocument();
+    expect(within(section).queryByTestId('board-cell-0-1')).toBeNull();
+    expect(within(section).getByTestId('board-cell-1-1')).toBeInTheDocument();
+    expect(within(section).queryByTestId('board-cell-1-2')).toBeNull();
+  });
+
+  it('painting a cell writes reels1 with { ...config, board }', async () => {
+    const { ctx, updateCalls } = await harness([
+      row('reels1', { grid: { cols: 2, rows: 1 }, win: { glow: false } }),
+    ]);
+    renderDocument(ctx);
+    const section = screen.getByTestId('reels-section-board');
+    fireEvent.click(within(section).getByTestId('board-cell-1-0'));
+    fireEvent.click(within(section).getByRole('button', { name: 'scatter' }));
+    await waitFor(() => expect(updateCalls).toHaveLength(1));
+    expect(updateCalls[0]).toEqual({
+      id: 'reels1',
+      config: {
+        grid: { cols: 2, rows: 1 },
+        win: { glow: false },
+        board: [[null], ['scatter']],
+      },
+    });
+  });
+
+  it('board-clear removes the board key entirely rather than writing an empty grid', async () => {
+    const { ctx, updateCalls } = await harness([
+      row('reels1', {
+        grid: { cols: 1, rows: 1 },
+        board: [['scatter']],
+      }),
+    ]);
+    renderDocument(ctx);
+    const section = screen.getByTestId('reels-section-board');
+    fireEvent.click(within(section).getByTestId('board-clear'));
+    await waitFor(() => expect(updateCalls).toHaveLength(1));
+    expect(updateCalls[0]).toEqual({ id: 'reels1', config: { grid: { cols: 1, rows: 1 } } });
+  });
+});
+
 describe('ReelsDocument — canvas sync', () => {
   it('sends the canvas every reel rows current config after a successful write, and again on ready', async () => {
     const { ctx } = await harness([
@@ -310,9 +435,7 @@ describe('ReelsDocument — canvas sync', () => {
     const c = canvas();
     fireEvent.change(screen.getByLabelText('cols'), { target: { value: '6' } });
     fireEvent.blur(screen.getByLabelText('cols'));
-    await waitFor(() =>
-      expect(screen.getByLabelText('cols')).toHaveValue(6 as unknown as number),
-    );
+    await waitFor(() => expect(screen.getByLabelText('cols')).toHaveValue(6 as unknown as number));
     expect(c.reqs('rows')).toHaveLength(0);
   });
 });

@@ -2,8 +2,12 @@ import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
 import type { Context } from 'cordis';
 import type { GameCompositionRow } from '@energy8engine/contracts';
 import { useGameComposition } from '../plugins/game-composition';
+import { useSymbols } from '../plugins/symbols';
 import { useWorkspace } from '../plugins/workspace';
 import { SchemaForm } from '../schema-form/SchemaForm';
+import type { FieldProps } from '../schema-form/fields';
+import { BoardPainter, type BoardShape } from './BoardPainter';
+import { SymbolChips } from './SymbolChips';
 import { createCanvasRpc, type CanvasRpc } from './canvas-rpc';
 
 /**
@@ -35,11 +39,52 @@ import { createCanvasRpc, type CanvasRpc } from './canvas-rpc';
  * between commit and this callback still ships the latest. The canvas
  * asks for the same thing itself on `ready` (a fresh load, or a reload the
  * host drove) — whatever board it showed before that is stale.
+ *
+ * Task 6: two of `reels1`'s own fields aren't drawn by `fields.tsx`'s
+ * stock editors. `anticipation1.triggerSymbols` and `win.frameShake.
+ * onlyOnSymbols` are both `string[]` of symbol ids — `SchemaForm.
+ * fieldOverrides` swaps in `SymbolChips` for them (the Win one keyed
+ * `win.frameShake.onlyOnSymbols`, the value-root path — see `SchemaForm`'s
+ * own doc comment — even though `root: 'win'` trims what actually draws).
+ * `board` is `Schema.any()` — no stock editor exists for it at all — so
+ * the Board section draws `BoardPainter` directly instead of a
+ * `SchemaForm`, over `reels1.config.board` shaped by the grid's own
+ * `cols`/`rowsPerReel ?? rows`. Both read the project's symbol ids off
+ * `ctx.symbols` (`useSymbols`, same hook `SymbolsProperties` uses) —
+ * `known()` first, then any of `doc()?.symbols` not already in it.
  */
 const REEL_ROW_IDS = ['reels1', 'motion1', 'anticipation1', 'cascade1', 'features1'] as const;
 
 function byId(rows: readonly GameCompositionRow[], id: string): GameCompositionRow | null {
   return rows.find((row) => row.id === id) ?? null;
+}
+
+/** The chips override's and the board painter's shared id list: `known`
+ * (the reel board's registered ids) first, then any symbol the doc has
+ * that `known` doesn't (a def not yet wired into `game/spec.json`) —
+ * neither is dropped, so an id already in a saved value still resolves to
+ * a name instead of reading as unknown for no reason. */
+function symbolIds(
+  known: readonly { id: string; name: string }[],
+  doc: { symbols: readonly { id: string; name?: string }[] } | null,
+): { id: string; name: string }[] {
+  const seen = new Set(known.map((s) => s.id));
+  const extra = (doc?.symbols ?? [])
+    .filter((s) => !seen.has(s.id))
+    .map((s) => ({ id: s.id, name: s.name ?? s.id }));
+  return [...known, ...extra];
+}
+
+/** `reels1.config.grid` merged over the schema's own defaults — the shape
+ * `BoardPainter` measures the saved `board` against. `rowsPerReel` (an
+ * array, one entry per reel — Megaways/variable-height reels) overrides
+ * the uniform `rows` entirely when set, same rule `GridSchema` itself
+ * documents; unset, every column gets the same `rows`. */
+function boardShape(config: Record<string, unknown>): BoardShape {
+  const grid = (config.grid ?? {}) as { cols?: number; rows?: number; rowsPerReel?: number[] };
+  const cols = grid.cols ?? 5;
+  const rows = grid.rowsPerReel ?? Array(cols).fill(grid.rows ?? 3);
+  return { cols, rows };
 }
 
 /**
@@ -105,6 +150,10 @@ export function ReelsDocument({ ctx }: { ctx: Context }) {
   const anticipation1 = byId(list, 'anticipation1');
   const cascade1 = byId(list, 'cascade1');
   const features1 = byId(list, 'features1');
+
+  const { known, doc } = useSymbols(ctx);
+  const ids = symbolIds(known, doc);
+  const chips = (props: FieldProps) => <SymbolChips {...props} known={ids} />;
 
   const workspace = useWorkspace(ctx);
   const previewUrl = workspace?.previewUrl ?? null;
@@ -192,13 +241,24 @@ export function ReelsDocument({ ctx }: { ctx: Context }) {
                 commit="blur"
                 resettable
                 root="win"
+                fieldOverrides={{ 'win.frameShake.onlyOnSymbols': chips }}
               />
             </Section>
             <section className="e8-reels-section" data-testid="reels-section-board">
               <header className="e8-reels-section-header">
                 <strong>Board</strong>
               </header>
-              <p className="e8-empty">board editor — coming in a later slice</p>
+              <BoardPainter
+                board={reels1.config.board}
+                shape={boardShape(reels1.config)}
+                known={ids}
+                onChange={(board) => {
+                  const next = { ...reels1.config } as Record<string, unknown>;
+                  if (board === undefined) delete next.board;
+                  else next.board = board;
+                  write(reels1.id, next);
+                }}
+              />
             </section>
           </>
         ) : null}
@@ -223,6 +283,7 @@ export function ReelsDocument({ ctx }: { ctx: Context }) {
               onChange={(next) => write(anticipation1.id, next)}
               commit="blur"
               resettable
+              fieldOverrides={{ triggerSymbols: chips }}
             />
           </Section>
         ) : null}
