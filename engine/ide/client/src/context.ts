@@ -18,6 +18,7 @@ import * as flow from './plugins/flow';
 import type { FlowConfig } from './plugins/flow';
 import * as symbols from './plugins/symbols';
 import type { SymbolsConfig } from './plugins/symbols';
+import * as reels from './plugins/reels';
 import * as gameDiagnostics from './plugins/diagnostics';
 import * as files from './plugins/files';
 import type { FilesConfig } from './plugins/files';
@@ -87,6 +88,11 @@ export async function createIdeClient(
   // Injects `scenes` and `flow` (the three-way deselect, the node types
   // and pickers), `files` and `assetNodeTypes` (the document's drop).
   await ctx.plugin(symbols, config);
+  // The Reels document: `gameComposition`'s rows split into sections,
+  // registered only while one of them is `reels1` (`reels.tsx`'s own
+  // doc). No fetch of its own — nothing here for a config to carry — so,
+  // unlike every plugin above it, this composes with no second argument.
+  await ctx.plugin(reels);
   // `GameDiagnosticsConfig` is `ConnectionConfig` by another name (see its
   // own doc) — no new field for this signature to carry, just another
   // plugin reading the same `url`/`socketFactory` this function's caller
