@@ -41,7 +41,7 @@ export interface SceneEditConfig {
    * skipped whenever this is anything other than `undefined` — `''`
    * included, which means "symbol mode, nothing picked yet" (the Symbols
    * document's canvas before any chip is selected) and boots to the
-   * outline only, waiting for the first `symbol` call. `undefined` (the
+   * frame only, waiting for the first `symbol` call. `undefined` (the
    * key left out entirely) is the only value that means scene mode.
    */
   symbol?: string;
@@ -123,7 +123,7 @@ export function apply(ctx: Context, config: SceneEditConfig): void {
   // armed. Gated on `!== undefined`, not truthiness: `''` is a real symbol
   // mode request — the Symbols document's canvas is always
   // `editor.html?symbol=` (the selection arrives as a `symbol` call), so it
-  // must boot symbol mode (outline only, waiting for that first call), not
+  // must boot symbol mode (frame only, waiting for that first call), not
   // fall through to scene mode with `scene: ''`.
   if (config.symbol !== undefined) {
     bootSymbol(config.symbol);
@@ -242,12 +242,19 @@ export function apply(ctx: Context, config: SceneEditConfig): void {
     const scaleFor = (w: number, h: number) =>
       zoom === '1:1' ? 1 : zoom === '2x' ? 2
         : (Math.min(w, h) * 0.6) / Math.max(cellSize.width, cellSize.height);
-    let laidOut = { w: -1, h: -1, zoom: '' as string };
+    let laidOutScreen = { w: -1, h: -1 };
+    let laidOutZoom = '' as string;
     const layout = () => {
       const { width: w, height: h } = app.screen;
-      if (laidOut.w === w && laidOut.h === h && laidOut.zoom === zoom) return;
-      laidOut = { w, h, zoom };
-      drawChecker(w, h);
+      // The checkerboard only cares about the screen — a zoom change alone
+      // must not repaint it (a screen resize's own change still does).
+      const screenChanged = laidOutScreen.w !== w || laidOutScreen.h !== h;
+      if (screenChanged) {
+        laidOutScreen = { w, h };
+        drawChecker(w, h);
+      }
+      if (!screenChanged && laidOutZoom === zoom) return;
+      laidOutZoom = zoom;
       previewBox.position.set(w / 2, h / 2);
       previewBox.scale.set(scaleFor(w, h));
     };
@@ -286,9 +293,13 @@ export function apply(ctx: Context, config: SceneEditConfig): void {
       let w = 0;
       let h = 0;
       if (view) {
+        // Measured in `previewBox`'s OWN space, not the scene root's: its
+        // scale is the zoom now, not the design→screen scale, so mapping
+        // through it (not `root`) divides the zoom back out — `w`/`h` read
+        // the same at `fit`, `1:1` and `2x`.
         const b = view.getBounds();
-        const tl = root.toLocal({ x: b.minX, y: b.minY });
-        const br = root.toLocal({ x: b.maxX, y: b.maxY });
+        const tl = previewBox.toLocal({ x: b.minX, y: b.minY });
+        const br = previewBox.toLocal({ x: b.maxX, y: b.maxY });
         w = br.x - tl.x;
         h = br.y - tl.y;
       }

@@ -141,10 +141,12 @@ describe('symbol mode', () => {
     expect(preview.position).toMatchObject({ x: 240, y: 144 });
     // fit: the 96×96 default cell's larger side is 60% of the 288 screen's smaller side.
     expect(preview.scale.x).toBeCloseTo((288 * 0.6) / 96, 5);
+    const layout = app.ticker.add.mock.calls[0][0];
     await fiber.dispose();
     expect(scenes.container.visible).toBe(true);
     expect(app.stage.getChildByLabel('symbol-preview')).toBeNull();
     expect(app.stage.getChildByLabel('symbol-checker')).toBeNull();
+    expect(app.ticker.remove).toHaveBeenCalledWith(layout);
   });
 
   it('symbol previews a state and answers shown; snapshot reports the view bounds in design space', async () => {
@@ -154,9 +156,9 @@ describe('symbol mode', () => {
     const res = await call('symbol', { id: 'coin', state: 'static' });
     expect(res.result).toEqual({ shown: true });
     const snap = await call('snapshot');
-    // `w`/`h` are the view's own design-space bounds — at the fit zoom (not the
-    // scene's design→screen scale any more), so they follow the zoom, not 1:1.
-    expect(snap.result).toEqual({ symbol: 'coin', state: 'static', w: 144, h: 144, cell: { width: 96, height: 96 }, screen: { w: 288 * 0.6, h: 288 * 0.6 } });
+    // `w`/`h` are the view's own design-space bounds (the 40×40 fixture) —
+    // unaffected by zoom; `screen` is the cell at the current (fit) zoom.
+    expect(snap.result).toEqual({ symbol: 'coin', state: 'static', w: 40, h: 40, cell: { width: 96, height: 96 }, screen: { w: 288 * 0.6, h: 288 * 0.6 } });
   });
 
   it('an unknown id answers shown: false and snapshot reports no bounds', async () => {
@@ -214,7 +216,7 @@ describe('symbol mode', () => {
     expect(String((grid as { error?: unknown }).error)).toContain('unknown method "grid"');
   });
 
-  it("symbol: '' still boots symbol mode (outline only, no initial preview); a select request answers unknown method; ready carries ''", async () => {
+  it("symbol: '' still boots symbol mode (frame only, no initial preview); a select request answers unknown method; ready carries ''", async () => {
     const { symbols } = fakeSymbols();
     const { call, ready, events } = bootSymbol(symbols, '');
     await ready();
@@ -318,6 +320,45 @@ describe('symbol mode', () => {
     expect(frame.getLocalBounds().width).toBe(96);
     const snap = (await call('snapshot')).result as { screen: { w: number } };
     expect(snap.screen.w).toBeCloseTo(288 * 0.6, 3); // the zoom is about the cell, not the art
+  });
+
+  it("snapshot's w/h are the view's own design-space bounds, unaffected by zoom", async () => {
+    const { symbols } = fakeSymbols();
+    const { call, ready } = bootSymbol(symbols);
+    await ready();
+    await call('symbol', { id: 'coin', state: 'static' });
+    const wh = async () => {
+      const r = (await call('snapshot')).result as { w: number; h: number };
+      return { w: r.w, h: r.h };
+    };
+    expect(await wh()).toEqual({ w: 40, h: 40 }); // fit
+    await call('zoom', { mode: '1:1' });
+    expect(await wh()).toEqual({ w: 40, h: 40 });
+    await call('zoom', { mode: '2x' });
+    expect(await wh()).toEqual({ w: 40, h: 40 });
+  });
+
+  it('a zoom change re-scales the preview but does not redraw the checkerboard; a screen resize does', async () => {
+    const { symbols } = fakeSymbols();
+    const { app, call, frame, ready } = bootSymbol(symbols);
+    await ready();
+    const checker = app.stage.getChildByLabel('symbol-checker') as Graphics;
+    const clear = vi.spyOn(checker, 'clear');
+    await call('zoom', { mode: '1:1' });
+    expect(clear).not.toHaveBeenCalled();
+    app.screen.width = 800; app.screen.height = 600;
+    frame();
+    expect(clear).toHaveBeenCalledTimes(1);
+  });
+
+  it('fit on a 120×80 board cell: screen is the cell scaled to 60% of the smaller screen side', async () => {
+    const board = { cellSize: { width: 120, height: 80 } };
+    const { symbols } = fakeSymbols();
+    const { call, ready } = bootSymbol(symbols, 'coin', board);
+    await ready();
+    const snap = (await call('snapshot')).result as { screen: { w: number; h: number } };
+    expect(snap.screen.w).toBeCloseTo(172.8, 3);
+    expect(snap.screen.h).toBeCloseTo(115.2, 3);
   });
 });
 
