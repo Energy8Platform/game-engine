@@ -147,6 +147,8 @@ export function SymbolsDocument({ ctx }: { ctx: Context }) {
   const workspace = useWorkspace(ctx);
   const { reloads } = useGameComposition(ctx);
   const previewUrl = workspace?.previewUrl ?? null;
+  /** What the iframe below is keyed on — a reload, a project switch or a changed preview address all remount it. */
+  const canvasKey = workspace ? `${reloads}:${workspace.active}:${previewUrl}` : null;
 
   const [zoomMode, setZoomModeState] = useState<ZoomMode>(readZoomState);
   const zoomRef = useRef(zoomMode);
@@ -217,6 +219,21 @@ export function SymbolsDocument({ ctx }: { ctx: Context }) {
     if (selected !== null) tell('symbol', selected);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selected]);
+  // A remote remove (a `symbols` frame without the picked id, or the doc
+  // going to `null`) can leave a selection the doc no longer has: dropped
+  // here rather than left for the render below to paper over, and keyed
+  // on the doc alone so clearing it (which changes `selected`, not `doc`)
+  // never re-triggers this effect.
+  useEffect(() => {
+    if (selected !== null && !symbols.some((s) => s.id === selected.id)) ctx.symbols.select(null);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [docKey]);
+  // A new canvas (reload / project / preview address) has not answered
+  // its OWN `snapshot` yet — the old cell size would otherwise survive
+  // the remount and lie about the new board until `ready` catches up.
+  useEffect(() => {
+    setCell(null);
+  }, [canvasKey]);
 
   /** The iframe's own ref, not its `load` event — `contentWindow` exists as soon as it's inserted. */
   const attachIframe = useCallback(
@@ -506,14 +523,14 @@ export function SymbolsDocument({ ctx }: { ctx: Context }) {
                 moment there is something to show it. */}
             <div className="e8-symbols-stage">
               <iframe
-                key={`${reloads}:${workspace.active}:${previewUrl}`}
+                key={canvasKey}
                 ref={attachIframe}
                 title="symbol canvas"
                 // Constant: `?symbol=` boots symbol mode with nothing picked; the
                 // selection travels as a `symbol` call, never as a navigation.
                 src={`${previewUrl}/editor.html?symbol=`}
               />
-              {selected === null ? (
+              {selected === null || !selectedDef ? (
                 <div className="e8-symbols-help" data-testid="symbols-help">
                   <p>
                     <strong>Symbols</strong> — how each symbol a reel shows looks. A reel&apos;s

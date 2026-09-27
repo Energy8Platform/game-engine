@@ -361,6 +361,18 @@ describe('SymbolsDocument', () => {
       );
     });
 
+    it('a remount (reload) resets the cell size until the new canvas answers snapshot', async () => {
+      const { ctx, bumpReloads } = await booted();
+      renderDocument(ctx);
+      const first = canvas({ width: 96, height: 96 });
+      frame(first.iframe, 'ready', {});
+      await waitFor(() =>
+        expect(screen.getByTestId('symbols-cell-size')).toHaveTextContent('cell 96×96'),
+      );
+      act(() => bumpReloads());
+      expect(screen.getByTestId('symbols-cell-size').textContent).toBe('');
+    });
+
     it('a chip click posts symbol to the canvas', async () => {
       const { ctx } = await booted();
       renderDocument(ctx);
@@ -554,6 +566,31 @@ describe('SymbolsDocument', () => {
         'no win yet — drop a file on the chip, or Create in Properties',
       );
       expect(screen.queryByTestId('symbols-help')).toBeNull();
+    });
+
+    it('a selection whose symbol another tab removed falls back to the help panel, and the stale selection is cleared', async () => {
+      const named: SymbolsDoc = {
+        version: 1,
+        symbols: [
+          { id: '3', name: 'sym-3', static: { type: 'image', props: { src: '' } } },
+          TWO.symbols[0],
+        ],
+      };
+      const { ctx, socket } = await booted({}, named);
+      renderDocument(ctx);
+      act(() => ctx.symbols.select({ id: '3', state: 'static' }));
+      expect(await screen.findByTestId('symbols-header')).toHaveTextContent('3 · sym-3 · static');
+      // Another tab's remove: the `symbols` frame no longer carries id '3'.
+      act(() =>
+        socket.receive({
+          type: 'symbols',
+          doc: { version: 1, symbols: [TWO.symbols[0]] },
+          diagnostics: [],
+        }),
+      );
+      await waitFor(() => expect(screen.queryByTestId('symbols-header')).toBeNull());
+      expect(screen.getByTestId('symbols-help')).toBeTruthy();
+      expect(ctx.symbols.selected()).toBeNull();
     });
   });
 

@@ -184,18 +184,30 @@ export async function harness(
     open: async () => [],
     create: async () => [],
   });
+  // `reloads` starts real (a `Set` of listeners, not `nothing`) so
+  // `bumpReloads` below can drive an actual canvas remount — the one
+  // thing about this fake `SymbolsDocument`'s canvas key cares about.
+  const gameCompositionListeners = new Set<() => void>();
   ctx.provide('gameComposition', {
     rows: [],
     diagnostics: [],
     reloads: 0,
     transitions: [],
-    subscribe: nothing,
+    subscribe: (fn: () => void) => {
+      gameCompositionListeners.add(fn);
+      return () => gameCompositionListeners.delete(fn);
+    },
     update: async () => ({ reload: false, diagnostics: [] }),
   });
   await ctx.plugin(symbols, { url: 'ws://x/ide', fetchFn });
   const puts = () =>
     calls.filter((c) => c.method === 'PUT' && c.url === '/api/symbols').map((c) => c.body);
-  return { ctx, socket, calls, fetchFn, puts };
+  /** Simulates a host `reload: true` verdict — the ONE way this fake drives an actual canvas remount. */
+  const bumpReloads = () => {
+    (ctx.gameComposition as unknown as { reloads: number }).reloads += 1;
+    gameCompositionListeners.forEach((fn) => fn());
+  };
+  return { ctx, socket, calls, fetchFn, puts, bumpReloads };
 }
 
 export const boot =
