@@ -10,12 +10,22 @@
  * no-scene shape, fitted to the screen.
  */
 import type { Context } from 'cordis';
-import { sceneRounding, type SafeArea, type SceneDoc, type SymbolsDoc, type SymbolState } from '@energy8engine/contracts';
+import {
+  sceneRounding,
+  type RevealWinsStep,
+  type SafeArea,
+  type SceneDoc,
+  type SpinToStep,
+  type SymbolsDoc,
+  type SymbolState,
+  type TumbleStep,
+} from '@energy8engine/contracts';
 import type {} from '@energy8engine/scenes/runtime';
 import { COMMON, pinPoint, type Fit, type Orientation, type Pin } from '@energy8engine/scenes';
 import { DEFAULT_CELL_FRAME_STYLE, type CellFrameStyle } from '@energy8engine/reel-core';
 import { Container, Graphics, type FederatedPointerEvent } from 'pixi.js';
 import { createGizmo, type GizmoTarget } from './gizmo';
+import { clusterTumble, lineWin, randomBoard, scatterBoard, type Rand, type Shape } from './lab';
 import { pickAt } from './pick';
 import { snapPoint } from './snap';
 import { createWire, type WireOptions } from './wire';
@@ -412,6 +422,13 @@ export function apply(ctx: Context, config: SceneEditConfig): void {
    * that. `rows` is the one write this mode makes, and it is not a second
    * writer: it hands each row's config straight to `gameRows.update`, the
    * same door `ide-bridge` uses for a hot row edit from the IDE side.
+   *
+   * `spin`/`scatters`/`win`/`tumble` (Task 4) are the reel lab's own test
+   * actions — synthetic results built from the project's symbol ids
+   * (`./lab`), played through `board.spinTo`/`revealWins`/`tumble`
+   * directly. No mechanic runs and nothing reaches a server; see the
+   * `runStep` helper below for the shared busy/board/symbols gate every
+   * one of them answers through.
    */
   function bootReels(): void {
     const root = scenes.container;
@@ -421,10 +438,24 @@ export function apply(ctx: Context, config: SceneEditConfig): void {
     box.label = 'reels-box';
     app.stage.addChild(checker.graphics, box);
 
-    /** The slice of `ReelsBoard` (`@energy8engine/game-reels`) this mode reads — not a dependency of this package, so declared structurally instead of imported. */
+    /**
+     * The slice of `ReelsBoard` (`@energy8engine/game-reels`) this mode
+     * reads — not a dependency of this package, so declared structurally
+     * instead of imported. `spinTo`/`revealWins`/`tumble` are the board
+     * steps Task 4's lab actions below play (`BoardApi`,
+     * `@energy8engine/play-loop`); `symbols` is NOT part of that contract
+     * — an optional escape hatch a test board can offer so `win()`/
+     * `tumble()` have something to read before any lab `spin()` has run.
+     * The real board has none, so on it those two always need a `spin()`
+     * first.
+     */
     interface ReelsBoardLike {
       readonly view: Container;
       readonly config?: { grid?: { cols?: number; rows?: number; rowsPerReel?: number[] } };
+      spinTo(step: SpinToStep): Promise<void>;
+      revealWins(step: RevealWinsStep): Promise<void>;
+      tumble(step: TumbleStep): Promise<void>;
+      symbols?(): string[][];
     }
     const currentBoard = () => ctx.reflect.get('board', false) as ReelsBoardLike | undefined;
 
@@ -472,6 +503,92 @@ export function apply(ctx: Context, config: SceneEditConfig): void {
     interface GameRowsUpdater {
       update(id: string, config: Record<string, unknown>): Promise<'updated' | 'unknown' | 'failed'>;
     }
+    /**
+     * The reel lab's test actions: synthetic spins, scatters, a win and a
+     * tumble (`./lab`), built from the project's own symbol ids and played
+     * through the board's real steps — no mechanic, no server. `lastBoard`
+     * is what the last `spinTo` landed, read back by `win`/`tumble` so
+     * they act on what is actually showing; `busy` serialises the four
+     * actions one at a time (like a real spin) and is what `snapshot`
+     * reports below. `Math.random` here; `lab.test.ts` is where a seeded
+     * `Rand` proves the shapes without one.
+     */
+    let lastBoard: string[][] | null = null;
+    let busy = false;
+    const rand: Rand = Math.random;
+
+    /** The symbols row's known ids (`symbols.yml`, parsed) — `undefined` with no `symbols` service on `ctx` at all. */
+    const symbolIds = (): string[] | undefined =>
+      (ctx.reflect.get('symbols', false) as { doc(): SymbolsDoc | null } | undefined)?.doc()?.symbols.map((s) => s.id);
+
+    const shapeOf = (board: ReelsBoardLike | undefined): Shape => {
+      const grid = board?.config?.grid;
+      const cols = grid?.cols ?? 0;
+      return { cols, rows: grid?.rowsPerReel ?? Array.from({ length: cols }, () => grid?.rows ?? 0) };
+    };
+
+    /**
+     * One lab action end to end: refuses a second one while `busy`, then
+     * with no board or no symbol vocabulary to draw a board from, then
+     * hands `run` a live board and the project's symbol ids. Whatever `run`
+     * throws — its board step's promise rejecting, or the `board replaced`
+     * it raises itself when a hot `reels1` re-apply swapped the board
+     * mid-step — lands here as `{ ok: false, reason: <message> }`; the rpc
+     * call itself never rejects.
+     */
+    const runStep = async (
+      run: (board: ReelsBoardLike, symbols: string[]) => Promise<void>,
+    ): Promise<{ ok: true } | { ok: false; reason: string }> => {
+      if (busy) return { ok: false, reason: 'busy' };
+      const board = currentBoard();
+      if (!board) return { ok: false, reason: 'no board' };
+      const symbols = symbolIds();
+      if (!symbols || symbols.length === 0) return { ok: false, reason: 'no symbols' };
+      busy = true;
+      try {
+        await run(board, symbols);
+        return { ok: true };
+      } catch (e) {
+        return { ok: false, reason: e instanceof Error ? e.message : String(e) };
+      } finally {
+        busy = false;
+      }
+    };
+
+    wire.handle('spin', () =>
+      runStep(async (board, symbols) => {
+        const built = randomBoard(shapeOf(board), symbols, rand);
+        await board.spinTo({ kind: 'spinTo', board: built });
+        if (currentBoard() !== board) throw new Error('board replaced');
+        lastBoard = built;
+      }),
+    );
+    wire.handle('scatters', (p) => {
+      const { triggers, threshold } = (p ?? {}) as { triggers?: string[]; threshold?: number };
+      return runStep(async (board, symbols) => {
+        const built = scatterBoard(shapeOf(board), symbols, triggers ?? [], threshold ?? 0, rand);
+        await board.spinTo({ kind: 'spinTo', board: built });
+        if (currentBoard() !== board) throw new Error('board replaced');
+        lastBoard = built;
+      });
+    });
+    wire.handle('win', () =>
+      runStep(async (board) => {
+        const grid = lastBoard ?? board.symbols?.() ?? null;
+        if (!grid) throw new Error('spin first');
+        await board.revealWins(lineWin(grid, rand));
+        if (currentBoard() !== board) throw new Error('board replaced');
+      }),
+    );
+    wire.handle('tumble', () =>
+      runStep(async (board, symbols) => {
+        const grid = lastBoard ?? board.symbols?.() ?? null;
+        if (!grid) throw new Error('spin first');
+        await board.tumble(clusterTumble(grid, symbols, rand));
+        if (currentBoard() !== board) throw new Error('board replaced');
+      }),
+    );
+
     wire.handle('rows', async (p) => {
       const rows = (p as { rows?: { id: string; config: Record<string, unknown> }[] })?.rows ?? [];
       const gameRows = ctx.reflect.get('gameRows', false) as GameRowsUpdater | undefined;
@@ -484,11 +601,8 @@ export function apply(ctx: Context, config: SceneEditConfig): void {
       return { results };
     });
     wire.handle('snapshot', () => {
-      const grid = currentBoard()?.config?.grid;
-      const cols = grid?.cols ?? 0;
-      const rows = grid?.rowsPerReel ?? Array.from({ length: cols }, () => grid?.rows ?? 0);
-      // `busy` is Task 4's (a test action in flight) — always false here.
-      return { mode: 'reels', cols, rows, fitted: { w: laid.bw * box.scale.x, h: laid.bh * box.scale.y }, busy: false };
+      const { cols, rows } = shapeOf(currentBoard());
+      return { mode: 'reels', cols, rows, fitted: { w: laid.bw * box.scale.x, h: laid.bh * box.scale.y }, busy };
     });
     emit('ready', { reels: true });
   }

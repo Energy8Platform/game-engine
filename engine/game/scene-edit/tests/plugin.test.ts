@@ -384,22 +384,37 @@ describe('symbol mode', () => {
   });
 });
 
-/** A `ReelsBoard`-shaped fake: a `w×h` `Graphics` child under `view`, a 5×3 grid, and the three step methods a real board has (unused by reels mode itself — Task 4's test actions call them). */
-function fakeBoard(w = 500, h = 300) {
+/**
+ * A `ReelsBoard`-shaped fake: a `w×h` `Graphics` child under `view`, a 5×3
+ * grid, and the three step methods a real board has — Task 4's lab actions
+ * call them. `symbols`, when given, is the optional escape hatch `win()`/
+ * `tumble()` read before any lab `spin()` has landed — not part of the
+ * real board at all, just what a test fake may offer.
+ */
+function fakeBoard(w = 500, h = 300, symbols?: () => string[][]) {
   const view = new Container();
   view.addChild(new Graphics().rect(0, 0, w, h).fill(0xffffff));
   return {
     view,
     cellSize: { width: 96, height: 96 },
     config: { grid: { cols: 5, rows: 3 } as { cols: number; rows: number; rowsPerReel?: number[] } },
-    spinTo: vi.fn(async () => {}),
-    revealWins: vi.fn(async () => {}),
-    tumble: vi.fn(async () => {}),
+    spinTo: vi.fn(async (_step: unknown) => {}),
+    revealWins: vi.fn(async (_step: unknown) => {}),
+    tumble: vi.fn(async (_step: unknown) => {}),
+    ...(symbols ? { symbols } : {}),
   };
 }
 
-/** Same fake-wire harness as `boot()`, wired for `reels: true`. `board`/`gameRows` are `ctx.provide`d only when given. */
-function bootReels(board?: unknown, gameRows?: unknown) {
+/** Ids '1'..'6' — the project's symbol vocabulary the lab actions in `bootReels` draw boards from (`ctx.reflect.get('symbols', false)?.doc()?.symbols`). `null` is the "no symbols" path. */
+const SIX = ['1', '2', '3', '4', '5', '6'];
+function fakeSymbolsService(ids: string[] | null): { doc(): SymbolsDoc | null } {
+  return {
+    doc: () => (ids === null ? null : { version: 1, symbols: ids.map((id) => ({ id, static: { type: 'box', props: {} } })) }),
+  };
+}
+
+/** Same fake-wire harness as `boot()`, wired for `reels: true`. `board`/`gameRows`/`symbols` are `ctx.provide`d only when given. */
+function bootReels(board?: unknown, gameRows?: unknown, symbols?: unknown) {
   const ctx = new Context();
   const app = { stage: new Container(), ticker: { add: vi.fn(), remove: vi.fn() }, canvas: document.createElement('canvas'), screen: { width: 480, height: 288 } };
   ctx.provide('renderer', { app });
@@ -409,6 +424,7 @@ function bootReels(board?: unknown, gameRows?: unknown) {
   ctx.provide('scenes', scenes);
   if (board !== undefined) ctx.provide('board', board);
   if (gameRows !== undefined) ctx.provide('gameRows', gameRows);
+  if (symbols !== undefined) ctx.provide('symbols', symbols);
   const posted: Frame[] = [];
   let listener: ((e: { data: unknown; origin: string }) => void) | undefined;
   let id = 0;
@@ -538,6 +554,156 @@ describe('reels mode', () => {
     expect(snap.fitted.h).toBeCloseTo(s * 300, 5);
     const checker = app.stage.getChildByLabel('reels-checker')!;
     expect([checker.getBounds().maxX, checker.getBounds().maxY]).toEqual([960, 576]);
+  });
+});
+
+describe('reels mode: lab actions', () => {
+  it('spin() spins a random board (project symbols, the board\'s own shape) and answers ok', async () => {
+    const board = fakeBoard();
+    const { call, ready } = bootReels(board, undefined, fakeSymbolsService(SIX));
+    await ready();
+    const res = await call('spin');
+    expect(res.result).toEqual({ ok: true });
+    expect(board.spinTo).toHaveBeenCalledTimes(1);
+    const step = board.spinTo.mock.calls[0][0] as { kind: string; board: string[][] };
+    expect(step.kind).toBe('spinTo');
+    expect(step.board).toHaveLength(5);
+    for (const col of step.board) {
+      expect(col).toHaveLength(3);
+      for (const cell of col) expect(SIX).toContain(cell);
+    }
+  });
+
+  it('scatters() lands the trigger on the first `threshold` reels', async () => {
+    const board = fakeBoard();
+    const { call, ready } = bootReels(board, undefined, fakeSymbolsService(SIX));
+    await ready();
+    const res = await call('scatters', { triggers: ['6'], threshold: 2 });
+    expect(res.result).toEqual({ ok: true });
+    const step = board.spinTo.mock.calls[0][0] as { board: string[][] };
+    expect(step.board[0]).toContain('6');
+    expect(step.board[1]).toContain('6');
+  });
+
+  it('win() reveals one line on the board the last spin() landed', async () => {
+    const board = fakeBoard();
+    const { call, ready } = bootReels(board, undefined, fakeSymbolsService(SIX));
+    await ready();
+    await call('spin');
+    const spun = (board.spinTo.mock.calls[0][0] as { board: string[][] }).board;
+    const res = await call('win');
+    expect(res.result).toEqual({ ok: true });
+    expect(board.revealWins).toHaveBeenCalledTimes(1);
+    const step = board.revealWins.mock.calls[0][0] as { kind: string; lines: { symbol: string; positions: { col: number; row: number }[] }[] };
+    expect(step.kind).toBe('revealWins');
+    expect(step.lines[0].positions).toHaveLength(5);
+    const row = step.lines[0].positions[0].row;
+    expect(step.lines[0].symbol).toBe(spun[0][row]);
+  });
+
+  it("win() before any spin reads the board via board.symbols(), when the fake has one", async () => {
+    const grid = [['1', '2', '3'], ['2', '3', '1'], ['3', '1', '2'], ['1', '2', '3'], ['2', '3', '1']];
+    const board = fakeBoard(500, 300, () => grid);
+    const { call, ready } = bootReels(board, undefined, fakeSymbolsService(SIX));
+    await ready();
+    const res = await call('win');
+    expect(res.result).toEqual({ ok: true });
+    const step = board.revealWins.mock.calls[0][0] as { lines: { symbol: string; positions: { row: number }[] }[] };
+    const row = step.lines[0].positions[0].row;
+    expect(step.lines[0].symbol).toBe(grid[0][row]);
+  });
+
+  it('win() before any spin, with no board.symbols() fallback, answers spin first', async () => {
+    const board = fakeBoard();
+    const { call, ready } = bootReels(board, undefined, fakeSymbolsService(SIX));
+    await ready();
+    const res = await call('win');
+    expect(res.result).toEqual({ ok: false, reason: 'spin first' });
+    expect(board.revealWins).not.toHaveBeenCalled();
+  });
+
+  it('tumble() builds a TumbleStep off the last board and tumbles it', async () => {
+    const board = fakeBoard();
+    const { call, ready } = bootReels(board, undefined, fakeSymbolsService(SIX));
+    await ready();
+    await call('spin');
+    const res = await call('tumble');
+    expect(res.result).toEqual({ ok: true });
+    expect(board.tumble).toHaveBeenCalledTimes(1);
+    const step = board.tumble.mock.calls[0][0] as {
+      kind: string;
+      winning: { col: number; row: number }[];
+      removed: { col: number; row: number }[];
+      fresh: { col: number; row: number; symbol: string }[];
+      settled: string[][];
+    };
+    expect(step.kind).toBe('tumble');
+    expect(step.winning).toEqual(step.removed);
+    const row = step.removed[0].row;
+    expect(step.removed).toEqual([{ col: 0, row }, { col: 1, row }, { col: 2, row }]);
+    expect(step.settled).toHaveLength(5);
+  });
+
+  it('a second action while one is pending answers busy; snapshot().busy tracks it', async () => {
+    const board = fakeBoard();
+    let resolveSpin!: () => void;
+    board.spinTo.mockImplementation(() => new Promise<void>((r) => { resolveSpin = r; }));
+    const { call, ready } = bootReels(board, undefined, fakeSymbolsService(SIX));
+    await ready();
+    const first = call('spin');
+    const whilePending = await call('snapshot');
+    expect((whilePending.result as { busy: boolean }).busy).toBe(true);
+    const second = await call('win');
+    expect(second.result).toEqual({ ok: false, reason: 'busy' });
+    resolveSpin();
+    expect((await first).result).toEqual({ ok: true });
+    const after = await call('snapshot');
+    expect((after.result as { busy: boolean }).busy).toBe(false);
+  });
+
+  it('no symbols service (or an empty doc) answers no symbols; the board is left alone', async () => {
+    const board = fakeBoard();
+    const { call, ready } = bootReels(board, undefined, fakeSymbolsService(null));
+    await ready();
+    const res = await call('spin');
+    expect(res.result).toEqual({ ok: false, reason: 'no symbols' });
+    expect(board.spinTo).not.toHaveBeenCalled();
+  });
+
+  it('no board service answers no board', async () => {
+    const { call, ready } = bootReels(undefined, undefined, fakeSymbolsService(SIX));
+    await ready();
+    const res = await call('spin');
+    expect(res.result).toEqual({ ok: false, reason: 'no board' });
+  });
+
+  it('a board step that throws answers ok:false with its message — never a rejected rpc', async () => {
+    const board = fakeBoard();
+    board.spinTo.mockRejectedValue(new Error('reel jam'));
+    const { call, ready } = bootReels(board, undefined, fakeSymbolsService(SIX));
+    await ready();
+    const res = await call('spin');
+    expect(res.ok).toBe(true); // the rpc itself did not reject
+    expect(res.result).toEqual({ ok: false, reason: 'reel jam' });
+  });
+
+  it('the board replaced while spinTo is pending answers board replaced', async () => {
+    const { ctx, call, ready } = bootReels(undefined, undefined, fakeSymbolsService(SIX));
+    const first = fakeBoard();
+    let resolveSpin!: () => void;
+    first.spinTo.mockImplementation(() => new Promise<void>((r) => { resolveSpin = r; }));
+    const disposeFirst = ctx.provide('board', first);
+    await ready();
+    const pending = call('spin');
+    // `spinTo` is called synchronously inside the handler, but only once the
+    // wire's own dispatch microtask runs — wait for it before swapping the
+    // board out from under the pending call.
+    await vi.waitFor(() => expect(first.spinTo).toHaveBeenCalled());
+    disposeFirst();
+    ctx.provide('board', fakeBoard());
+    resolveSpin();
+    const res = await pending;
+    expect(res.result).toEqual({ ok: false, reason: 'board replaced' });
   });
 });
 
