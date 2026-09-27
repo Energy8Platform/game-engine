@@ -1102,6 +1102,73 @@ describe('SchemaForm — colour, one-or-list, literal-or-value', () => {
     expect(onChange).toHaveBeenLastCalledWith({ colGap: [4] });
   });
 
+  // Fix round 1: a controlled form (the value feeds back), chaining + then
+  // − — the ArrayField "remove and up/down" test's own shape. `+` off the
+  // fed-back `[4, 8, 8]` must drop the entry `+` itself just appended, not
+  // re-derive from the ORIGINAL `[4, 8]` a second time.
+  it('a controlled form: + then − chain off the value each click feeds back', () => {
+    const onChange = renderForm(
+      Schema.object({ colGap: Schema.union([Schema.number(), Schema.array(Schema.number())]) }),
+      { colGap: [4, 8] },
+    );
+    fireEvent.click(screen.getByRole('button', { name: '+' }));
+    expect(onChange).toHaveBeenLastCalledWith({ colGap: [4, 8, 8] });
+    fireEvent.click(screen.getByRole('button', { name: '−' }));
+    expect(onChange).toHaveBeenLastCalledWith({ colGap: [4, 8] });
+  });
+
+  // Fix round 1: the per-reel entries used to be raw `<input>`s that
+  // ignored `commit` entirely — under `commit: 'blur'` (a GAME row) every
+  // keystroke was a `PUT`. They now go through `Field`/`NumberField`, so
+  // they get its draft: buffered while focused, one commit on blur, and a
+  // cleared entry commits nothing (NumberField's own rule, not re-tested
+  // here — this just confirms the entry actually IS a `NumberField`).
+  it("under commit: 'blur', a per-reel entry buffers keystrokes and commits once on blur; clearing writes nothing", () => {
+    const onChange = renderStaticForm(
+      Schema.object({ colGap: Schema.union([Schema.number(), Schema.array(Schema.number())]) }),
+      { colGap: [4, 8] },
+      { commit: 'blur' },
+    );
+    const entry = screen.getByLabelText('reel 1') as HTMLInputElement;
+    fireEvent.change(entry, { target: { value: '6' } });
+    fireEvent.change(entry, { target: { value: '60' } });
+    expect(onChange).not.toHaveBeenCalled();
+    fireEvent.blur(entry);
+    expect(onChange).toHaveBeenCalledTimes(1);
+    expect(onChange).toHaveBeenLastCalledWith({ colGap: [60, 8] });
+
+    fireEvent.focus(entry);
+    fireEvent.change(entry, { target: { value: '' } });
+    fireEvent.blur(entry);
+    expect(onChange).toHaveBeenCalledTimes(1); // the clear commits nothing
+  });
+
+  // Fix round 1: `one` mode's single number field had the same bug.
+  it("under commit: 'blur', one mode's number field buffers too", () => {
+    const onChange = renderStaticForm(
+      Schema.object({ colGap: Schema.union([Schema.number(), Schema.array(Schema.number())]) }),
+      { colGap: 6 },
+      { commit: 'blur' },
+    );
+    const input = screen.getByLabelText('colGap') as HTMLInputElement;
+    fireEvent.change(input, { target: { value: '48' } });
+    expect(onChange).not.toHaveBeenCalled();
+    fireEvent.blur(input);
+    expect(onChange).toHaveBeenCalledTimes(1);
+    expect(onChange).toHaveBeenLastCalledWith({ colGap: 48 });
+  });
+
+  // Fix round 1: in list mode nothing carries the bare `id={id}` the
+  // field's own `<label htmlFor>` names — the field must still resolve to
+  // a NAMED element some other way, via `role="group"`/`aria-labelledby`.
+  it('per-reel mode is a group the field label names', () => {
+    renderStaticForm(
+      Schema.object({ colGap: Schema.union([Schema.number(), Schema.array(Schema.number())]) }),
+      { colGap: [4, 8] },
+    );
+    expect(screen.getByRole('group', { name: 'colGap' })).toBeInTheDocument();
+  });
+
   it("null | object is an on switch with the object's fields; off writes null", () => {
     const schema = Schema.object({
       topReel: Schema.union([
@@ -1138,6 +1205,18 @@ describe('SchemaForm — colour, one-or-list, literal-or-value', () => {
     expect(screen.getByRole('radio', { name: 'trailing' })).toBeChecked();
     fireEvent.click(screen.getByRole('radio', { name: 'these' }));
     expect(onChange).toHaveBeenLastCalledWith({ reels: [] });
+  });
+
+  // Fix round 1: neither radio in this switch carries the bare `id={id}`
+  // either (same gap as `OneOrListField`'s list mode above).
+  it("the trailing / these switch is a group the field label names", () => {
+    const schema = Schema.object({
+      reels: Schema.union([Schema.const('trailing'), Schema.array(Schema.natural())]).default(
+        'trailing',
+      ),
+    });
+    renderStaticForm(schema, {});
+    expect(screen.getByRole('group', { name: 'reels' })).toBeInTheDocument();
   });
 
   it('rendering never writes: odd values stay as they are until the user acts', () => {

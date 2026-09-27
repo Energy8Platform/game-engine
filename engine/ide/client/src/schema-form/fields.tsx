@@ -180,7 +180,14 @@ export function ObjectFields({
               </fieldset>
             ) : (
               <>
-                <label htmlFor={id}>{label(child, key)}</label>
+                {/* `id={`${id}-label`}` is a second, purely-for-`aria-labelledby`
+                    id: `OneOrListField`'s list mode and `LiteralOrValueField`'s
+                    string-literal switch have no single control the plain
+                    `htmlFor` above can name, so they point their own
+                    `role="group"` wrapper at this instead. */}
+                <label htmlFor={id} id={`${id}-label`}>
+                  {label(child, key)}
+                </label>
                 {control}
               </>
             )}
@@ -288,6 +295,7 @@ export function Field({ id, node, value, onChange, commit, ariaLabel, describedB
         value={value}
         onChange={onChange}
         commit={commit}
+        ariaLabel={ariaLabel}
         describedBy={describedBy}
       />
     );
@@ -410,7 +418,7 @@ function useDraft<T>({
   };
 }
 
-function NumberField({ id, node, value, onChange, commit, describedBy }: FieldProps) {
+function NumberField({ id, node, value, onChange, commit, ariaLabel, describedBy }: FieldProps) {
   const draft = useDraft<number | undefined>({
     dep: value,
     current: (value ?? node.meta?.default) as number | undefined,
@@ -426,6 +434,7 @@ function NumberField({ id, node, value, onChange, commit, describedBy }: FieldPr
   return (
     <input
       id={id}
+      aria-label={ariaLabel}
       aria-describedby={describedBy}
       type="number"
       value={draft.raw}
@@ -827,10 +836,17 @@ function ModeSwitch({
  * input; `per reel` shows one input per entry plus `+`/`−`. Switching
  * converts in place — `one`'s number becomes `[n]`, a list's first entry
  * becomes the scalar — rather than losing the value the user already set.
- * Every change here is structural (a whole new array, or a whole new
- * scalar), so — like `ArrayField` — there is no draft to buffer.
+ * The switch itself and `+`/`−` are structural (a whole new array, or a
+ * whole new scalar) — no draft to buffer, same as `ArrayField`'s own
+ * tools. Each NUMBER, though, goes through `Field`/`NumberField` (the
+ * union's `number` member for `one`, the array member's `inner` for every
+ * entry) so it gets `NumberField`'s own draft: under `commit: 'blur'` (a
+ * GAME row) a keystroke is not a `PUT`, and clearing an entry to retype it
+ * does not momentarily commit `0`.
  */
-function OneOrListField({ id, node, value, onChange, describedBy }: FieldProps) {
+function OneOrListField({ id, node, value, onChange, commit, describedBy }: FieldProps) {
+  const [a, b] = node.list!;
+  const [numMember, listMember] = a.type === 'number' ? [a, b] : [b, a];
   const current = value ?? node.meta?.default;
   const list = Array.isArray(current) ? (current as number[]) : null;
   const single = typeof current === 'number' ? current : 0;
@@ -846,22 +862,29 @@ function OneOrListField({ id, node, value, onChange, describedBy }: FieldProps) 
             { name: 'per reel', checked: false, onSelect: () => onChange([single]) },
           ]}
         />
-        <input
+        <Field
           id={id}
-          type="number"
-          aria-describedby={describedBy}
+          node={numMember}
           value={single}
-          onChange={(e) => {
-            const n = Number(e.target.value);
-            if (!Number.isNaN(n)) onChange(n);
-          }}
+          onChange={onChange}
+          commit={commit}
+          describedBy={describedBy}
         />
       </span>
     );
   }
 
   return (
-    <span className="e8-one-or-list">
+    // `role="group"`/`aria-labelledby`: unlike `one` above, nothing in list
+    // mode carries the bare `id={id}` the field's own `<label htmlFor>`
+    // names — the entries are `${id}-0`, `${id}-1`, … — so this wrapper is
+    // what that label actually points at (see `ObjectFields`' `${id}-label`).
+    <span
+      className="e8-one-or-list"
+      role="group"
+      aria-labelledby={`${id}-label`}
+      aria-describedby={describedBy}
+    >
       <ModeSwitch
         id={id}
         describedBy={describedBy}
@@ -872,17 +895,15 @@ function OneOrListField({ id, node, value, onChange, describedBy }: FieldProps) 
       />
       <span className="e8-one-or-list-items">
         {list.map((n, i) => (
-          <input
+          <Field
             key={i}
             id={`${id}-${i}`}
-            type="number"
-            aria-label={`reel ${i + 1}`}
-            aria-describedby={describedBy}
+            node={listMember.inner!}
             value={n}
-            onChange={(e) => {
-              const next = Number(e.target.value);
-              if (!Number.isNaN(next)) onChange(list.map((v, j) => (j === i ? next : v)));
-            }}
+            onChange={(next) => onChange(list.map((v, j) => (j === i ? next : v)))}
+            commit={commit}
+            ariaLabel={`reel ${i + 1}`}
+            describedBy={describedBy}
           />
         ))}
         <button type="button" aria-label="+" onClick={() => onChange([...list, list[list.length - 1] ?? 0])}>
@@ -937,7 +958,15 @@ function LiteralOrValueField({ id, node, value, onChange, commit, describedBy }:
   const literalValue = literal.value as string;
   const on = current === literalValue;
   return (
-    <span className="e8-literal-or-value">
+    // Same `role="group"` reasoning as `OneOrListField`'s list mode: neither
+    // radio here carries the bare `id={id}` — the field's own label points
+    // at this wrapper instead (`${id}-label`, from `ObjectFields`).
+    <span
+      className="e8-literal-or-value"
+      role="group"
+      aria-labelledby={`${id}-label`}
+      aria-describedby={describedBy}
+    >
       <ModeSwitch
         id={id}
         describedBy={describedBy}
