@@ -705,6 +705,36 @@ describe('reels mode: lab actions', () => {
     const res = await pending;
     expect(res.result).toEqual({ ok: false, reason: 'board replaced' });
   });
+
+  it('a step that rejects with its OWN message after the board was replaced still answers board replaced', async () => {
+    // The real board's own teardown ("board destroyed — reels1 was
+    // re-applied…") and the handler's post-await identity check are two
+    // different doors to the same fact; `runStep`'s catch must not let
+    // whichever fired first leak its own wording to the caller.
+    const { ctx, call, ready } = bootReels(undefined, undefined, fakeSymbolsService(SIX));
+    const first = fakeBoard();
+    let rejectSpin!: (e: Error) => void;
+    first.spinTo.mockImplementation(() => new Promise<void>((_resolve, reject) => { rejectSpin = reject; }));
+    const disposeFirst = ctx.provide('board', first);
+    await ready();
+    const pending = call('spin');
+    await vi.waitFor(() => expect(first.spinTo).toHaveBeenCalled());
+    disposeFirst();
+    ctx.provide('board', fakeBoard());
+    rejectSpin(new Error('board destroyed — reels1 was re-applied'));
+    const res = await pending;
+    expect(res.result).toEqual({ ok: false, reason: 'board replaced' });
+  });
+
+  it('tumble() on a 2-reel board answers a clear reason instead of crashing', async () => {
+    const board = { ...fakeBoard(), config: { grid: { cols: 2, rows: 3 } } };
+    const { call, ready } = bootReels(board, undefined, fakeSymbolsService(SIX));
+    await ready();
+    await call('spin');
+    const res = await call('tumble');
+    expect(res.result).toEqual({ ok: false, reason: 'a tumble needs at least 3 reels' });
+    expect(board.tumble).not.toHaveBeenCalled();
+  });
 });
 
 describe('scene-edit plugin', () => {

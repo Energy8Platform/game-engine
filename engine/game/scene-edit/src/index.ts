@@ -535,6 +535,15 @@ export function apply(ctx: Context, config: SceneEditConfig): void {
      * it raises itself when a hot `reels1` re-apply swapped the board
      * mid-step — lands here as `{ ok: false, reason: <message> }`; the rpc
      * call itself never rejects.
+     *
+     * A board torn down mid-step can reject through either door: the
+     * handler's own post-await identity check, or the real board's own
+     * teardown message (`ReelSystem`'s "board destroyed — reels1 was
+     * re-applied…", or anything else a disposed board throws on its way
+     * out). Both mean the same thing to the caller, so this is the one
+     * place that normalizes them: whatever `e` says, a board swap detected
+     * AT CATCH TIME answers `'board replaced'` — one reason, not whichever
+     * of the two happened to fire first.
      */
     const runStep = async (
       run: (board: ReelsBoardLike, symbols: string[]) => Promise<void>,
@@ -549,6 +558,7 @@ export function apply(ctx: Context, config: SceneEditConfig): void {
         await run(board, symbols);
         return { ok: true };
       } catch (e) {
+        if (currentBoard() !== board) return { ok: false, reason: 'board replaced' };
         return { ok: false, reason: e instanceof Error ? e.message : String(e) };
       } finally {
         busy = false;

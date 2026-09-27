@@ -35,6 +35,14 @@ describe('scatterBoard', () => {
     expect(board[1].filter((c) => c === 'S')).toHaveLength(1);
     for (const col of board.slice(2)) expect(col).not.toContain('S');
   });
+
+  it('skips a zero-height reel among the first `threshold` — no trigger, no length change', () => {
+    // Reel 0 is legally empty (a ragged grid); it must stay length 0, not
+    // grow to 1 from `board[0][row] = trigger` writing an out-of-range index.
+    const board = scatterBoard({ cols: 3, rows: [0, 3, 3] }, ['1', '2'], ['S'], 2, seeded(7));
+    expect(board[0]).toHaveLength(0);
+    expect(board[1].filter((c) => c === 'S')).toHaveLength(1);
+  });
 });
 
 describe('lineWin', () => {
@@ -89,5 +97,17 @@ describe('clusterTumble', () => {
       expect(step.settled[col]).toEqual(expected);
     }
     for (let col = 3; col < 5; col++) expect(step.settled[col]).toEqual(board[col]);
+  });
+
+  it('refuses fewer than 3 reels with a clear reason, rather than reading past the array', () => {
+    const rand = seeded(8);
+    const board = randomBoard({ cols: 2, rows: [3, 3] }, ['1', '2'], rand);
+    expect(() => clusterTumble(board, ['1', '2'], rand)).toThrow('a tumble needs at least 3 reels');
+  });
+
+  it('refuses a height-0 reel among the first 3 with a clear reason', () => {
+    const rand = seeded(9);
+    const board = randomBoard({ cols: 3, rows: [3, 0, 3] }, ['1', '2'], rand);
+    expect(() => clusterTumble(board, ['1', '2'], rand)).toThrow('a tumble needs a row on each of the first 3 reels');
   });
 });

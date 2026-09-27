@@ -35,9 +35,12 @@ export function randomBoard(shape: Shape, symbols: readonly string[], rand: Rand
 /**
  * A `randomBoard` seeded for anticipation: the first `threshold` reels each
  * get one `triggers` symbol dropped at a random row over an otherwise
- * random fill — the rest are plain `randomBoard`. Since `symbols` never
- * includes a trigger id itself, the untouched reels can never show one by
- * chance either.
+ * random fill — the rest are plain `randomBoard`. Guaranteed: each of the
+ * first `threshold` reels shows a trigger at least once (a reel of height
+ * 0 among them is skipped — there is no row to drop one on). NOT
+ * guaranteed: that the OTHER reels show none — a trigger id that also
+ * happens to be one of the project's ordinary `symbols` can still land
+ * there by chance, same as any other symbol would.
  */
 export function scatterBoard(
   shape: Shape,
@@ -48,6 +51,7 @@ export function scatterBoard(
 ): string[][] {
   const board = randomBoard(shape, symbols, rand);
   for (let col = 0; col < Math.min(threshold, shape.cols); col++) {
+    if (shape.rows[col] === 0) continue; // no row to drop a trigger on — leave this reel empty, not length 1
     const row = Math.floor(rand() * shape.rows[col]);
     board[col][row] = triggers[Math.floor(rand() * triggers.length)];
   }
@@ -74,9 +78,19 @@ export function lineWin(board: readonly (readonly string[])[], rand: Rand): Reve
  * `settled` is what each reel reads after — the removed cell gone, whatever
  * was above it shifted down one, the fresh symbol on top. Reels past 2 are
  * untouched, carried into `settled` as they are.
+ *
+ * Throws (a plain `Error`, its `message` meant to reach the caller as-is —
+ * `bootReels`' `runStep` turns it into `{ ok: false, reason: <message> }`)
+ * when there is no row to cluster: fewer than 3 reels at all, the legal
+ * shape a lab board can be handed but a cluster needs; or one of the first
+ * 3 is height 0, which `board[col].length` would otherwise silently accept
+ * and `Math.min` would happily bound the row to 0 for.
  */
 export function clusterTumble(board: readonly (readonly string[])[], symbols: readonly string[], rand: Rand): TumbleStep {
-  const minRows = Math.min(board[0].length, board[1].length, board[2].length);
+  if (board.length < 3) throw new Error('a tumble needs at least 3 reels');
+  const heights = [board[0].length, board[1].length, board[2].length];
+  if (heights.some((h) => h === 0)) throw new Error('a tumble needs a row on each of the first 3 reels');
+  const minRows = Math.min(...heights);
   const row = Math.floor(rand() * minRows);
   const cells: Cell[] = [0, 1, 2].map((col) => ({ col, row }));
   const fresh = [0, 1, 2].map((col) => ({ col, row: 0, symbol: symbols[Math.floor(rand() * symbols.length)] }));
