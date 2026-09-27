@@ -487,6 +487,11 @@ describe('reels mode', () => {
     const board = fakeBoard();
     const { call, ready, edit, fiber } = bootReels(board);
     await ready();
+    // Fails here, with a clear message, rather than inside `edit()`'s own
+    // property access — a hook `bootReels` forgot to install (this test's
+    // own reason for existing) would otherwise surface as "Cannot read
+    // properties of undefined", not "the hook is missing".
+    expect((window as unknown as { __e8edit?: unknown }).__e8edit).toBeDefined();
     expect(edit().emitted().some((e) => e.event === 'ready')).toBe(true);
     const wireSnap = (await call('snapshot')).result;
     expect(edit().snapshot()).toEqual(wireSnap);

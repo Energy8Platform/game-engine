@@ -116,7 +116,7 @@ test('the Reels document edits the reel rows, rebuilds the lab board, spins it, 
 
   const canvas = await readyCanvas(page, REELS_CANVAS);
   const snapshot = () => canvas.evaluate(() => (window as any).__e8edit.snapshot() as ReelsSnapshot);
-  await expect.poll(async () => (await snapshot()).cols).toBe(5);
+  await expect.poll(snapshot).toMatchObject({ mode: 'reels', cols: 5 });
 
   await test.step('cols to 6 (blur): the patch and the canvas both pick it up', async () => {
     const cols = page.locator('#field-reels1-cols');
@@ -165,8 +165,30 @@ test('the Reels document edits the reel rows, rebuilds the lab board, spins it, 
     await expect.poll(async () => (await snapshot()).cols).toBe(5);
   });
 
-  await test.step('Composition shows reels1 with no unsupported union', async () => {
+  await test.step('Composition draws reels1 with its real union widgets, not a fallback', async () => {
     await page.getByTestId('activity-composition').click();
-    await expect(page.getByTestId('row-reels1')).not.toContainText('unsupported (union)');
+    const row = page.getByTestId('row-reels1');
+    // Positive first: the row is actually there (composition.spec.ts's own
+    // "lists the rows the profile resolved to" test reads the same two
+    // things) — the negative check below would otherwise pass vacuously
+    // against a row that never rendered at all.
+    await expect(row).toBeVisible();
+    await expect(row).toContainText('@energy8engine/reels');
+    // One of the exact fields Task 1 fixed: `colGap` is `number | number[]`
+    // — before that fix it fell through to `UnsupportedField` (a read-only
+    // text input plus " unsupported (union)"); now it draws the `one`/`per
+    // reel` radio switch. Scoped to colGap's OWN `.e8-field` row (found by
+    // its field id, unrooted here since Composition draws the whole row) —
+    // `.filter({ has })` also matches the OUTER `.e8-field` that wraps the
+    // whole `grid` fieldset (colGap is a descendant of that one too, and so
+    // is `rowGap`'s identical, identically-labelled switch); `.last()` is
+    // colGap's own, innermost wrapper, in document order.
+    const colGapField = row
+      .locator('.e8-field')
+      .filter({ has: page.locator('#field-reels1-grid-colGap') })
+      .last();
+    await expect(colGapField.getByRole('radio', { name: 'one' })).toBeChecked();
+    await expect(colGapField.getByRole('radio', { name: 'per reel' })).toBeVisible();
+    await expect(row).not.toContainText('unsupported (union)');
   });
 });
