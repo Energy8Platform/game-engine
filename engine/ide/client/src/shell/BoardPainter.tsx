@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 
 /** `cols` reels, `rows[col]` cells in each — `reels1`'s own `grid.cols`/
  * `grid.rowsPerReel ?? Array(cols).fill(grid.rows)` (see `ReelsDocument`). */
@@ -55,13 +55,21 @@ function fitBoard(board: BoardGrid, shape: BoardShape): BoardGrid {
  * instead, and that never counts as a mismatch (there is nothing saved to
  * disagree with `shape`).
  *
- * A cell click opens a small menu — the known ids plus `empty` — right
- * under it; picking one replaces just that cell in whatever grid is
- * currently drawn and hands the WHOLE grid to `onChange`. `board-clear`
- * hands up `undefined` outright — the section drops the `board` key
- * entirely rather than writing an empty grid, so a later `reels1.config`
- * with no `board` at all reads exactly as "no starting board", not "one
- * cell of nothing".
+ * A cell click opens a small popup — the known ids plus `empty` — right
+ * under it (a labelled `role="group"`, plain buttons; not `role="menu"`,
+ * which implies arrow-key/`menuitem` semantics this never offers); picking
+ * one replaces just that cell in whatever grid is currently drawn and
+ * hands the WHOLE grid to `onChange`. `board-clear` hands up `undefined`
+ * outright — the section drops the `board` key entirely rather than
+ * writing an empty grid, so a later `reels1.config` with no `board` at all
+ * reads exactly as "no starting board", not "one cell of nothing".
+ *
+ * The popup closes three ways, same rule a native `<select>` follows:
+ * picking an entry (`paint`, above), `Escape` (focus returns to the cell
+ * that opened it — `triggerRef`), or a pointerdown anywhere outside this
+ * component (`containerRef`) — a click on `board-clear`/`board-fit`, or on
+ * a DIFFERENT cell, is still inside the painter, so those keep their own
+ * click handlers rather than being swallowed by the outside-close check.
  */
 export function BoardPainter({
   board,
@@ -75,6 +83,8 @@ export function BoardPainter({
   onChange: (next: BoardGrid | undefined) => void;
 }) {
   const [open, setOpen] = useState<{ col: number; row: number } | null>(null);
+  const containerRef = useRef<HTMLDivElement>(null);
+  const triggerRef = useRef<HTMLButtonElement | null>(null);
   const saved = isGrid(board) ? board : null;
   const mismatched = saved !== null && !sameShape(shapeOf(saved), shape);
   const grid = saved ?? emptyGrid(shape);
@@ -88,8 +98,27 @@ export function BoardPainter({
     setOpen(null);
   };
 
+  useEffect(() => {
+    if (!open) return;
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape') return;
+      setOpen(null);
+      triggerRef.current?.focus();
+    };
+    const onPointerDown = (e: MouseEvent) => {
+      if (containerRef.current?.contains(e.target as Node)) return;
+      setOpen(null);
+    };
+    document.addEventListener('keydown', onKeyDown);
+    document.addEventListener('mousedown', onPointerDown);
+    return () => {
+      document.removeEventListener('keydown', onKeyDown);
+      document.removeEventListener('mousedown', onPointerDown);
+    };
+  }, [open]);
+
   return (
-    <div className="e8-board-painter">
+    <div className="e8-board-painter" ref={containerRef}>
       <div className="e8-board-toolbar">
         <button type="button" data-testid="board-clear" onClick={() => onChange(undefined)}>
           clear
@@ -117,16 +146,22 @@ export function BoardPainter({
                   className="e8-board-cell"
                   data-testid={`board-cell-${col}-${row}`}
                   aria-label={`column ${col}, row ${row}: ${symbol ?? 'empty'}`}
-                  onClick={() =>
+                  aria-expanded={open?.col === col && open.row === row}
+                  onClick={(e) => {
+                    triggerRef.current = e.currentTarget;
                     setOpen((current) =>
                       current?.col === col && current.row === row ? null : { col, row },
-                    )
-                  }
+                    );
+                  }}
                 >
                   {symbol ?? '·'}
                 </button>
                 {open?.col === col && open.row === row ? (
-                  <div className="e8-board-menu" role="menu">
+                  <div
+                    className="e8-board-menu"
+                    role="group"
+                    aria-label={`symbol for reel ${col} row ${row}`}
+                  >
                     <button type="button" onClick={() => paint(col, row, null)}>
                       empty
                     </button>

@@ -18,6 +18,17 @@ import type { FieldProps } from '../schema-form/fields';
  * which `ObjectFields` already wraps in its own `<fieldset><legend>` (no
  * `<label for>` this component needs to be the target of), and the
  * override is reached before any node-specific rendering — see `Field`.
+ *
+ * Keyed and removed by POSITION, not by id: `triggerSymbols`/`onlyOnSymbols`
+ * are plain string arrays, and nothing stops the same symbol id appearing
+ * twice (hand-authored YAML, or two separate adds before a write lands).
+ * Keying by id would hand React two chips with the same key (React warns
+ * and may drop/duplicate one), and removing by VALUE (`!== id`) would
+ * delete every matching entry at once instead of just the one clicked —
+ * both chips still share `data-testid`/`aria-label` (the id is what a
+ * sighted or assistive reading of the chip actually says), so a test
+ * reaching for "the first one" uses `getAllBy…()[0]`, same as a real user
+ * clicking the chip they can see.
  */
 export function SymbolChips({
   value,
@@ -35,9 +46,9 @@ export function SymbolChips({
 
   return (
     <span className="e8-chips">
-      {list.map((id) => (
+      {list.map((id, index) => (
         <span
-          key={id}
+          key={index}
           className={`e8-chip${knownIds.has(id) ? '' : ' e8-chip-unknown'}`}
           data-testid={`symbol-chip-${id}`}
           title={knownIds.has(id) ? undefined : 'not a symbol of this project'}
@@ -47,7 +58,7 @@ export function SymbolChips({
             type="button"
             className="e8-chip-remove"
             aria-label={`remove ${id}`}
-            onClick={() => onChange(list.filter((existing) => existing !== id))}
+            onClick={() => onChange(list.filter((_, i) => i !== index))}
           >
             ×
           </button>

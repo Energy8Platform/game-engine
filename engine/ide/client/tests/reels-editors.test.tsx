@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import { fireEvent, render, screen, within } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import { SymbolChips } from '../src/shell/SymbolChips';
@@ -64,6 +65,18 @@ describe('SymbolChips', () => {
     chips([]);
     expect(screen.queryByTestId(/^symbol-chip-/)).toBeNull();
     expect(screen.getByTestId('symbol-chips-add')).toBeInTheDocument();
+  });
+
+  // Fix round 1, item 1: keyed/removed by id, a duplicate value either
+  // crashed React's key uniqueness or let one remove take out both copies.
+  it('a duplicate id draws two chips (sharing a test id) and removes only the one clicked, by position', () => {
+    const onChange = chips(['6', '6', 'x']);
+    const sixes = screen.getAllByTestId('symbol-chip-6');
+    expect(sixes).toHaveLength(2);
+    const removes = screen.getAllByRole('button', { name: 'remove 6' });
+    expect(removes).toHaveLength(2);
+    fireEvent.click(removes[0]);
+    expect(onChange).toHaveBeenCalledWith(['6', 'x']);
   });
 });
 
@@ -166,5 +179,66 @@ describe('BoardPainter', () => {
       ['d', 'e', 'f'],
       ['g', 'h', 'i'],
     ]);
+  });
+
+  // Fix round 1, item 3: painting a cell while the saved board mismatches
+  // `shape` must build the new board off the SAVED (drawn) shape, not
+  // `shape` — else a mismatched 2-col board would silently grow a 3rd,
+  // empty column the moment it's edited.
+  it('painting a cell while mismatched keeps the saved shape, changing only that cell', () => {
+    const saved = [
+      ['a', 'b', 'c'],
+      ['d', 'e', 'f'],
+    ]; // 2 cols, not 3
+    function Wrapper() {
+      const [board, setBoard] = useState<unknown>(saved);
+      return <BoardPainter board={board} shape={SHAPE_3x3} known={KNOWN} onChange={setBoard} />;
+    }
+    render(<Wrapper />);
+    expect(screen.getByTestId('board-mismatch')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByTestId('board-cell-1-0'));
+    fireEvent.click(screen.getByRole('button', { name: '4' }));
+
+    expect(screen.queryByTestId('board-cell-2-0')).toBeNull(); // still 2 columns
+    expect(screen.getByTestId('board-cell-1-0')).toHaveTextContent('4');
+    expect(screen.getByTestId('board-cell-1-1')).toHaveTextContent('e'); // untouched
+    expect(screen.getByTestId('board-mismatch')).toBeInTheDocument(); // still mismatched
+  });
+
+  // Fix round 1, item 2: the popup is a labelled group, not a `menu` with
+  // no keyboard way out — Escape closes it and returns focus to the cell
+  // that opened it.
+  describe('the cell popup', () => {
+    it('is not role="menu"; the trigger reports aria-expanded and the popup has an accessible name naming the cell', () => {
+      painter(undefined, SHAPE_3x3);
+      const trigger = screen.getByTestId('board-cell-1-2');
+      expect(trigger).toHaveAttribute('aria-expanded', 'false');
+      fireEvent.click(trigger);
+      expect(trigger).toHaveAttribute('aria-expanded', 'true');
+      expect(screen.queryByRole('menu')).toBeNull();
+      expect(screen.getByRole('group', { name: 'symbol for reel 1 row 2' })).toBeInTheDocument();
+    });
+
+    it('Escape closes the popup and returns focus to the cell that opened it', () => {
+      painter(undefined, SHAPE_3x3);
+      const trigger = screen.getByTestId('board-cell-1-2');
+      fireEvent.click(trigger);
+      expect(screen.getByRole('button', { name: '4' })).toBeInTheDocument();
+
+      fireEvent.keyDown(document, { key: 'Escape' });
+      expect(screen.queryByRole('button', { name: '4' })).toBeNull();
+      expect(trigger).toHaveAttribute('aria-expanded', 'false');
+      expect(document.activeElement).toBe(trigger);
+    });
+
+    it('a mousedown outside the painter closes the popup', () => {
+      painter(undefined, SHAPE_3x3);
+      fireEvent.click(screen.getByTestId('board-cell-1-2'));
+      expect(screen.getByRole('button', { name: '4' })).toBeInTheDocument();
+
+      fireEvent.mouseDown(document.body);
+      expect(screen.queryByRole('button', { name: '4' })).toBeNull();
+    });
   });
 });
