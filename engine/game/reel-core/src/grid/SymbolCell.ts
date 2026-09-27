@@ -28,13 +28,14 @@ export interface SymbolCellConfig {
   frameStyle?: CellFrameStyle;
 }
 
-const DEFAULT_STYLE: Required<CellFrameStyle> = {
+/** `SymbolCell`'s idle/winning/removed/fresh frame colours — also what a board-less symbol-mode canvas frames its preview with (`@energy8engine/scene-edit`'s `bootSymbol`). */
+export const DEFAULT_CELL_FRAME_STYLE: Readonly<Required<CellFrameStyle>> = Object.freeze({
   radius: 8,
   idle: { color: 0x223047, alpha: 0.34 },
   winning: { color: 0x00d4ff, alpha: 0.95 },
   removed: { color: 0x223047, alpha: 0.12 },
   fresh: { color: 0xffffff, alpha: 0.6 },
-};
+});
 
 const cellDims = (size: number | { width: number; height: number }) =>
   typeof size === 'number' ? { width: size, height: size } : size;
@@ -61,7 +62,7 @@ export class SymbolCell extends Container {
     this._w = width;
     this._h = height;
     this._resolve = config.resolve;
-    this._style = { ...DEFAULT_STYLE, ...(config.frameStyle ?? {}) } as Required<CellFrameStyle>;
+    this._style = { ...DEFAULT_CELL_FRAME_STYLE, ...(config.frameStyle ?? {}) } as Required<CellFrameStyle>;
     this._frame = new Graphics();
     this.addChild(this._frame);
     this.addChild(this._badges);

@@ -2,6 +2,8 @@ import { describe, it, expect, vi } from 'vitest';
 import { Container, Graphics } from 'pixi.js';
 import { SymbolCell, type CellData, type SymbolCellConfig } from '../src/grid/SymbolCell';
 import type { SymbolResolver, SymbolView } from '../src/grid/SymbolView';
+// The barrel re-export, not the direct module — proves `DEFAULT_CELL_FRAME_STYLE` is public API.
+import { DEFAULT_CELL_FRAME_STYLE } from '../src';
 
 const resolver: SymbolResolver = vi.fn((id: string) => {
   const v = new Container() as any;
@@ -38,6 +40,14 @@ describe('SymbolCell', () => {
     expect(cell.hasBadge('multiplier')).toBe(true);
     cell.setData({ symbol: 'A' });
     expect(cell.hasBadge('multiplier')).toBe(false);
+  });
+  it('exports its frame defaults and draws its idle frame with them', () => {
+    expect(DEFAULT_CELL_FRAME_STYLE.idle).toEqual({ color: 0x223047, alpha: 0.34 });
+    expect(DEFAULT_CELL_FRAME_STYLE.radius).toBe(8);
+    expect(Object.isFrozen(DEFAULT_CELL_FRAME_STYLE)).toBe(true);
+    const cell = new SymbolCell({ size: 96, resolve: resolver });
+    // the frame is the first child; its tint is the idle colour (`_drawFrame` stores it)
+    expect((cell.children[0] as { tint: number }).tint).toBe(0x223047);
   });
 });
 

@@ -11,6 +11,7 @@ import type { Context } from 'cordis';
 import { sceneRounding, type SafeArea, type SceneDoc, type SymbolsDoc, type SymbolState } from '@energy8engine/contracts';
 import type {} from '@energy8engine/scenes/runtime';
 import { COMMON, pinPoint, type Fit, type Orientation, type Pin } from '@energy8engine/scenes';
+import { DEFAULT_CELL_FRAME_STYLE, type CellFrameStyle } from '@energy8engine/reel-core';
 import { Container, Graphics, type FederatedPointerEvent } from 'pixi.js';
 import { createGizmo, type GizmoTarget } from './gizmo';
 import { pickAt } from './pick';
@@ -48,8 +49,20 @@ export interface SceneEditConfig {
 
 export interface Bounds { x: number; y: number; w: number; h: number }
 export interface Snapshot { scene: string; selected: string | null; bounds: Record<string, Bounds> }
-/** What symbol mode's `snapshot` answers instead — no nodes, one preview. */
-export interface SymbolSnapshot { symbol: string | null; state: SymbolState | null; w: number; h: number }
+/**
+ * What symbol mode's `snapshot` answers instead — no nodes, one preview.
+ * `w`/`h` are the previewed view's own bounds in design units (unaffected by
+ * zoom); `cell` is the board's cell size (design units) and `screen` that
+ * same cell at the current zoom's on-screen size.
+ */
+export interface SymbolSnapshot {
+  symbol: string | null;
+  state: SymbolState | null;
+  w: number;
+  h: number;
+  cell: { width: number; height: number };
+  screen: { w: number; h: number };
+}
 
 /** Which layer of the document an edit lands in: the node's own props (`null`), or `portrait.nodes[<id>]` while the safe rect is portrait (spec §7). */
 export type Variant = 'portrait' | null;
@@ -166,10 +179,13 @@ export function apply(ctx: Context, config: SceneEditConfig): void {
   );
 
   /**
-   * `config.symbol` set: no scene document, no gizmo/grid/keyboard/drop — just one
-   * `symbols.yml` state, fitted to `ctx.board?.cellSize` (96×96 when there is no
-   * reel board), centred on the screen at the scenes root's design→screen scale.
-   * The composed game (`flow1`'s `boot → show base_game`) still mounts under
+   * `config.symbol` set: no scene document, no gizmo/grid/keyboard/drop — just
+   * one `symbols.yml` state on a checkerboard, framed by the board's own idle
+   * cell frame (`@energy8engine/reel-core`'s `SymbolCell` style; 96×96 /
+   * `DEFAULT_CELL_FRAME_STYLE` when there is no reel board), centred on the
+   * screen at a zoom (`fit` / `1:1` / `2x`) the IDE drives over the wire —
+   * `fit` sizes the cell to 60% of the screen's smaller side. The composed
+   * game (`flow1`'s `boot → show base_game`) still mounts under
    * `scenes.container` — `board.cellSize` and the symbols live set need it —
    * but is hidden; the preview sits on `app.stage` above it, so its own bounds
    * are measurable and `snapshot` still reads them back in design units.
@@ -185,20 +201,65 @@ export function apply(ctx: Context, config: SceneEditConfig): void {
     if (!symbols) { emit('error', { message: 'no "symbols" service' }); return; }
     root.visible = false;
 
-    const cellSize = (ctx.reflect.get('board', false) as { cellSize?: { width: number; height: number } } | undefined)
-      ?.cellSize ?? { width: 96, height: 96 };
+    const board = ctx.reflect.get('board', false) as
+      | { cellSize?: { width: number; height: number }; config?: { grid?: { frameStyle?: CellFrameStyle } } }
+      | undefined;
+    const cellSize = board?.cellSize ?? { width: 96, height: 96 };
+    const frameStyle = { ...DEFAULT_CELL_FRAME_STYLE, ...(board?.config?.grid?.frameStyle ?? {}) };
+    type Zoom = 'fit' | '1:1' | '2x';
+    const ZOOMS: readonly Zoom[] = ['fit', '1:1', '2x'];
+    let zoom: Zoom = 'fit';
+
     const previewBox = new Container();
     previewBox.label = 'symbol-preview';
-    previewBox.position.set(app.screen.width / 2, app.screen.height / 2);
-    // `getGlobalTransform`, not `worldTransform`: the latter is only refreshed by a render pass.
-    previewBox.scale.set(root.getGlobalTransform().a);
-    const outline = new Graphics()
-      .roundRect(-cellSize.width / 2, -cellSize.height / 2, cellSize.width, cellSize.height, 8)
-      .stroke({ width: 2, color: 0x3a4152 });
-    outline.label = 'symbol-outline';
-    previewBox.addChild(outline);
+    const frameG = new Graphics()
+      .roundRect(-cellSize.width / 2, -cellSize.height / 2, cellSize.width, cellSize.height, frameStyle.radius)
+      .fill({ color: frameStyle.idle.color, alpha: frameStyle.idle.alpha });
+    frameG.tint = frameStyle.idle.color; // what SymbolCell stores, read by tests
+    frameG.label = 'symbol-frame';
+    previewBox.addChild(frameG); // replaces the old outline; the view is added after it
     app.stage.addChild(previewBox);
-    ctx.effect(() => () => { app.stage.removeChild(previewBox); previewBox.destroy({ children: true }); root.visible = true; }, 'scene-edit:symbol-preview');
+    const checker = new Graphics();
+    checker.label = 'symbol-checker';
+    app.stage.addChildAt(checker, 0); // under the preview box
+    ctx.effect(() => () => {
+      app.stage.removeChild(previewBox);
+      app.stage.removeChild(checker);
+      previewBox.destroy({ children: true });
+      checker.destroy();
+      root.visible = true;
+    }, 'scene-edit:symbol-preview');
+
+    const CHECK = 8;
+    const drawChecker = (w: number, h: number) => {
+      checker.clear();
+      checker.rect(0, 0, w, h).fill({ color: 0x2a2f3a });
+      for (let y = 0; y < h; y += CHECK)
+        for (let x = (y / CHECK) % 2 === 0 ? 0 : CHECK; x < w; x += CHECK * 2)
+          checker.rect(x, y, Math.min(CHECK, w - x), Math.min(CHECK, h - y));
+      checker.fill({ color: 0x3a4152 });
+    };
+    const scaleFor = (w: number, h: number) =>
+      zoom === '1:1' ? 1 : zoom === '2x' ? 2
+        : (Math.min(w, h) * 0.6) / Math.max(cellSize.width, cellSize.height);
+    let laidOut = { w: -1, h: -1, zoom: '' as string };
+    const layout = () => {
+      const { width: w, height: h } = app.screen;
+      if (laidOut.w === w && laidOut.h === h && laidOut.zoom === zoom) return;
+      laidOut = { w, h, zoom };
+      drawChecker(w, h);
+      previewBox.position.set(w / 2, h / 2);
+      previewBox.scale.set(scaleFor(w, h));
+    };
+    layout();
+    app.ticker.add(layout);
+    ctx.effect(() => () => app.ticker.remove(layout), 'scene-edit:symbol-layout');
+    wire.handle('zoom', (p) => {
+      const mode = (p as { mode?: unknown })?.mode;
+      zoom = ZOOMS.includes(mode as Zoom) ? (mode as Zoom) : 'fit';
+      layout();
+      return { mode: zoom };
+    });
 
     let current: { id: string; state: SymbolState } | null = null;
     let view: Container | null = null;
@@ -231,7 +292,13 @@ export function apply(ctx: Context, config: SceneEditConfig): void {
         w = br.x - tl.x;
         h = br.y - tl.y;
       }
-      return { symbol: current?.id ?? null, state: current?.state ?? null, w, h };
+      return {
+        symbol: current?.id ?? null,
+        state: current?.state ?? null,
+        w, h,
+        cell: { ...cellSize },
+        screen: { w: cellSize.width * previewBox.scale.x, h: cellSize.height * previewBox.scale.y },
+      };
     };
     wire.handle('snapshot', () => snapshot());
 

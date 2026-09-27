@@ -13,6 +13,7 @@
   },
   "dependencies": {
     "@energy8engine/contracts": "*",
+    "@energy8engine/reel-core": "*",
     "@energy8engine/scenes": "*",
     "@energy8engine/renderer-pixi": "*",
     "cordis": "4.0.0-rc.8",

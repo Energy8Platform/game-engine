@@ -6,7 +6,7 @@ markModuleCopy('@energy8engine/reel-core', import.meta.url);
 
 export type { SymbolView, SymbolResolver } from './grid/SymbolView';
 export { AnimatedSymbol } from './grid/AnimatedSymbol';
-export { SymbolCell } from './grid/SymbolCell';
+export { SymbolCell, DEFAULT_CELL_FRAME_STYLE } from './grid/SymbolCell';
 export type { CellData, CellState, CellFrameStyle } from './grid/SymbolCell';
 export { ReelGrid } from './grid/ReelGrid';
 export type { ReelGridConfig } from './grid/ReelGrid';

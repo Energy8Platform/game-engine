@@ -91,8 +91,8 @@ function fakeSymbols() {
   return { symbols, previewCalls, views };
 }
 
-/** Same fake-wire harness as `boot()`, wired for `symbol: 'coin'` (or `symbol` when given) instead of a scene. `symbols` is `ctx.provide`d only when given — omit it to test the no-service path. */
-function bootSymbol(symbols?: unknown, symbol = 'coin') {
+/** Same fake-wire harness as `boot()`, wired for `symbol: 'coin'` (or `symbol` when given) instead of a scene. `symbols` is `ctx.provide`d only when given — omit it to test the no-service path. `board` is `ctx.provide`d only when given, same rule. */
+function bootSymbol(symbols?: unknown, symbol = 'coin', board?: unknown) {
   const ctx = new Context();
   const app = { stage: new Container(), ticker: { add: vi.fn(), remove: vi.fn() }, canvas: document.createElement('canvas'), screen: { width: 480, height: 288 } };
   ctx.provide('renderer', { app });
@@ -101,6 +101,7 @@ function bootSymbol(symbols?: unknown, symbol = 'coin') {
   const scenes = createScenes({ root: app.stage, design: { width: 960, height: 576 }, nodeTypes, loader, ctx });
   ctx.provide('scenes', scenes);
   if (symbols !== undefined) ctx.provide('symbols', symbols);
+  if (board !== undefined) ctx.provide('board', board);
   const posted: Frame[] = [];
   let listener: ((e: { data: unknown; origin: string }) => void) | undefined;
   let id = 0;
@@ -117,8 +118,9 @@ function bootSymbol(symbols?: unknown, symbol = 'coin') {
     return posted.find((m) => m.type === 'e8:ide:res' && m.id === reqId)!;
   };
   const ready = () => vi.waitFor(() => expect(events().some((e) => e.event === 'ready')).toBe(true));
+  const frame = () => (app.ticker.add.mock.calls[0][0] as () => void)();
   const edit = () => (window as unknown as { __e8edit: Pick<plugin.SceneEdit, 'emitted' | 'snapshot' | 'frameOf'> }).__e8edit;
-  return { ctx, app, scenes, fiber, events, call, ready, edit };
+  return { ctx, app, scenes, fiber, events, call, ready, frame, edit };
 }
 
 describe('symbol mode', () => {
@@ -129,7 +131,7 @@ describe('symbol mode', () => {
     expect(events()[0]).toEqual({ event: 'ready', payload: { symbol: 'coin' } });
   });
 
-  it('hides the composed game under the preview: scenes.container is invisible, the preview sits on app.stage at the design→screen scale', async () => {
+  it('hides the composed game under the preview: scenes.container is invisible, the preview sits centred on app.stage at the fit zoom', async () => {
     const { symbols } = fakeSymbols();
     const { app, scenes, ready, fiber } = bootSymbol(symbols);
     await ready();
@@ -137,10 +139,12 @@ describe('symbol mode', () => {
     const preview = app.stage.getChildByLabel('symbol-preview')!;
     expect(preview.parent).toBe(app.stage);
     expect(preview.position).toMatchObject({ x: 240, y: 144 });
-    expect(preview.scale.x).toBe(0.5);
+    // fit: the 96×96 default cell's larger side is 60% of the 288 screen's smaller side.
+    expect(preview.scale.x).toBeCloseTo((288 * 0.6) / 96, 5);
     await fiber.dispose();
     expect(scenes.container.visible).toBe(true);
     expect(app.stage.getChildByLabel('symbol-preview')).toBeNull();
+    expect(app.stage.getChildByLabel('symbol-checker')).toBeNull();
   });
 
   it('symbol previews a state and answers shown; snapshot reports the view bounds in design space', async () => {
@@ -150,7 +154,9 @@ describe('symbol mode', () => {
     const res = await call('symbol', { id: 'coin', state: 'static' });
     expect(res.result).toEqual({ shown: true });
     const snap = await call('snapshot');
-    expect(snap.result).toEqual({ symbol: 'coin', state: 'static', w: 40, h: 40 });
+    // `w`/`h` are the view's own design-space bounds — at the fit zoom (not the
+    // scene's design→screen scale any more), so they follow the zoom, not 1:1.
+    expect(snap.result).toEqual({ symbol: 'coin', state: 'static', w: 144, h: 144, cell: { width: 96, height: 96 }, screen: { w: 288 * 0.6, h: 288 * 0.6 } });
   });
 
   it('an unknown id answers shown: false and snapshot reports no bounds', async () => {
@@ -160,7 +166,7 @@ describe('symbol mode', () => {
     const res = await call('symbol', { id: 'nope', state: 'static' });
     expect(res.result).toEqual({ shown: false });
     const snap = await call('snapshot');
-    expect(snap.result).toEqual({ symbol: 'nope', state: 'static', w: 0, h: 0 });
+    expect(snap.result).toEqual({ symbol: 'nope', state: 'static', w: 0, h: 0, cell: { width: 96, height: 96 }, screen: { w: 288 * 0.6, h: 288 * 0.6 } });
   });
 
   it('a second symbol call destroys the previous view before previewing the new one', async () => {
@@ -217,7 +223,7 @@ describe('symbol mode', () => {
     expect(select.ok).toBe(false);
     expect(String((select as { error?: unknown }).error)).toContain('unknown method "select"');
     const snap = await call('snapshot');
-    expect(snap.result).toEqual({ symbol: null, state: null, w: 0, h: 0 });
+    expect(snap.result).toEqual({ symbol: null, state: null, w: 0, h: 0, cell: { width: 96, height: 96 }, screen: { w: 288 * 0.6, h: 288 * 0.6 } });
   });
 
   it('no symbols service on ctx emits error and leaves the composed game visible', async () => {
@@ -244,6 +250,74 @@ describe('symbol mode', () => {
     expect(edit().emitted().some((e) => e.event === 'ready')).toBe(true);
     const wireSnap = (await call('snapshot')).result;
     expect(edit().snapshot()).toEqual(wireSnap);
+  });
+
+  it('draws a checkerboard over the whole screen and the default frame at 96×96 with no board', async () => {
+    const { symbols } = fakeSymbols();
+    const { app, ready } = bootSymbol(symbols);
+    await ready();
+    const checker = app.stage.getChildByLabel('symbol-checker')!;
+    const b = checker.getBounds();
+    expect([b.minX, b.minY, b.maxX, b.maxY]).toEqual([0, 0, 480, 288]);
+    const frame = app.stage.getChildByLabel('symbol-frame', true) as Graphics;
+    expect(frame.tint).toBe(0x223047);
+  });
+
+  it("fit: the cell's larger side is 60% of the screen's smaller side; 1:1 and 2x follow", async () => {
+    const { symbols } = fakeSymbols();
+    const { call, ready } = bootSymbol(symbols);
+    await ready();
+    await call('symbol', { id: 'coin', state: 'static' });
+    const screenOf = async () => ((await call('snapshot')).result as { screen: { w: number; h: number } }).screen;
+    expect((await screenOf()).w).toBeCloseTo(288 * 0.6, 3); // 96 → 172.8
+    expect((await call('zoom', { mode: '1:1' })).result).toEqual({ mode: '1:1' });
+    expect((await screenOf()).w).toBeCloseTo(96, 3);
+    await call('zoom', { mode: '2x' });
+    expect((await screenOf()).w).toBeCloseTo(192, 3);
+    expect((await call('zoom', { mode: 'bogus' })).result).toEqual({ mode: 'fit' });
+  });
+
+  it('takes the cell size and the idle frame style from the board', async () => {
+    const board = { cellSize: { width: 120, height: 80 }, config: { grid: { frameStyle: { radius: 4, idle: { color: 0x112233, alpha: 0.5 } } } } };
+    const { symbols } = fakeSymbols();
+    const { app, call, ready } = bootSymbol(symbols, 'coin', board);
+    await ready();
+    const snap = (await call('snapshot')).result as { cell: { width: number; height: number } };
+    expect(snap.cell).toEqual({ width: 120, height: 80 });
+    expect((app.stage.getChildByLabel('symbol-frame', true) as Graphics).tint).toBe(0x112233);
+  });
+
+  it('a screen resize re-lays out on the next frame: checker covers it, the cell stays centred', async () => {
+    const { symbols } = fakeSymbols();
+    const { app, frame, ready } = bootSymbol(symbols);
+    await ready();
+    app.screen.width = 800; app.screen.height = 600;
+    frame();
+    const b = app.stage.getChildByLabel('symbol-checker')!.getBounds();
+    expect([b.maxX, b.maxY]).toEqual([800, 600]);
+    const box = app.stage.getChildByLabel('symbol-preview')!;
+    expect([box.position.x, box.position.y]).toEqual([400, 300]);
+    expect(box.scale.x).toBeCloseTo((600 * 0.6) / 96, 5);
+  });
+
+  it('the frame is the cell\'s size whatever the art: a large view under fit none does not grow it', async () => {
+    const symbols = {
+      replace: vi.fn(),
+      ready: Promise.resolve(),
+      // what `symbols.preview` returns for a `fit: none` symbol with 400×400 art: the view at its own size
+      preview: vi.fn(() => {
+        const c = new Container();
+        c.addChild(new Graphics().rect(-200, -200, 400, 400).fill(0xffffff));
+        return c;
+      }),
+    };
+    const { app, call, ready } = bootSymbol(symbols, 'big');
+    await ready();
+    await call('symbol', { id: 'big', state: 'static' });
+    const frame = app.stage.getChildByLabel('symbol-frame', true)!;
+    expect(frame.getLocalBounds().width).toBe(96);
+    const snap = (await call('snapshot')).result as { screen: { w: number } };
+    expect(snap.screen.w).toBeCloseTo(288 * 0.6, 3); // the zoom is about the cell, not the art
   });
 });
 
