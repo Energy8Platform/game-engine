@@ -1,4 +1,4 @@
-import { act, fireEvent, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, screen, waitFor, within } from '@testing-library/react';
 import { describe, expect, it } from 'vitest';
 import type { SymbolsDoc } from '@energy8engine/contracts';
 import { accept, boot, harness, KNOWN, renderSide, TWO } from './symbols-harness';
@@ -154,5 +154,114 @@ describe('SymbolsProperties', () => {
     act(() => ctx.symbols.select({ id: '1', state: 'win' }));
     renderSide(ctx);
     expect(screen.queryByTestId('prop-state-remove')).toBeNull();
+  });
+
+  it("three groups: Symbol (id/name/fit), State (type + the type's own props, no common), Adjust (the six common props, nothing else)", async () => {
+    const { ctx } = await booted();
+    act(() => ctx.symbols.select({ id: '1', state: 'static' }));
+    renderSide(ctx);
+
+    const symbolGroup = within(screen.getByTestId('symbol-props-symbol'));
+    expect(symbolGroup.getByText('Symbol')).toBeTruthy();
+    const id = symbolGroup.getByLabelText('id') as HTMLInputElement;
+    expect(id.value).toBe('1');
+    expect(id).toHaveAttribute('readonly');
+    expect(symbolGroup.getByLabelText('name')).toBeTruthy();
+    const fit = symbolGroup.getByLabelText('fit') as HTMLSelectElement;
+    expect([...fit.options].map((o) => o.value)).toEqual(['contain', 'none']);
+    expect(
+      symbolGroup.getByText('contain: scaled into the cell · none: centred at its own size'),
+    ).toBeTruthy();
+
+    const stateGroup = within(screen.getByTestId('symbol-props-state'));
+    expect(stateGroup.getByText('State static')).toBeTruthy();
+    expect(stateGroup.getByTestId('prop-state-type')).toBeTruthy();
+    expect(stateGroup.getByLabelText('src', { exact: true })).toBeTruthy();
+
+    const adjustGroup = within(screen.getByTestId('symbol-props-adjust'));
+    expect(adjustGroup.getByText('Adjust')).toBeTruthy();
+    for (const key of ['x', 'y', 'scale', 'rotation', 'alpha', 'tint']) {
+      expect(adjustGroup.getByLabelText(key, { exact: true })).toBeTruthy();
+    }
+    for (const key of [
+      'width',
+      'height',
+      'visible',
+      'anchor',
+      'anchorX',
+      'anchorY',
+      'mask',
+      'pin',
+    ]) {
+      expect(screen.queryByLabelText(key, { exact: true })).toBeNull();
+    }
+  });
+
+  it('a scale change on a state carrying hidden common props (mask, pin) keeps them', async () => {
+    const doc: SymbolsDoc = {
+      version: 1,
+      symbols: [
+        {
+          ...TWO.symbols[0],
+          static: { type: 'image', props: { src: 'assets/1.png', mask: true, pin: 'top' } },
+        },
+        TWO.symbols[1],
+      ],
+    };
+    const { ctx, docs } = await booted({}, doc);
+    act(() => ctx.symbols.select({ id: '1', state: 'static' }));
+    renderSide(ctx);
+    const scale = screen.getByLabelText('scale', { exact: true }) as HTMLInputElement;
+    fireEvent.change(scale, { target: { value: '2' } });
+    fireEvent.blur(scale);
+    await waitFor(() => expect(docs()).toHaveLength(1));
+    expect(docs()[0].symbols[0].static).toEqual({
+      type: 'image',
+      props: { src: 'assets/1.png', mask: true, pin: 'top', scale: 2 },
+    });
+  });
+
+  it('changing src writes only that prop, the hidden common props kept', async () => {
+    const doc: SymbolsDoc = {
+      version: 1,
+      symbols: [
+        {
+          ...TWO.symbols[0],
+          static: { type: 'image', props: { src: 'assets/1.png', mask: true, pin: 'top' } },
+        },
+        TWO.symbols[1],
+      ],
+    };
+    const { ctx, docs } = await booted({}, doc);
+    act(() => ctx.symbols.select({ id: '1', state: 'static' }));
+    renderSide(ctx);
+    const src = screen.getByLabelText('src', { exact: true }) as HTMLSelectElement;
+    fireEvent.change(src, { target: { value: '' } });
+    await waitFor(() => expect(docs()).toHaveLength(1));
+    expect(docs()[0].symbols[0].static).toEqual({
+      type: 'image',
+      props: { src: '', mask: true, pin: 'top' },
+    });
+  });
+
+  it('a named state still shows "Remove state"; an absent state still shows "Create <state>" — both inside State', async () => {
+    const doc: SymbolsDoc = {
+      ...TWO,
+      symbols: [
+        { ...TWO.symbols[0], states: { death: { type: 'image', props: { src: '' } } } },
+        TWO.symbols[1],
+      ],
+    };
+    const { ctx } = await booted({}, doc);
+    act(() => ctx.symbols.select({ id: '1', state: 'death' }));
+    renderSide(ctx);
+    expect(
+      within(screen.getByTestId('symbol-props-state')).getByTestId('prop-state-remove'),
+    ).toBeTruthy();
+
+    act(() => ctx.symbols.select({ id: '1', state: 'idle' }));
+    expect(
+      within(screen.getByTestId('symbol-props-state')).getByTestId('prop-state-create'),
+    ).toBeTruthy();
   });
 });

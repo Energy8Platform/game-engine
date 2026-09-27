@@ -74,7 +74,8 @@ export function useNodePicker(ctx: Context): () => string[] {
   return () => docs.flatMap((d) => [...walk(d.nodes)].map(({ node }) => `${d.id}/${node.id}`));
 }
 
-const COMMON_JSON = JSON.parse(JSON.stringify(COMMON)) as unknown;
+/** `COMMON` as JSON — exported so `SymbolsProperties` can build its own restricted schema (`Adjust`) from the same dict, rather than importing `COMMON` a second time. */
+export const COMMON_JSON = JSON.parse(JSON.stringify(COMMON)) as unknown;
 
 /** `x`/`y` re-described for a pinned node: the runtime reads them from the pin's point of the safe rect. */
 const OFFSETS = {
