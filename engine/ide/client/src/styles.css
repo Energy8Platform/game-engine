@@ -1247,6 +1247,73 @@ button.e8-status-item {
   gap: 2px;
 }
 
+/* Task 1: `.role('color')` (`ColorField`), `number | number[]`
+   (`OneOrListField`) and `<const> | <other>` (`LiteralOrValueField`). */
+input[type='color'] {
+  width: 32px;
+  height: 28px;
+  padding: 2px;
+  box-sizing: border-box;
+  border: 1px solid var(--e8-border);
+  border-radius: var(--e8-radius-sm);
+  background: var(--e8-editor-bg);
+  cursor: pointer;
+}
+input[type='radio'] {
+  width: 14px;
+  height: 14px;
+  accent-color: var(--e8-accent);
+  margin: 0;
+}
+/* The picker and its hex readout, side by side. */
+.e8-color {
+  display: flex;
+  align-items: center;
+  gap: var(--e8-gap);
+}
+.e8-color input[type='text'] {
+  width: 90px;
+}
+/* A compact two-segment switch — `one | per reel`, `<literal> | these`. */
+.e8-segmented {
+  display: inline-flex;
+  gap: 2px;
+  padding: 2px;
+  border: 1px solid var(--e8-border);
+  border-radius: var(--e8-radius-sm);
+}
+.e8-segmented label {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  border-radius: var(--e8-radius-sm);
+  font-size: var(--e8-size-label);
+  font-weight: 400;
+  color: var(--e8-fg-muted);
+  cursor: pointer;
+}
+.e8-segmented label:has(input:checked) {
+  background: var(--e8-selected);
+  color: var(--e8-fg);
+}
+.e8-one-or-list,
+.e8-literal-or-value {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--e8-gap);
+}
+.e8-one-or-list-items {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+}
+.e8-one-or-list-items input[type='number'] {
+  width: 64px;
+}
+
 /* The editor document: a thin toolbar (save, and any words the host or the
    check had), then Monaco filling the rest of the pane. Monaco's own
    `automaticLayout` follows this box, so the editor is the pane, not a box

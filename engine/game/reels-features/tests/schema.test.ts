@@ -35,6 +35,21 @@ describe('reels-features schema', () => {
     expect(() => Config({ sticky: { enabled: 'yes' } } as never)).toThrow();
   });
 
+  // Task 1: every `ringColor`/`labelColor`/`totalColor` carries `meta.role
+  // === 'color'`, surviving the JSON round-trip the IDE host sends the
+  // schema through (the IDE's ColorField dispatches off that, not the live
+  // `Schema` instance).
+  it('every colour field carries role: color, surviving JSON', () => {
+    const node = new Schema(JSON.parse(JSON.stringify(Config))) as Schema;
+    expect([
+      node.dict!.expandWild.dict!.ringColor.meta.role,
+      node.dict!.walkWild.dict!.ringColor.meta.role,
+      node.dict!.sticky.dict!.ringColor.meta.role,
+      node.dict!.multipliers.dict!.labelColor.meta.role,
+      node.dict!.multipliers.dict!.totalColor.meta.role,
+    ]).toEqual(Array(5).fill('color'));
+  });
+
   it('survives toJSON → new Schema', () => {
     const node = new Schema(Config.toJSON()) as Schema;
     expect(node.dict!.giant.dict!.ms.meta.default).toBe(420);

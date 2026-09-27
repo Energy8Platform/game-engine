@@ -50,6 +50,8 @@ export interface SchemaNode {
     pick?: string;
     /** A string field holding an asset path: a `<select>` of `pickers.asset(extensions)`. */
     asset?: string[];
+    /** `.role('color')`: a `number` field renders as a colour picker + hex text, not a plain number input. */
+    role?: string;
   };
 }
 
@@ -87,6 +89,31 @@ function constants(node: SchemaNode): string[] | null {
   if (node.type !== 'union' || !node.list) return null;
   const values = node.list.map((member) => member.value);
   return values.every((value) => typeof value === 'string') ? (values as string[]) : null;
+}
+
+/** `colGap: number | number[]` (a scalar gap, or one per reel-boundary): exactly two members, one `number`, one `array` of `number`. */
+function oneOrList(node: SchemaNode): boolean {
+  if (node.type !== 'union' || node.list?.length !== 2) return false;
+  const [a, b] = node.list;
+  const isNumber = (n: SchemaNode) => n.type === 'number';
+  const isNumberList = (n: SchemaNode) => n.type === 'array' && n.inner?.type === 'number';
+  return (isNumber(a) && isNumberList(b)) || (isNumber(b) && isNumberList(a));
+}
+
+/**
+ * `topReel: object | null`, anticipation's `reels: 'trailing' | number[]`:
+ * exactly two members, one a `const` (`null`, or a string literal) and the
+ * other anything but a `const`. Order-independent — the schema may list
+ * either member first.
+ */
+function literalOrValue(node: SchemaNode): { literal: SchemaNode; other: SchemaNode } | null {
+  if (node.type !== 'union' || node.list?.length !== 2) return null;
+  const [a, b] = node.list;
+  const isLiteral = (n: SchemaNode) =>
+    n.type === 'const' && (n.value === null || typeof n.value === 'string');
+  if (isLiteral(a) && b.type !== 'const') return { literal: a, other: b };
+  if (isLiteral(b) && a.type !== 'const') return { literal: b, other: a };
+  return null;
 }
 
 /**
@@ -217,6 +244,39 @@ export function Field({ id, node, value, onChange, commit, ariaLabel, describedB
           </option>
         ))}
       </select>
+    );
+  }
+
+  if (oneOrList(node)) {
+    return (
+      <OneOrListField
+        id={id}
+        node={node}
+        value={value}
+        onChange={onChange}
+        commit={commit}
+        describedBy={describedBy}
+      />
+    );
+  }
+
+  const litOrVal = literalOrValue(node);
+  if (litOrVal) {
+    return (
+      <LiteralOrValueField
+        id={id}
+        node={node}
+        value={value}
+        onChange={onChange}
+        commit={commit}
+        describedBy={describedBy}
+      />
+    );
+  }
+
+  if (node.type === 'number' && node.meta?.role === 'color') {
+    return (
+      <ColorField id={id} node={node} value={value} onChange={onChange} describedBy={describedBy} />
     );
   }
 
@@ -377,6 +437,62 @@ function NumberField({ id, node, value, onChange, commit, describedBy }: FieldPr
       onBlur={draft.onBlur}
       onKeyDown={draft.onKeyDown}
     />
+  );
+}
+
+/** `#RRGGBB` for a 0xRRGGBB number, from the file's own formula: mask off
+ * anything past 24 bits (`>>> 0`) and re-pad, so a short or negative value
+ * still shows six hex digits. */
+const hexOf = (n: number) => '#' + (n >>> 0).toString(16).padStart(6, '0').slice(-6);
+const HEX_RE = /^#?[0-9a-f]{6}$/i;
+
+/**
+ * A `.role('color')` number: a native colour picker (one click is one
+ * commit, same as a `<select>`) plus a hex text field that buffers a draft
+ * and commits on blur/Enter — typing `#ff0000` one keystroke at a time
+ * must not write five half-finished numbers. An unparsable draft is left
+ * showing (never silently reverted) and flagged `aria-invalid`, matching
+ * `useDraft`'s "refuse, don't corrupt" contract for every other field.
+ */
+function ColorField({
+  id,
+  node,
+  value,
+  onChange,
+  describedBy,
+}: Omit<FieldProps, 'commit' | 'ariaLabel'>) {
+  const current = (Number(value ?? node.meta?.default ?? 0) >>> 0) as number;
+  const draft = useDraft<number>({
+    dep: value,
+    current,
+    show: hexOf,
+    parse: (raw) => (HEX_RE.test(raw) ? parseInt(raw.replace('#', ''), 16) : null),
+    onChange,
+    commit: 'blur',
+  });
+  const write = (e: ChangeEvent<HTMLInputElement>) => onChange(parseInt(e.target.value.slice(1), 16));
+  return (
+    <span className="e8-color">
+      <input
+        id={id}
+        aria-describedby={describedBy}
+        type="color"
+        value={hexOf(current)}
+        onInput={write}
+        onChange={write}
+      />
+      <input
+        type="text"
+        aria-label="hex"
+        aria-describedby={describedBy}
+        aria-invalid={HEX_RE.test(draft.raw) ? undefined : 'true'}
+        value={draft.raw}
+        onFocus={draft.onFocus}
+        onChange={draft.onChange}
+        onBlur={draft.onBlur}
+        onKeyDown={draft.onKeyDown}
+      />
+    </span>
   );
 }
 
@@ -585,6 +701,7 @@ function defaults(node: SchemaNode): unknown {
     }
     return out;
   }
+  if (node.type === 'array') return node.meta?.default ?? [];
   return node.meta?.default ?? '';
 }
 
@@ -670,6 +787,169 @@ function ArrayField({ id, node, value, onChange, commit }: FieldProps) {
         +
       </button>
     </div>
+  );
+}
+
+/** A radiogroup of two named modes, sharing one `name` so the browser
+ * enforces mutual exclusion — the piece `OneOrListField` and
+ * `LiteralOrValueField` both need. `onSelect` is wired on every option
+ * (a no-op for whichever is already checked) so React never sees a
+ * `checked` radio with no `onChange` of its own. */
+function ModeSwitch({
+  id,
+  describedBy,
+  options,
+}: {
+  id: string;
+  describedBy?: string;
+  options: { name: string; checked: boolean; onSelect: () => void }[];
+}) {
+  return (
+    <span role="radiogroup" aria-describedby={describedBy} className="e8-segmented">
+      {options.map((option) => (
+        <label key={option.name}>
+          <input
+            type="radio"
+            name={`${id}-mode`}
+            checked={option.checked}
+            onChange={option.onSelect}
+          />
+          {option.name}
+        </label>
+      ))}
+    </span>
+  );
+}
+
+/**
+ * `colGap: number | number[]` (and `rowGap`, and every other per-axis gap):
+ * a scalar or one value per reel-boundary. `one` shows a single number
+ * input; `per reel` shows one input per entry plus `+`/`−`. Switching
+ * converts in place — `one`'s number becomes `[n]`, a list's first entry
+ * becomes the scalar — rather than losing the value the user already set.
+ * Every change here is structural (a whole new array, or a whole new
+ * scalar), so — like `ArrayField` — there is no draft to buffer.
+ */
+function OneOrListField({ id, node, value, onChange, describedBy }: FieldProps) {
+  const current = value ?? node.meta?.default;
+  const list = Array.isArray(current) ? (current as number[]) : null;
+  const single = typeof current === 'number' ? current : 0;
+
+  if (!list) {
+    return (
+      <span className="e8-one-or-list">
+        <ModeSwitch
+          id={id}
+          describedBy={describedBy}
+          options={[
+            { name: 'one', checked: true, onSelect: () => {} },
+            { name: 'per reel', checked: false, onSelect: () => onChange([single]) },
+          ]}
+        />
+        <input
+          id={id}
+          type="number"
+          aria-describedby={describedBy}
+          value={single}
+          onChange={(e) => {
+            const n = Number(e.target.value);
+            if (!Number.isNaN(n)) onChange(n);
+          }}
+        />
+      </span>
+    );
+  }
+
+  return (
+    <span className="e8-one-or-list">
+      <ModeSwitch
+        id={id}
+        describedBy={describedBy}
+        options={[
+          { name: 'one', checked: false, onSelect: () => onChange(list[0] ?? 0) },
+          { name: 'per reel', checked: true, onSelect: () => {} },
+        ]}
+      />
+      <span className="e8-one-or-list-items">
+        {list.map((n, i) => (
+          <input
+            key={i}
+            id={`${id}-${i}`}
+            type="number"
+            aria-label={`reel ${i + 1}`}
+            aria-describedby={describedBy}
+            value={n}
+            onChange={(e) => {
+              const next = Number(e.target.value);
+              if (!Number.isNaN(next)) onChange(list.map((v, j) => (j === i ? next : v)));
+            }}
+          />
+        ))}
+        <button type="button" aria-label="+" onClick={() => onChange([...list, list[list.length - 1] ?? 0])}>
+          +
+        </button>
+        <button
+          type="button"
+          aria-label="−"
+          disabled={list.length === 0}
+          onClick={() => onChange(list.slice(0, -1))}
+        >
+          −
+        </button>
+      </span>
+    </span>
+  );
+}
+
+/**
+ * `topReel: object | null`, anticipation's `reels: 'trailing' | number[]`:
+ * a literal (`null`, or a named mode like `'trailing'`) versus a real value.
+ * `null` reads as an on/off checkbox — the field's own label names it, same
+ * as a plain boolean — with the value's editor appearing once switched on.
+ * A string literal reads as a two-way switch, `<literal> | these`, same
+ * shape as `OneOrListField` above. Either way switching TO the value writes
+ * `defaults(other)`, never an empty shell the value's own `Field` would
+ * then have to cope with.
+ */
+function LiteralOrValueField({ id, node, value, onChange, commit, describedBy }: FieldProps) {
+  const [a, b] = node.list!;
+  const [literal, other] = a.type === 'const' ? [a, b] : [b, a];
+  const current = value ?? node.meta?.default;
+
+  if (literal.value === null) {
+    const on = current !== null && current !== undefined;
+    return (
+      <span className="e8-literal-or-value">
+        <input
+          id={id}
+          type="checkbox"
+          aria-describedby={describedBy}
+          checked={on}
+          onChange={(e) => onChange(e.target.checked ? defaults(other) : null)}
+        />
+        {on ? (
+          <Field id={`${id}-value`} node={other} value={current} onChange={onChange} commit={commit} />
+        ) : null}
+      </span>
+    );
+  }
+
+  const literalValue = literal.value as string;
+  const on = current === literalValue;
+  return (
+    <span className="e8-literal-or-value">
+      <ModeSwitch
+        id={id}
+        describedBy={describedBy}
+        options={[
+          { name: literalValue, checked: on, onSelect: () => onChange(literalValue) },
+          { name: 'these', checked: !on, onSelect: () => onChange(defaults(other)) },
+        ]}
+      />
+      {!on ? (
+        <Field id={`${id}-value`} node={other} value={current} onChange={onChange} commit={commit} />
+      ) : null}
+    </span>
   );
 }
 

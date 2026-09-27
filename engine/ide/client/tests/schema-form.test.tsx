@@ -1047,3 +1047,115 @@ describe('SchemaForm — dicts of objects', () => {
     expect(onChange).toHaveBeenLastCalledWith({ scenes: { base_game: { layers: ['bg', ''] } } });
   });
 });
+
+// Task 1: `reels1`'s `colGap`/`rowGap` (`number | number[]`), `topReel`
+// (`object | null`) and anticipation's `reels` (`'trailing' | number[]`) all
+// used to fall through to `unsupported (union)`, and a frame colour was a
+// bare number field — no picker. Three new shapes: `.role('color')`, an
+// exactly-two-member `number | number[]` union, and an exactly-two-member
+// `const | other` union (`null` or a string literal).
+describe('SchemaForm — colour, one-or-list, literal-or-value', () => {
+  it('a colour role renders a picker and hex text that read and write the number', () => {
+    const onChange = renderStaticForm(
+      Schema.object({ color: Schema.number().role('color').default(0x223047) }),
+      { color: 0x112233 },
+    );
+    expect(screen.getByLabelText('color')).toHaveValue('#112233');
+    const hex = screen.getByRole('textbox', { name: 'hex' });
+    fireEvent.change(hex, { target: { value: '#ff0000' } });
+    fireEvent.blur(hex);
+    expect(onChange).toHaveBeenLastCalledWith({ color: 0xff0000 });
+    fireEvent.input(screen.getByLabelText('color'), { target: { value: '#00ff00' } });
+    expect(onChange).toHaveBeenLastCalledWith({ color: 0x00ff00 });
+  });
+
+  it('an invalid hex is refused in the field, not written', () => {
+    const onChange = renderStaticForm(Schema.object({ color: Schema.number().role('color') }), {
+      color: 1,
+    });
+    const hex = screen.getByRole('textbox', { name: 'hex' });
+    fireEvent.change(hex, { target: { value: 'nope' } });
+    fireEvent.blur(hex);
+    expect(onChange).not.toHaveBeenCalled();
+    expect(hex).toHaveAttribute('aria-invalid', 'true');
+  });
+
+  it('number | number[] is a one / per reel switch; switching converts', () => {
+    const onChange = renderStaticForm(
+      Schema.object({ colGap: Schema.union([Schema.number(), Schema.array(Schema.number())]) }),
+      { colGap: 6 },
+    );
+    expect(screen.getByRole('radio', { name: 'one' })).toBeChecked();
+    fireEvent.click(screen.getByRole('radio', { name: 'per reel' }));
+    expect(onChange).toHaveBeenLastCalledWith({ colGap: [6] });
+  });
+
+  it('a list value shows one input per entry; + appends the last value, − drops the last', () => {
+    const onChange = renderStaticForm(
+      Schema.object({ colGap: Schema.union([Schema.number(), Schema.array(Schema.number())]) }),
+      { colGap: [4, 8] },
+    );
+    expect(screen.getByRole('radio', { name: 'per reel' })).toBeChecked();
+    fireEvent.click(screen.getByRole('button', { name: '+' }));
+    expect(onChange).toHaveBeenLastCalledWith({ colGap: [4, 8, 8] });
+    fireEvent.click(screen.getByRole('button', { name: '−' }));
+    expect(onChange).toHaveBeenLastCalledWith({ colGap: [4] });
+  });
+
+  it("null | object is an on switch with the object's fields; off writes null", () => {
+    const schema = Schema.object({
+      topReel: Schema.union([
+        Schema.object({ size: Schema.natural().default(4) }),
+        Schema.const(null),
+      ]).default(null),
+    });
+    const onChange = renderStaticForm(schema, { topReel: { size: 4 } });
+    expect(screen.getByRole('checkbox', { name: 'topReel' })).toBeChecked();
+    expect(screen.getByLabelText('size')).toHaveValue(4);
+    fireEvent.click(screen.getByRole('checkbox', { name: 'topReel' }));
+    expect(onChange).toHaveBeenLastCalledWith({ topReel: null });
+  });
+
+  it('turning a null | object on writes the object’s defaults', () => {
+    const schema = Schema.object({
+      topReel: Schema.union([
+        Schema.object({ size: Schema.natural().default(4) }),
+        Schema.const(null),
+      ]).default(null),
+    });
+    const onChange = renderStaticForm(schema, {});
+    fireEvent.click(screen.getByRole('checkbox', { name: 'topReel' }));
+    expect(onChange).toHaveBeenLastCalledWith({ topReel: { size: 4 } });
+  });
+
+  it("'trailing' | number[] is a trailing / these switch", () => {
+    const schema = Schema.object({
+      reels: Schema.union([Schema.const('trailing'), Schema.array(Schema.natural())]).default(
+        'trailing',
+      ),
+    });
+    const onChange = renderStaticForm(schema, {});
+    expect(screen.getByRole('radio', { name: 'trailing' })).toBeChecked();
+    fireEvent.click(screen.getByRole('radio', { name: 'these' }));
+    expect(onChange).toHaveBeenLastCalledWith({ reels: [] });
+  });
+
+  it('rendering never writes: odd values stay as they are until the user acts', () => {
+    const onChange = renderStaticForm(
+      Schema.object({
+        colGap: Schema.union([Schema.number(), Schema.array(Schema.number())]),
+        topReel: Schema.union([Schema.object({ size: Schema.natural() }), Schema.const(null)]),
+      }),
+      { colGap: [6], topReel: {} },
+    );
+    expect(onChange).not.toHaveBeenCalled();
+  });
+
+  it('a union none of the shapes covers is still unsupported', () => {
+    renderStaticForm(
+      Schema.object({ odd: Schema.union([Schema.number(), Schema.string(), Schema.boolean()]) }),
+      {},
+    );
+    expect(screen.getByText(/unsupported \(union\)/)).toBeInTheDocument();
+  });
+});

@@ -21,7 +21,7 @@
 import Schema from 'schemastery';
 
 const FrameState = Schema.object({
-  color: Schema.number().description('frame colour, 0xRRGGBB'),
+  color: Schema.number().role('color').description('frame colour, 0xRRGGBB'),
   alpha: Schema.number().description('frame opacity, 0–1'),
 });
 

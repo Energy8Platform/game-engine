@@ -24,6 +24,14 @@ describe('@energy8engine/reels/schema', () => {
     expect(Config.dict!.win.dict!.frameShake.dict!.onlyOnSymbols.meta.default).toBe(null);
   });
 
+  // Task 1: the IDE's ColorField dispatches on `meta.role === 'color'` off
+  // the rebuilt JSON, not the live `Schema` instance — so the role has to
+  // actually survive the round-trip the IDE host sends it through.
+  it('the frame colour carries role: color, surviving JSON', () => {
+    const node = new Schema(JSON.parse(JSON.stringify(Config))) as Schema;
+    expect(node.dict!.grid.dict!.frameStyle.dict!.idle.dict!.color.meta.role).toBe('color');
+  });
+
   it('a nested `config` key (the old row shape) still validates, but is not read', () => {
     const out = Config({ config: { grid: { cols: 3 } } } as never);
     expect(out.grid.cols).toBe(DEFAULT_REEL_CONFIG.grid.cols);

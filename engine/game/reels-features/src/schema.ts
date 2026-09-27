@@ -57,6 +57,7 @@ export const Config = Schema.object({
       .default(500)
       .description('How long the rings stay once the last row has turned.'),
     ringColor: Schema.number()
+      .role('color')
       .default(0xffd700)
       .description('The glow ring color on each turned row.'),
   }).description(
@@ -71,6 +72,7 @@ export const Config = Schema.object({
     stepMs: Schema.number().default(260).description('One step, cell to cell.'),
     easing: easing('easeInOutQuad', "the wild's step"),
     ringColor: Schema.number()
+      .role('color')
       .default(0xff66cc)
       .description('The glow ring on the cell the wild is entering.'),
   }).description('A wild walks cell to cell along a path, emptying every cell it leaves.'),
@@ -100,8 +102,14 @@ export const Config = Schema.object({
     pulseMs: Schema.number().default(240).description("Each cell's pulse, up and back."),
     labelMs: Schema.number().default(500).description("Each cell's ×value label."),
     totalMs: Schema.number().default(900).description("The combined total's label, when shown."),
-    labelColor: Schema.number().default(0xffd24a).description("Each cell's label color."),
-    totalColor: Schema.number().default(0xffe24a).description("The total's label color."),
+    labelColor: Schema.number()
+      .role('color')
+      .default(0xffd24a)
+      .description("Each cell's label color."),
+    totalColor: Schema.number()
+      .role('color')
+      .default(0xffe24a)
+      .description("The total's label color."),
   }).description(
     'Each named cell takes its multiplier badge and pulses, then floats a ×value label; an ' +
       'optional combined total floats at the grid centre.',
@@ -110,6 +118,7 @@ export const Config = Schema.object({
   sticky: Schema.object({
     enabled: enabled('sticky'),
     ringColor: Schema.number()
+      .role('color')
       .default(0xec4899)
       .description('The persistent ring color on a sticky cell.'),
   }).description(
