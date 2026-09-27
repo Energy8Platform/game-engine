@@ -184,6 +184,83 @@ test('a drop of coin.json onto a chip sets its state, and the symbol canvas prev
   await expect.poll(frameOfSymbol, { timeout: 5000 }).not.toBe(0);
 });
 
+test('the Symbols canvas shows a symbol large, zooms to 1:1 and 2x, plays a win, explains itself', async ({
+  page,
+}) => {
+  await openSymbols(page);
+  // Nothing picked yet: the canvas is warm underneath, but the help panel
+  // is what covers it.
+  await expect(page.getByTestId('symbols-help')).toBeVisible();
+
+  let canvas = await readyCanvas(page, SYMBOL_CANVAS);
+  const snapshot = () =>
+    canvas.evaluate(
+      () =>
+        (window as any).__e8edit.snapshot() as {
+          symbol: string | null;
+          state: string | null;
+          screen: { w: number; h: number };
+        },
+    );
+
+  await page.getByTestId('symbol-row-1').click();
+  await expect.poll(async () => (await snapshot()).symbol).toBe('1');
+
+  // `fit` sizes the cell to 60% of the screen's smaller side (`scene-edit`'s
+  // `scaleFor`); 0.4 is a loose floor rather than pinning that exact
+  // fraction, since the iframe's CSS box and the canvas' own `app.screen`
+  // need not agree to the pixel.
+  const iframe = page.locator(SYMBOL_CANVAS);
+  const box = (await iframe.boundingBox())!;
+  const minSide = Math.min(box.width, box.height);
+  expect((await snapshot()).screen.w).toBeGreaterThanOrEqual(0.4 * minSide);
+
+  // The iframe fills the stage under the toolbar — no border, no padding
+  // (`.e8-symbols-stage iframe { width: 100%; height: 100% }`).
+  const stageBox = (await page.locator('.e8-symbols-stage').boundingBox())!;
+  expect(box.x).toBeCloseTo(stageBox.x, -1);
+  expect(box.y).toBeCloseTo(stageBox.y, -1);
+  expect(box.width).toBeCloseTo(stageBox.width, -1);
+  expect(box.height).toBeCloseTo(stageBox.height, -1);
+
+  await page.getByTestId('symbols-zoom-1:1').click();
+  await expect
+    .poll(async () => Math.abs((await snapshot()).screen.w - 96), { timeout: 5000 })
+    .toBeLessThanOrEqual(1);
+
+  await page.getByTestId('symbols-zoom-2x').click();
+  await expect
+    .poll(async () => Math.abs((await snapshot()).screen.w - 192), { timeout: 5000 })
+    .toBeLessThanOrEqual(1);
+
+  // A reload keeps the remembered zoom (`localStorage['e8.symbols-zoom']`)
+  // — proven by the toolbar button AND by the canvas actually laying the
+  // cell out at 2x again once a symbol is re-selected.
+  await page.reload();
+  await expect(page.getByTestId('symbols-doc')).toBeVisible({ timeout: 20_000 });
+  await expect(page.getByTestId('symbols-zoom-2x')).toHaveAttribute('aria-pressed', 'true');
+  canvas = await readyCanvas(page, SYMBOL_CANVAS);
+
+  // The win chip of `1` is a spritesheet (`assets/coin.json`, `loop: false`)
+  // — the same asset the "a drop of coin.json…" case above plays.
+  await page.getByTestId('symbol-chip-1-win').click();
+  await expect
+    .poll(async () => Math.abs((await snapshot()).screen.w - 192), { timeout: 5000 })
+    .toBeLessThanOrEqual(1);
+
+  await page.getByTestId('symbol-replay').click();
+  const frameOfSymbol = () =>
+    canvas.evaluate(() => (window as any).__e8edit.frameOf('symbol') as number | null);
+  // Whatever frame Replay lands on first (a one-shot may already be warm
+  // from the selection above) — polled tight, same reasoning as the
+  // "a drop of coin.json…" case's own frame-0 poll (~80 ms first frame).
+  await expect.poll(frameOfSymbol, { intervals: [10], timeout: 5000 }).not.toBeNull();
+  const first = (await frameOfSymbol()) as number;
+  await expect.poll(frameOfSymbol, { timeout: 5000 }).toBeGreaterThan(first);
+
+  await expect(page.getByTestId('symbols-cell-size')).toHaveText('cell 96×96');
+});
+
 test('the Preview draws a symbol sprite after a spin, and Properties shows src as a select of project images', async ({
   page,
 }) => {
