@@ -294,17 +294,24 @@ export function apply(ctx: Context, config: SceneEditConfig): void {
         : (Math.min(w, h) * 0.6) / Math.max(cellSize.width, cellSize.height);
     let laidOutScreen = { w: -1, h: -1 };
     let laidOutZoom = '' as string;
-    let laidOutStyle = ''; // JSON of the last drawn cellSize/frameStyle — see `boardStyle` above
+    // The last drawn cellSize/frameStyle, field by field — see `boardStyle`
+    // above. Only the fields `drawFrame` actually reads: the idle look is
+    // the only one a board-less preview frame ever shows.
+    let laidOutStyle = { w: -1, h: -1, radius: -1, color: -1, alpha: -1 };
     const layout = () => {
       const { width: w, height: h } = app.screen;
       checker.resize(w, h); // redraws only on a size change
       const screenChanged = laidOutScreen.w !== w || laidOutScreen.h !== h;
       if (screenChanged) laidOutScreen = { w, h };
       const style = boardStyle();
-      const styleKey = JSON.stringify(style);
-      const styleChanged = styleKey !== laidOutStyle;
+      const styleChanged =
+        laidOutStyle.w !== style.cellSize.width ||
+        laidOutStyle.h !== style.cellSize.height ||
+        laidOutStyle.radius !== style.frameStyle.radius ||
+        laidOutStyle.color !== style.frameStyle.idle.color ||
+        laidOutStyle.alpha !== style.frameStyle.idle.alpha;
       if (styleChanged) {
-        laidOutStyle = styleKey;
+        laidOutStyle = { w: style.cellSize.width, h: style.cellSize.height, radius: style.frameStyle.radius, color: style.frameStyle.idle.color, alpha: style.frameStyle.idle.alpha };
         ({ cellSize, frameStyle } = style);
         drawFrame();
       }
@@ -423,10 +430,19 @@ export function apply(ctx: Context, config: SceneEditConfig): void {
 
     let mounted: Container | null = null;
     const MARGIN = 24;
+    // `bw`/`bh` are the measurement the CURRENT fit was taken from — read by
+    // `snapshot` below. Re-measured only when `view`/`w`/`h` change (a new
+    // mounted view, or a screen resize), never every tick: a spin's
+    // overshoot or a win glow bleeding past the grid changes the SAME
+    // view's `getLocalBounds()` frame to frame, and re-fitting on that
+    // would pulse the box mid-spin. A grid change rebuilds the board (a
+    // `reels1` re-apply), which IS a new `view` — covered below.
     let laid = { w: -1, h: -1, view: null as Container | null, bw: -1, bh: -1 };
     const layout = () => {
       const board = currentBoard();
-      const view = board?.view ?? null;
+      // A destroyed view is as good as none: `getLocalBounds()` on one is
+      // not safe to trust, and it must not linger in `box` either.
+      const view = board && !board.view.destroyed ? board.view : null;
       if (view !== mounted) {
         if (mounted && mounted.parent === box) box.removeChild(mounted);
         mounted = view;
@@ -435,8 +451,8 @@ export function apply(ctx: Context, config: SceneEditConfig): void {
       const { width: w, height: h } = app.screen;
       checker.resize(w, h); // redraws only on a size change
       if (!view) return;
+      if (laid.w === w && laid.h === h && laid.view === view) return;
       const b = view.getLocalBounds();
-      if (laid.w === w && laid.h === h && laid.view === view && laid.bw === b.width && laid.bh === b.height) return;
       laid = { w, h, view, bw: b.width, bh: b.height };
       const s = Math.min((w - 2 * MARGIN) / b.width, (h - 2 * MARGIN) / b.height);
       box.scale.set(s);

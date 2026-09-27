@@ -473,6 +473,45 @@ describe('reels mode', () => {
     expect(first.view.destroyed).toBe(false); // the row's own `board.destroy()` does that, not this mode
   });
 
+  it('re-fits only when the mounted view or the screen size changes — not when the same view grows content mid-spin', async () => {
+    const { ctx, app, ready, frame } = bootReels();
+    const first = fakeBoard(500, 300);
+    const disposeFirst = ctx.provide('board', first);
+    await ready();
+    const box = app.stage.getChildByLabel('reels-box')!;
+    const scale = box.scale.x;
+    const position = { x: box.position.x, y: box.position.y };
+    // A spin's overshoot / a win glow bleeding past the grid: the SAME
+    // view's content bounds grow — must not re-fit (would pulse the box).
+    first.view.addChild(new Graphics().rect(0, 0, 900, 900).fill(0xffffff));
+    frame();
+    expect(box.scale.x).toBe(scale);
+    expect(box.position.x).toBe(position.x);
+    expect(box.position.y).toBe(position.y);
+    // A screen resize still re-fits.
+    app.screen.width = 960; app.screen.height = 576;
+    frame();
+    expect(box.scale.x).not.toBe(scale);
+    // A rebuilt board (a `reels1` re-apply: dispose, provide a new view) re-fits too, off the NEW view's own bounds.
+    const rescaled = box.scale.x;
+    disposeFirst();
+    const second = fakeBoard(200, 100);
+    ctx.provide('board', second);
+    frame();
+    expect(box.scale.x).not.toBe(rescaled);
+  });
+
+  it('a view destroyed while still provided is dropped from the box on the next frame, not measured', async () => {
+    const board = fakeBoard();
+    const { app, ready, frame } = bootReels(board);
+    await ready();
+    const box = app.stage.getChildByLabel('reels-box')!;
+    expect(box.children).toContain(board.view);
+    board.view.destroy({ children: true });
+    expect(() => frame()).not.toThrow();
+    expect(box.children).not.toContain(board.view);
+  });
+
   it("rows hands each row's config to gameRows.update and reports its verdict; no gameRows answers unknown for every row", async () => {
     const gameRows = { update: vi.fn(async () => 'updated' as const) };
     const { call, ready } = bootReels(fakeBoard(), gameRows);
