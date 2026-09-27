@@ -23,7 +23,6 @@ import { useWorkspace } from '../plugins/workspace';
 import { useGameComposition } from '../plugins/game-composition';
 import { activateOnKey } from './activate';
 import { createCanvasRpc, type CanvasRpc } from './canvas-rpc';
-import { clampZoom } from './CanvasToolbar';
 import { ExplorerMenu } from './ExplorerMenu';
 import {
   addState,
@@ -42,18 +41,28 @@ import {
  * (`def.states`) in declaration order, each showing the state's type or
  * `+` — and a trailing `+` chip that prompts for a name and adds one; then
  * the `known` ids not yet in the doc as ghost rows with Add; then an add
- * input for a free id), the live canvas in the centre (`editor.html?symbol=`
- * in `@energy8engine/scene-edit`'s symbol mode, talked to through
- * `canvas-rpc` exactly as `SceneDocument` talks to the scene canvas) and a
- * status line — the last refusal, the doc's first diagnostic, or the
- * canvas' own `error`.
+ * input for a free id), a toolbar + the live canvas filling the rest
+ * (`editor.html?symbol=` in `@energy8engine/scene-edit`'s symbol mode,
+ * talked to through `canvas-rpc` exactly as `SceneDocument` talks to the
+ * scene canvas) and a status line — the last refusal, the doc's first
+ * diagnostic, or the canvas' own `error`.
+ *
+ * The toolbar shows the picked symbol (`id · name · state`), the board's
+ * cell size (read back from the canvas' `snapshot`) and the zoom group
+ * (`fit`/`1:1`/`2x`, remembered in `localStorage['e8.symbols-zoom']`) plus
+ * a Play button that re-sends the selection. Nothing picked, or a state
+ * the def hasn't got: a panel over the stage says so — the help text
+ * (what a symbol/state is) or the empty-state line — the iframe staying
+ * mounted underneath either way, so the canvas is warm.
  *
  * The canvas is keyed on the project/reload, NOT on the selection: a
  * selection change is a `symbol` RPC call, not a remount. On `ready` the
- * parent resends the current doc (`replaceSymbols`, skipped when there is
- * none) and the current selection (`symbol`, skipped when nothing is
- * selected — the canvas keeps whatever it last showed); the same two
- * calls follow every later doc/selection change.
+ * parent resends, IN ORDER: the current doc (`replaceSymbols`, skipped
+ * when there is none), the remembered zoom, the current selection
+ * (`symbol`, skipped when nothing is selected — the canvas keeps whatever
+ * it last showed), then asks `snapshot` for the cell size. `replaceSymbols`
+ * and `symbol` repeat on every later doc/selection change; a doc change
+ * also re-asks `snapshot` (a board change can resize the cell).
  *
  * Every write is a REDUCER over the doc, queued through `ctx.symbols.update`
  * (the Flow document's `commit`, moved into the service so `SymbolsProperties`
@@ -74,10 +83,29 @@ import {
 type Reduce = (doc: SymbolsDoc) => SymbolsDoc;
 const DROP_TYPE = 'text/x-e8-path';
 const SEVERITY = { error: 2, warning: 1, info: 0 } as const;
-// ponytail: fit-scale constants duplicated from SceneDocument rather than a
-// shared module — one more consumer of ~20 lines isn't worth extracting yet.
-const FALLBACK_DESIGN = { width: 480, height: 288 };
-const FIT_PAD = 24;
+
+const ZOOM_KEY = 'e8.symbols-zoom';
+const ZOOM_MODES = ['fit', '1:1', '2x'] as const;
+type ZoomMode = (typeof ZOOM_MODES)[number];
+const ZOOM_LABEL: Record<ZoomMode, string> = { fit: 'Fit', '1:1': '1:1', '2x': '2×' };
+
+/** `localStorage['e8.symbols-zoom']` — junk or a denied storage both fall back to `fit`, `Preview.tsx`'s `readPreviewState` pattern. */
+function readZoomState(): ZoomMode {
+  try {
+    const stored = localStorage.getItem(ZOOM_KEY);
+    return (ZOOM_MODES as readonly string[]).includes(stored ?? '') ? (stored as ZoomMode) : 'fit';
+  } catch {
+    return 'fit';
+  }
+}
+
+function writeZoomState(mode: ZoomMode) {
+  try {
+    localStorage.setItem(ZOOM_KEY, mode);
+  } catch {
+    // a viewer convenience; nothing to do without storage
+  }
+}
 
 /** The worst severity among the diagnostics under `where` (itself or a path below it), or `undefined`. */
 function worst(diagnostics: readonly Diagnostic[], where: string): string | undefined {
@@ -117,14 +145,16 @@ export function SymbolsDocument({ ctx }: { ctx: Context }) {
   const [dropTarget, setDropTarget] = useState<string | null>(null);
 
   const workspace = useWorkspace(ctx);
-  const { rows, reloads } = useGameComposition(ctx);
+  const { reloads } = useGameComposition(ctx);
   const previewUrl = workspace?.previewUrl ?? null;
-  const design =
-    (rows?.find((r) => r.id === 'scenes1' || r.name === '@energy8engine/scenes')?.config.design as
-      { width: number; height: number } | undefined) ?? FALLBACK_DESIGN;
 
-  const stageRef = useRef<HTMLDivElement>(null);
-  const [fit, setFit] = useState(1);
+  const [zoomMode, setZoomModeState] = useState<ZoomMode>(readZoomState);
+  const zoomRef = useRef(zoomMode);
+  useEffect(() => {
+    zoomRef.current = zoomMode;
+  }, [zoomMode]);
+  const [cell, setCell] = useState<{ width: number; height: number } | null>(null);
+
   // Created synchronously, same reasoning as `SceneDocument`'s: the
   // iframe's ref callback fires during commit, before the mount effect
   // below runs, and needs an rpc to attach to already.
@@ -134,16 +164,32 @@ export function SymbolsDocument({ ctx }: { ctx: Context }) {
   const tell = (method: string, params: unknown) => {
     void rpcRef.current?.call(method, params).catch(() => {});
   };
+  /** The board's cell size, in design px — asked fresh whenever the doc changes, since a board change can resize it. */
+  const askSnapshot = () => {
+    void rpcRef.current
+      ?.call<{ cell?: { width: number; height: number } }>('snapshot')
+      .then((snap) => snap?.cell && setCell(snap.cell))
+      .catch(() => {});
+  };
+
+  const setZoom = (mode: ZoomMode) => {
+    setZoomModeState(mode);
+    writeZoomState(mode);
+    tell('zoom', { mode });
+  };
 
   useEffect(() => {
     rpcRef.current = rpc;
     rpc.on('ready', () => {
-      // The parent is the source of truth: resend the doc and the
-      // selection the canvas missed while it was still loading.
+      // The parent is the source of truth: resend the doc, the remembered
+      // zoom and the selection the canvas missed while it was still
+      // loading, then read back the board's cell size.
       const currentDoc = ctx.symbols.doc();
       if (currentDoc !== null) tell('replaceSymbols', { doc: currentDoc });
+      tell('zoom', { mode: zoomRef.current });
       const sel = ctx.symbols.selected();
       if (sel !== null) tell('symbol', sel);
+      askSnapshot();
     });
     rpc.on('error', (payload) => setStatus((payload as { message: string }).message));
     return () => {
@@ -161,7 +207,10 @@ export function SymbolsDocument({ ctx }: { ctx: Context }) {
   // the canvas remounts every live view per `replaceSymbols`.
   const docKey = doc === null ? null : JSON.stringify(doc);
   useEffect(() => {
-    if (doc !== null) tell('replaceSymbols', { doc });
+    if (doc !== null) {
+      tell('replaceSymbols', { doc });
+      askSnapshot();
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [docKey]);
   useEffect(() => {
@@ -177,24 +226,9 @@ export function SymbolsDocument({ ctx }: { ctx: Context }) {
     [rpc, previewUrl],
   );
 
-  // The fit follows the stage's box (jsdom has no ResizeObserver: fit stays 1).
-  useEffect(() => {
-    const stage = stageRef.current;
-    if (!stage || typeof ResizeObserver === 'undefined') return;
-    const measure = () => {
-      const box = stage.getBoundingClientRect();
-      if (box.width < 50 || box.height < 50) return;
-      setFit(
-        clampZoom(
-          Math.min((box.width - FIT_PAD) / design.width, (box.height - FIT_PAD) / design.height),
-        ),
-      );
-    };
-    const observer = new ResizeObserver(measure);
-    observer.observe(stage);
-    measure();
-    return () => observer.disconnect();
-  }, [design.width, design.height, previewUrl]);
+  const selectedDef = selected ? symbols.find((s) => s.id === selected.id) : undefined;
+  const stateMissing =
+    selected !== null && selectedDef !== undefined && !stateNode(selectedDef, selected.state);
 
   // The write queue lives in `ctx.symbols.update` now — see that module's
   // top comment — so this only needs to report the answer.
@@ -433,33 +467,87 @@ export function SymbolsDocument({ ctx }: { ctx: Context }) {
           </p>
         ) : (
           <>
-            <div className="e8-canvas-stage" ref={stageRef}>
-              <div
-                className="e8-canvas-frame"
-                style={{ width: design.width * fit, height: design.height * fit }}
-              >
-                <iframe
-                  key={`${reloads}:${workspace.active}:${previewUrl}`}
-                  ref={attachIframe}
-                  title="symbol canvas"
-                  // Constant: `?symbol=` boots symbol mode with nothing picked; the
-                  // selection travels as a `symbol` call, never as a navigation.
-                  src={`${previewUrl}/editor.html?symbol=`}
-                  width={design.width}
-                  height={design.height}
-                  style={{ transform: `scale(${fit})` }}
-                />
+            <div className="e8-symbols-toolbar" data-testid="symbols-toolbar">
+              {selected !== null && selectedDef ? (
+                <span className="e8-symbols-header" data-testid="symbols-header">
+                  {[selected.id, selectedDef.name, selected.state].filter(Boolean).join(' · ')}
+                </span>
+              ) : null}
+              <div className="e8-symbols-toolbar-right">
+                <span className="e8-symbols-cell-size" data-testid="symbols-cell-size">
+                  {cell ? `cell ${cell.width}×${cell.height}` : ''}
+                </span>
+                <span className="e8-symbols-zoom" role="group" aria-label="zoom">
+                  {ZOOM_MODES.map((mode) => (
+                    <button
+                      key={mode}
+                      type="button"
+                      data-testid={`symbols-zoom-${mode}`}
+                      aria-pressed={zoomMode === mode}
+                      onClick={() => setZoom(mode)}
+                    >
+                      {ZOOM_LABEL[mode]}
+                    </button>
+                  ))}
+                </span>
+                <button
+                  type="button"
+                  className="e8-symbols-play"
+                  data-testid="symbol-replay"
+                  title="play"
+                  onClick={() => selected !== null && tell('symbol', selected)}
+                >
+                  ▶ Play
+                </button>
               </div>
             </div>
-            <button
-              type="button"
-              className="e8-explorer-action e8-symbols-replay"
-              data-testid="symbol-replay"
-              title="replay"
-              onClick={() => selected !== null && tell('symbol', selected)}
-            >
-              Replay
-            </button>
+            {/* The iframe stays mounted under the help/empty-state panel
+                (an absolutely positioned layer) so the canvas is warm the
+                moment there is something to show it. */}
+            <div className="e8-symbols-stage">
+              <iframe
+                key={`${reloads}:${workspace.active}:${previewUrl}`}
+                ref={attachIframe}
+                title="symbol canvas"
+                // Constant: `?symbol=` boots symbol mode with nothing picked; the
+                // selection travels as a `symbol` call, never as a navigation.
+                src={`${previewUrl}/editor.html?symbol=`}
+              />
+              {selected === null ? (
+                <div className="e8-symbols-help" data-testid="symbols-help">
+                  <p>
+                    <strong>Symbols</strong> — how each symbol a reel shows looks. A reel&apos;s
+                    board carries symbol ids; each id here gets a picture per state:
+                  </p>
+                  <ul>
+                    <li>
+                      <strong>static</strong> — at rest (required);
+                    </li>
+                    <li>
+                      <strong>idle</strong> — an optional looping look at rest;
+                    </li>
+                    <li>
+                      <strong>win</strong> — plays when the symbol is in a win;
+                    </li>
+                    <li>
+                      <strong>named states</strong> — played by a mechanic&apos;s plan steps (
+                      <code>+</code> on a row adds one).
+                    </li>
+                  </ul>
+                  <p>
+                    Drop a file from the Explorer onto a state chip, onto a row (its static), or
+                    below the list (a new symbol). Pick a symbol on the left to see it here.
+                  </p>
+                  {doc === null ? (
+                    <p>There is no symbols.yml yet — the first symbol you add creates it.</p>
+                  ) : null}
+                </div>
+              ) : stateMissing ? (
+                <div className="e8-symbols-state-empty" data-testid="symbols-state-empty">
+                  {`no ${selected.state} yet — drop a file on the chip, or Create in Properties`}
+                </div>
+              ) : null}
+            </div>
           </>
         )}
       </div>

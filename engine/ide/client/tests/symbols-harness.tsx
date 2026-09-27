@@ -1,4 +1,4 @@
-import { render } from '@testing-library/react';
+import { render, screen } from '@testing-library/react';
 import { afterEach, vi } from 'vitest';
 import { Context } from 'cordis';
 import Schema from 'schemastery';
@@ -216,6 +216,43 @@ export function transfer(path: string) {
       dropEffect: 'copy',
     },
   };
+}
+
+/**
+ * The canvas iframe, with `contentWindow.postMessage` stubbed so requests
+ * can be read back — same trick as `scene-document.test.tsx`'s `canvas()`:
+ * the tab attaches the RPC from the iframe's ref callback, so by the time
+ * `renderDocument` returns it is already attached. Also ANSWERS the two
+ * requests `SymbolsDocument` now asks on every `ready` — `snapshot`
+ * (the board's `cell`, `{ width: 96, height: 96 }` unless told otherwise)
+ * and `zoom` (echoes the mode it was asked for) — the way the real canvas
+ * would, so a test can await the toolbar picking the answer up instead of
+ * hand-building `e8:ide:res` frames itself.
+ */
+export function canvas(cell: { width: number; height: number } = { width: 96, height: 96 }) {
+  const iframe = screen.getByTitle('symbol canvas') as HTMLIFrameElement;
+  const win = iframe.contentWindow as Window & { postMessage: ReturnType<typeof vi.fn> };
+  const respond = (id: number, result: unknown) =>
+    window.dispatchEvent(
+      new MessageEvent('message', {
+        data: { type: 'e8:ide:res', id, ok: true, result },
+        origin: PREVIEW_URL,
+        source: iframe.contentWindow,
+      }),
+    );
+  win.postMessage = vi.fn((data: unknown) => {
+    const req = data as { type?: string; id?: number; method?: string; params?: unknown };
+    if (req.type !== 'e8:ide:req' || typeof req.id !== 'number') return;
+    if (req.method === 'snapshot') respond(req.id, { cell });
+    else if (req.method === 'zoom')
+      respond(req.id, { mode: (req.params as { mode?: string } | undefined)?.mode ?? 'fit' });
+  });
+  const posted = () => win.postMessage.mock.calls.map((c) => c[0]);
+  const reqs = (method: string) =>
+    posted()
+      .filter((m) => m.type === 'e8:ide:req' && m.method === method)
+      .map((m) => m.params);
+  return { iframe, posted, reqs };
 }
 
 export function renderDocument(ctx: Context) {

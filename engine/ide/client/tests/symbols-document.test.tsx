@@ -5,6 +5,7 @@ import { EMPTY } from '../src/shell/symbols-doc';
 import {
   accept,
   boot,
+  canvas,
   harness,
   KNOWN,
   PREVIEW_URL,
@@ -13,24 +14,6 @@ import {
   TWO,
   type Answer,
 } from './symbols-harness';
-
-/**
- * The canvas iframe, with `contentWindow.postMessage` stubbed so requests
- * can be read back — same trick as `scene-document.test.tsx`'s `canvas()`:
- * the tab attaches the RPC from the iframe's ref callback, so by the time
- * `renderDocument` returns it is already attached.
- */
-function canvas() {
-  const iframe = screen.getByTitle('symbol canvas') as HTMLIFrameElement;
-  const win = iframe.contentWindow as Window & { postMessage: ReturnType<typeof vi.fn> };
-  win.postMessage = vi.fn();
-  const posted = () => win.postMessage.mock.calls.map((c) => c[0]);
-  const reqs = (method: string) =>
-    posted()
-      .filter((m) => m.type === 'e8:ide:req' && m.method === method)
-      .map((m) => m.params);
-  return { iframe, posted, reqs };
-}
 
 /** A frame FROM the iframe: the message event the browser would deliver to the tab's window. */
 function frame(iframe: HTMLIFrameElement, event: string, payload: unknown) {
@@ -331,7 +314,18 @@ describe('SymbolsDocument', () => {
   });
 
   describe('the live canvas', () => {
-    it('on ready, resends the current doc then the current selection, in that order', async () => {
+    it('the iframe has no width/height/transform; its wrapper fills the pane', async () => {
+      const { ctx } = await booted();
+      renderDocument(ctx);
+      const iframe = screen.getByTitle('symbol canvas');
+      expect(iframe).not.toHaveAttribute('width');
+      expect(iframe).not.toHaveAttribute('height');
+      expect((iframe as HTMLElement).style.transform).toBe('');
+      expect(iframe.closest('.e8-symbols-stage')).toBeTruthy();
+    });
+
+    it('on ready, sends the doc, the remembered zoom, the selection, then asks snapshot, in that order', async () => {
+      localStorage.clear();
       const { ctx } = await booted();
       act(() => ctx.symbols.select({ id: '1', state: 'win' }));
       renderDocument(ctx);
@@ -339,18 +333,32 @@ describe('SymbolsDocument', () => {
       const before = posted().length;
       frame(iframe, 'ready', {});
       const added = posted().slice(before);
-      expect(added.map((m) => m.method)).toEqual(['replaceSymbols', 'symbol']);
+      expect(added.map((m) => m.method)).toEqual(['replaceSymbols', 'zoom', 'symbol', 'snapshot']);
       expect(added[0].params).toEqual({ doc: ctx.symbols.doc() });
-      expect(added[1].params).toEqual({ id: '1', state: 'win' });
+      expect(added[1].params).toEqual({ mode: 'fit' });
+      expect(added[2].params).toEqual({ id: '1', state: 'win' });
     });
 
-    it('ready sends neither call when there is no doc and nothing selected', async () => {
+    it('ready always sends zoom and asks snapshot, but skips replaceSymbols/symbol with no doc and nothing selected', async () => {
+      localStorage.clear();
       const { ctx } = await booted({}, null);
       renderDocument(ctx);
       const { iframe, reqs } = canvas();
       frame(iframe, 'ready', {});
       expect(reqs('replaceSymbols')).toHaveLength(0);
       expect(reqs('symbol')).toHaveLength(0);
+      expect(reqs('zoom').at(-1)).toEqual({ mode: 'fit' });
+      expect(reqs('snapshot')).toHaveLength(1);
+    });
+
+    it("the canvas' snapshot answer fills the toolbar's cell size", async () => {
+      const { ctx } = await booted();
+      renderDocument(ctx);
+      const { iframe } = canvas({ width: 96, height: 96 });
+      frame(iframe, 'ready', {});
+      await waitFor(() =>
+        expect(screen.getByTestId('symbols-cell-size')).toHaveTextContent('cell 96×96'),
+      );
     });
 
     it('a chip click posts symbol to the canvas', async () => {
@@ -374,13 +382,15 @@ describe('SymbolsDocument', () => {
       expect(iframe.src).toBe(`${PREVIEW_URL}/editor.html?symbol=`);
     });
 
-    it('a symbols frame with a changed doc posts replaceSymbols to the canvas', async () => {
+    it('a symbols frame with a changed doc posts replaceSymbols to the canvas and re-asks snapshot', async () => {
       const { ctx, socket } = await booted();
       renderDocument(ctx);
       const { reqs } = canvas();
+      const before = reqs('snapshot').length;
       const one: SymbolsDoc = { version: 1, symbols: [TWO.symbols[0]] };
       act(() => socket.receive({ type: 'symbols', doc: one, diagnostics: [] }));
       await waitFor(() => expect(reqs('replaceSymbols').at(-1)).toEqual({ doc: one }));
+      expect(reqs('snapshot').length).toBeGreaterThan(before);
     });
 
     it('one write is one replaceSymbols: the frame carrying the doc the PUT already answered posts nothing more', async () => {
@@ -404,9 +414,10 @@ describe('SymbolsDocument', () => {
       expect(reqs('replaceSymbols')).toHaveLength(before + 1);
     });
 
-    it('the Replay button re-sends the current selection', async () => {
+    it('the Play button (labelled ▶ Play) re-sends the current selection', async () => {
       const { ctx } = await booted();
       renderDocument(ctx);
+      expect(screen.getByTestId('symbol-replay')).toHaveTextContent('▶ Play');
       const { reqs } = canvas();
       fireEvent.click(screen.getByTestId('symbol-chip-1-win'));
       await waitFor(() => expect(reqs('symbol').at(-1)).toEqual({ id: '1', state: 'win' }));
@@ -435,6 +446,114 @@ describe('SymbolsDocument', () => {
         'canvas unavailable: no project open',
       );
       expect(screen.queryByTitle('symbol canvas')).toBeNull();
+    });
+  });
+
+  describe('zoom', () => {
+    afterEach(() => {
+      try {
+        localStorage.clear();
+      } catch {
+        // nothing to clean up without storage
+      }
+    });
+
+    it('clicking 2x sends zoom, marks it pressed, and remembers it', async () => {
+      localStorage.clear();
+      const { ctx } = await booted();
+      renderDocument(ctx);
+      const { reqs } = canvas();
+      fireEvent.click(screen.getByTestId('symbols-zoom-2x'));
+      expect(reqs('zoom').at(-1)).toEqual({ mode: '2x' });
+      expect(screen.getByTestId('symbols-zoom-2x')).toHaveAttribute('aria-pressed', 'true');
+      expect(screen.getByTestId('symbols-zoom-fit')).toHaveAttribute('aria-pressed', 'false');
+      expect(localStorage.getItem('e8.symbols-zoom')).toBe('2x');
+    });
+
+    it('a remount starts on the remembered zoom and sends it after ready', async () => {
+      localStorage.setItem('e8.symbols-zoom', '2x');
+      const { ctx } = await booted();
+      renderDocument(ctx);
+      expect(screen.getByTestId('symbols-zoom-2x')).toHaveAttribute('aria-pressed', 'true');
+      const { iframe, reqs } = canvas();
+      frame(iframe, 'ready', {});
+      expect(reqs('zoom').at(-1)).toEqual({ mode: '2x' });
+    });
+
+    it('junk in storage falls back to fit', async () => {
+      localStorage.setItem('e8.symbols-zoom', 'huge');
+      const { ctx } = await booted();
+      renderDocument(ctx);
+      expect(screen.getByTestId('symbols-zoom-fit')).toHaveAttribute('aria-pressed', 'true');
+    });
+
+    it('a throwing storage falls back to fit', async () => {
+      const spy = vi.spyOn(Storage.prototype, 'getItem').mockImplementation(() => {
+        throw new Error('denied');
+      });
+      try {
+        const { ctx } = await booted();
+        renderDocument(ctx);
+        expect(screen.getByTestId('symbols-zoom-fit')).toHaveAttribute('aria-pressed', 'true');
+      } finally {
+        spy.mockRestore();
+      }
+    });
+  });
+
+  describe('the toolbar header and help panel', () => {
+    it('nothing selected: the help panel explains states and dropping; no header', async () => {
+      const { ctx } = await booted();
+      renderDocument(ctx);
+      const help = await screen.findByTestId('symbols-help');
+      expect(help).toHaveTextContent(/static/);
+      expect(help).toHaveTextContent(/idle/);
+      expect(help).toHaveTextContent(/win/);
+      expect(help).toHaveTextContent(/drop a file/i);
+      expect(help).not.toHaveTextContent('symbols.yml');
+      expect(screen.queryByTestId('symbols-header')).toBeNull();
+    });
+
+    it('with no doc, the help panel also says the first add creates symbols.yml', async () => {
+      const { ctx } = await booted({}, null);
+      renderDocument(ctx);
+      expect(await screen.findByTestId('symbols-help')).toHaveTextContent(
+        'There is no symbols.yml yet — the first symbol you add creates it.',
+      );
+    });
+
+    it('the header reads id · name · state', async () => {
+      const named: SymbolsDoc = {
+        version: 1,
+        symbols: [{ id: '3', name: 'sym-3', static: { type: 'image', props: { src: '' } } }],
+      };
+      const { ctx } = await booted({}, named);
+      renderDocument(ctx);
+      act(() => ctx.symbols.select({ id: '3', state: 'static' }));
+      expect(await screen.findByTestId('symbols-header')).toHaveTextContent('3 · sym-3 · static');
+      expect(screen.queryByTestId('symbols-help')).toBeNull();
+      expect(screen.queryByTestId('symbols-state-empty')).toBeNull();
+    });
+
+    it('a def with no name: the header is just id · state', async () => {
+      const anon: SymbolsDoc = {
+        version: 1,
+        symbols: [{ id: '3', static: { type: 'image', props: { src: '' } } }],
+      };
+      const { ctx } = await booted({}, anon);
+      renderDocument(ctx);
+      act(() => ctx.symbols.select({ id: '3', state: 'static' }));
+      expect(await screen.findByTestId('symbols-header')).toHaveTextContent('3 · static');
+    });
+
+    it('a state the def has not got shows the empty-state line instead of the help panel', async () => {
+      const { ctx } = await booted(); // TWO's symbol 2 has no `win`
+      renderDocument(ctx);
+      act(() => ctx.symbols.select({ id: '2', state: 'win' }));
+      expect(await screen.findByTestId('symbols-state-empty')).toHaveTextContent(
+        'no win yet — drop a file on the chip, or Create in Properties',
+      );
+      expect(screen.queryByTestId('symbols-help')).toBeNull();
     });
   });
 

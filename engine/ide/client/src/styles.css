@@ -1430,9 +1430,12 @@ button.e8-status-item {
 /* Symbols document: the list (the Explorer's rows — id, name, then one
    chip per state, a `+` on an empty one, the picked one on the accent;
    the ghosts muted; the add input; the drop area filling what is left of
-   the column) down the left, the canvas filling the rest, the status
-   line under both. A diagnostic paints the row or chip with its colour
-   in the margin, as the tree's own rows do. */
+   the column) down the left, the canvas filling the rest — a toolbar
+   (the picked symbol, the board's cell size, zoom, Play) over a stage
+   that fills the pane, a help panel or the missing-state line laid OVER
+   the stage (the iframe stays mounted underneath) when there's nothing to
+   show — and the status line under both. A diagnostic paints the row or
+   chip with its colour in the margin, as the tree's own rows do. */
 .e8-doc-pane:has(> .e8-symbols-doc) {
   padding: 0;
   overflow: hidden;
@@ -1503,9 +1506,103 @@ button.e8-status-item {
 }
 .e8-symbols-canvas {
   display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+.e8-symbols-toolbar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  min-height: var(--e8-title-h);
+  padding: 0 8px;
+  border-bottom: 1px solid var(--e8-border);
+  font-size: var(--e8-size-label);
+  color: var(--e8-fg);
+}
+.e8-symbols-header {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.e8-symbols-toolbar-right {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-left: auto;
+}
+.e8-symbols-cell-size {
+  color: var(--e8-fg-muted);
+  font-variant-numeric: tabular-nums;
+}
+.e8-symbols-zoom button {
+  height: 22px;
+  padding: 0 8px;
+  border: 1px solid var(--e8-border);
+  border-left: 0;
+  background: var(--e8-surface);
+  color: var(--e8-fg);
+  font: inherit;
+  font-size: var(--e8-size-label);
+}
+.e8-symbols-zoom button:first-child {
+  border-left: 1px solid var(--e8-border);
+  border-radius: var(--e8-radius-sm) 0 0 var(--e8-radius-sm);
+}
+.e8-symbols-zoom button:last-child {
+  border-radius: 0 var(--e8-radius-sm) var(--e8-radius-sm) 0;
+}
+.e8-symbols-zoom button[aria-pressed='true'] {
+  border-color: var(--e8-accent);
+  background: var(--e8-accent);
+  color: var(--e8-on-accent);
+}
+.e8-symbols-play {
+  height: 22px;
+  padding: 0 8px;
+  border: 1px solid var(--e8-border);
+  border-radius: var(--e8-radius-sm);
+  background: var(--e8-surface);
+  color: var(--e8-fg);
+  font: inherit;
+  font-size: var(--e8-size-label);
+}
+.e8-symbols-stage {
+  position: relative;
+  flex: 1 1 auto;
+  min-height: 0;
+  background: var(--e8-shell-bg);
+}
+.e8-symbols-stage iframe {
+  display: block;
+  width: 100%;
+  height: 100%;
+  border: 0;
+  background: var(--e8-editor-bg);
+}
+.e8-symbols-help,
+.e8-symbols-state-empty {
+  position: absolute;
+  inset: 0;
+  overflow: auto;
+  padding: 24px;
+  background: var(--e8-shell-bg);
+  color: var(--e8-fg-muted);
+}
+.e8-symbols-help p,
+.e8-symbols-help ul {
+  max-width: 480px;
+  margin: 0 0 8px;
+}
+.e8-symbols-help strong {
+  color: var(--e8-fg);
+}
+.e8-symbols-state-empty {
+  display: flex;
   align-items: center;
   justify-content: center;
-  min-height: 0;
+  text-align: center;
 }
 .e8-symbols-status {
   grid-column: 1 / -1;
