@@ -4,7 +4,7 @@ import { useState } from 'react';
 import Schema from 'schemastery';
 import { describe, expect, it, vi } from 'vitest';
 import { SchemaForm } from '../src/index';
-import type { CommitMode } from '../src/schema-form/fields';
+import type { CommitMode, FieldProps } from '../src/schema-form/fields';
 
 const schema = JSON.parse(
   JSON.stringify(
@@ -74,16 +74,21 @@ function DictForm({
   );
 }
 
+/** Shared by `renderForm` and `renderStaticForm` — the two new SchemaForm
+ * props (Task 2), alongside the existing `commit`. */
+interface FormOpts {
+  commit?: CommitMode;
+  resettable?: boolean;
+  root?: string;
+  fieldOverrides?: Record<string, (props: FieldProps) => JSX.Element>;
+}
+
 /**
  * A controlled form over a real schemastery schema, returning the spy: the
  * value feeds back so a structural commit (reorder, remove) is what the
  * next click sees.
  */
-function renderForm(
-  schema: Schema,
-  initial: Record<string, unknown>,
-  opts: { commit?: CommitMode } = {},
-) {
+function renderForm(schema: Schema, initial: Record<string, unknown>, opts: FormOpts = {}) {
   const onChange = vi.fn();
   const json = JSON.parse(JSON.stringify(schema.toJSON()));
   function Form() {
@@ -98,6 +103,9 @@ function renderForm(
           onChange(next);
         }}
         commit={opts.commit}
+        resettable={opts.resettable}
+        root={opts.root}
+        fieldOverrides={opts.fieldOverrides}
       />
     );
   }
@@ -106,15 +114,20 @@ function renderForm(
 }
 
 /** The real consumer's shape: `value` only moves when a PUT's frame lands — here never. */
-function renderStaticForm(
-  schema: Schema,
-  value: Record<string, unknown>,
-  opts: { commit?: CommitMode } = {},
-) {
+function renderStaticForm(schema: Schema, value: Record<string, unknown>, opts: FormOpts = {}) {
   const onChange = vi.fn();
   const json = JSON.parse(JSON.stringify(schema.toJSON()));
   render(
-    <SchemaForm rowId="row" schema={json} value={value} onChange={onChange} commit={opts.commit} />,
+    <SchemaForm
+      rowId="row"
+      schema={json}
+      value={value}
+      onChange={onChange}
+      commit={opts.commit}
+      resettable={opts.resettable}
+      root={opts.root}
+      fieldOverrides={opts.fieldOverrides}
+    />,
   );
   return onChange;
 }
@@ -287,9 +300,7 @@ describe('SchemaForm', () => {
     const winSchema = JSON.parse(
       JSON.stringify(
         Schema.object({
-          win: Schema.object({ glow: Schema.boolean().default(true) }).description(
-            'win highlight',
-          ),
+          win: Schema.object({ glow: Schema.boolean().default(true) }).description('win highlight'),
         }).toJSON(),
       ),
     );
@@ -305,9 +316,7 @@ describe('SchemaForm', () => {
     const winSchema = JSON.parse(
       JSON.stringify(
         Schema.object({
-          win: Schema.object({ glow: Schema.boolean().default(true) }).description(
-            'win highlight',
-          ),
+          win: Schema.object({ glow: Schema.boolean().default(true) }).description('win highlight'),
         }).toJSON(),
       ),
     );
@@ -1209,7 +1218,7 @@ describe('SchemaForm — colour, one-or-list, literal-or-value', () => {
 
   // Fix round 1: neither radio in this switch carries the bare `id={id}`
   // either (same gap as `OneOrListField`'s list mode above).
-  it("the trailing / these switch is a group the field label names", () => {
+  it('the trailing / these switch is a group the field label names', () => {
     const schema = Schema.object({
       reels: Schema.union([Schema.const('trailing'), Schema.array(Schema.natural())]).default(
         'trailing',
@@ -1236,5 +1245,104 @@ describe('SchemaForm — colour, one-or-list, literal-or-value', () => {
       {},
     );
     expect(screen.getByText(/unsupported \(union\)/)).toBeInTheDocument();
+  });
+});
+
+/**
+ * Task 2 of the reels-editor slice: the Composition screen's game rows edit
+ * `row.config`, which holds ONLY what the patch sets — so "resettable"
+ * means "reset-able back to whatever schemastery would default it to",
+ * and "set" means `Object.hasOwn`, not merely "not undefined".
+ */
+describe('SchemaForm — resettable', () => {
+  const gridSchema = Schema.object({
+    grid: Schema.object({
+      cols: Schema.number().default(5),
+      rows: Schema.number().default(3),
+    }),
+  });
+
+  it('a set key gets a marker and a reset button; an absent one gets neither; a nested group resets as a whole section', () => {
+    const onChange = renderStaticForm(gridSchema, { grid: { cols: 6 } }, { resettable: true });
+
+    const colsField = screen.getByLabelText('cols').closest('.e8-field')!;
+    expect(colsField.querySelector('.e8-field-set')).not.toBeNull();
+    expect(screen.getByRole('button', { name: 'reset cols' })).toBeInTheDocument();
+
+    const rowsField = screen.getByLabelText('rows').closest('.e8-field')!;
+    expect(rowsField.querySelector('.e8-field-set')).toBeNull();
+    expect(screen.queryByRole('button', { name: 'reset rows' })).toBeNull();
+
+    fireEvent.click(screen.getByRole('button', { name: 'reset cols' }));
+    expect(onChange).toHaveBeenLastCalledWith({ grid: {} });
+
+    fireEvent.click(screen.getByRole('button', { name: 'reset section grid' }));
+    expect(onChange).toHaveBeenLastCalledWith({});
+
+    expect(screen.getByLabelText('cols')).toHaveAccessibleDescription('default 5');
+  });
+
+  it('without resettable, nothing is marked and no reset button renders', () => {
+    renderStaticForm(gridSchema, { grid: { cols: 6 } });
+    expect(document.querySelector('.e8-field-set')).toBeNull();
+    expect(screen.queryByRole('button', { name: 'reset cols' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'reset section grid' })).toBeNull();
+  });
+});
+
+describe('SchemaForm — root', () => {
+  const rowSchema = Schema.object({
+    grid: Schema.object({ cols: Schema.number() }),
+    win: Schema.object({ glow: Schema.boolean() }),
+  });
+
+  it('renders only the named key’s fields, with no legend for the key itself, and onChange still carries the whole value', () => {
+    const onChange = renderStaticForm(
+      rowSchema,
+      { grid: { cols: 6 }, win: { glow: true } },
+      { root: 'grid' },
+    );
+    expect(screen.getByLabelText('cols')).toHaveValue(6);
+    expect(screen.queryByLabelText('glow')).toBeNull();
+    expect(screen.queryByText('grid')).toBeNull();
+
+    fireEvent.change(screen.getByLabelText('cols'), { target: { value: '7' } });
+    expect(onChange).toHaveBeenLastCalledWith({ grid: { cols: 7 }, win: { glow: true } });
+  });
+});
+
+describe('SchemaForm — fieldOverrides', () => {
+  it('draws the override at a non-union node’s dotted path; the literal-or-value switch above it still draws itself', () => {
+    const schema = Schema.object({
+      win: Schema.object({
+        frameShake: Schema.object({
+          onlyOnSymbols: Schema.union([Schema.const(null), Schema.array(Schema.string())]).default(
+            null,
+          ),
+        }),
+      }),
+    });
+    const received: { path?: string; value?: unknown } = {};
+    function Fake({ path, value }: FieldProps) {
+      received.path = path;
+      received.value = value;
+      return <div data-testid="fake" />;
+    }
+    // A controlled form: the array-mode value the override receives only
+    // shows up once the toggle's own `onChange` round-trips into `value`.
+    renderForm(
+      schema,
+      { win: { frameShake: { onlyOnSymbols: null } } },
+      { fieldOverrides: { 'win.frameShake.onlyOnSymbols': Fake } },
+    );
+
+    const toggle = screen.getByRole('checkbox', { name: 'onlyOnSymbols' });
+    expect(toggle).not.toBeChecked();
+    expect(screen.queryByTestId('fake')).toBeNull();
+
+    fireEvent.click(toggle);
+    expect(screen.getByTestId('fake')).toBeInTheDocument();
+    expect(received.path).toBe('win.frameShake.onlyOnSymbols');
+    expect(received.value).toEqual([]);
   });
 });

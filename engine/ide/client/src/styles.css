@@ -1175,6 +1175,42 @@ button.e8-status-item {
 .e8-field input[type='checkbox'] {
   justify-self: start;
 }
+/* Task 2 (`resettable`): the label column holds the label plus the "set
+   in the patch" marker and the reset button as one row, so a row with
+   neither still lays out exactly like a plain label — no shift for the
+   common case of a row that isn't set. */
+.e8-field-label-row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+}
+.e8-field-label-row label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.e8-field-set {
+  color: var(--e8-accent);
+  font-size: 10px;
+  line-height: 1;
+}
+/* A small ghost button, not `button`'s default 28px/bordered shape — it
+   only earns a background on hover, so it doesn't read as a second
+   primary action beside the field's own control. */
+.e8-field-reset {
+  height: auto;
+  padding: 1px 6px;
+  border: none;
+  background: none;
+  color: var(--e8-fg-muted);
+  font-size: var(--e8-size-label);
+  font-weight: 400;
+}
+.e8-field-reset:hover {
+  background: var(--e8-hover);
+  color: var(--e8-fg);
+}
 .e8-field-hint {
   margin: 2px 0 0;
   color: var(--e8-fg-muted);
@@ -1214,6 +1250,9 @@ button.e8-status-item {
   padding: 0 4px;
   color: var(--e8-fg-muted);
   font-size: var(--e8-size-label);
+  display: flex;
+  align-items: center;
+  gap: 4px;
 }
 .e8-dict {
   display: grid;

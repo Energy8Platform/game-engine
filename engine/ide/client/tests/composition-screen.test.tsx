@@ -316,4 +316,25 @@ describe('CompositionScreen — game rows', () => {
     // exactly this object.
     expect(puts[0].body).toEqual({ config: { width: 500 } });
   });
+
+  // Task 2 of the reels-editor slice: `GameComposition`'s form is
+  // `resettable` — a row's `config` holds only what the patch sets, so a
+  // key present there (`grid.cols` here) shows a reset button.
+  it('a key present in the row’s config patch shows a reset button', async () => {
+    const gridSchema = JSON.parse(
+      JSON.stringify(
+        Schema.object({
+          grid: Schema.object({ cols: Schema.number().default(5) }),
+        }).toJSON(),
+      ),
+    );
+    const { ctx } = await harness();
+    render(
+      <CompositionScreen
+        ctx={ctx}
+        rows={[gameRow({ id: 'reels1', schema: gridSchema, config: { grid: { cols: 6 } } })]}
+      />,
+    );
+    expect(screen.getByRole('button', { name: 'reset cols' })).toBeInTheDocument();
+  });
 });

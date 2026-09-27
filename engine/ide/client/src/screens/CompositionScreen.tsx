@@ -209,6 +209,7 @@ function GameComposition({ ctx, rows }: GameCompositionProps) {
               value={row.config ?? {}}
               onChange={(next) => void ctx.gameComposition.update(row.id, next)}
               commit="blur"
+              resettable
             />
           ) : null}
         </section>

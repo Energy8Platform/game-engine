@@ -68,7 +68,17 @@ export interface FieldProps {
   ariaLabel?: string;
   /** The id of this field's hint `<p>` (`ObjectFields`), tied to the control with `aria-describedby`. */
   describedBy?: string;
+  /** Dotted path from the FORM'S value root (`win.frameShake.onlyOnSymbols`) — stable regardless of
+   * `SchemaForm.root` trimming what actually renders; `fieldOverrides` is keyed by it. */
+  path: string;
 }
+
+/** `SchemaForm.resettable`/`fieldOverrides`, reaching `ObjectFields`/`Field` however deep the field
+ * sits — the same shape as `Pickers` above, one context per form-wide option. */
+export const FormOptions = createContext<{
+  resettable: boolean;
+  fieldOverrides: Record<string, (props: FieldProps) => JSX.Element>;
+}>({ resettable: false, fieldOverrides: {} });
 
 /** A field's label is the key as written in the YAML — never the description (that's `hint`, a muted line under the control). */
 export function label(node: SchemaNode, key: string): string {
@@ -82,6 +92,24 @@ export function hint(node: SchemaNode): string | undefined {
 
 export function needsRestart(node: SchemaNode): boolean {
   return node.meta?.extra?.applies === 'restart';
+}
+
+/**
+ * `resettable`'s hint suffix on a SET field whose schema default differs
+ * from what's set: ` · default <value>`. Only for a primitive default — an
+ * object/array default isn't a one-line value worth quoting — and a
+ * `.role('color')` default prints the same `#rrggbb` the field itself
+ * shows (`hexOf`, below), not the raw decimal.
+ */
+function defaultNote(node: SchemaNode, current: unknown): string | undefined {
+  const value = node.meta?.default;
+  if (value === undefined || value === current) return undefined;
+  if (typeof value !== 'number' && typeof value !== 'string' && typeof value !== 'boolean') {
+    return undefined;
+  }
+  const shown =
+    node.meta?.role === 'color' && typeof value === 'number' ? hexOf(value) : String(value);
+  return `default ${shown}`;
 }
 
 /** Union of constants — the only union shape Slice 0 renders. */
@@ -129,13 +157,17 @@ export function ObjectFields({
   value,
   onChange,
   commit,
+  path,
 }: {
   idPrefix: string;
   node: SchemaNode;
   value: Record<string, unknown>;
   onChange: (next: Record<string, unknown>) => void;
   commit: CommitMode;
+  /** This object's own dotted path from the form's value root (`''` at the form's own top level, or `root`'s name when `SchemaForm.root` is set) — each child appends its key. */
+  path: string;
 }) {
+  const { resettable } = useContext(FormOptions);
   // A dict entry can point at a uid that isn't in the graph's `refs` (a
   // dangling reference from a truncated or hand-edited schema) — rebuilding
   // then leaves that entry `undefined` rather than dropping the key. Reading
@@ -148,12 +180,44 @@ export function ObjectFields({
     <>
       {fields.map(([key, child]) => {
         const id = `${idPrefix}-${key}`;
-        const isGroup = (child.type === 'object' && child.dict) || child.type === 'dict' || child.type === 'array';
-        const described = hint(child) ? `${id}-hint` : undefined;
+        const childPath = path ? `${path}.${key}` : key;
+        const isGroup =
+          (child.type === 'object' && child.dict) ||
+          child.type === 'dict' ||
+          child.type === 'array';
+        // `resettable`'s "set" is `Object.hasOwn`, not "not undefined" — a
+        // row's `config` holds only what the patch actually set, and an
+        // explicit `null`/`0`/`false` is still a decision worth marking.
+        const isSet = resettable && Object.hasOwn(value, key);
+        const note = isSet ? defaultNote(child, value[key]) : undefined;
+        const hintText = [hint(child), note].filter((s): s is string => Boolean(s)).join(' · ');
+        const described = hintText ? `${id}-hint` : undefined;
         const theHint = described ? (
           <p className="e8-field-hint" id={described}>
-            {hint(child)}
+            {hintText}
           </p>
+        ) : null;
+        const marker = isSet ? (
+          <span className="e8-field-set" aria-label="set in the patch">
+            ●
+          </span>
+        ) : null;
+        // A leaf resets ITSELF out of its parent's value; a group resets
+        // the whole section the same way — both are "drop this key from
+        // the object one level up", the group's legend just says so.
+        const resetButton = isSet ? (
+          <button
+            type="button"
+            className="e8-field-reset"
+            aria-label={isGroup ? `reset section ${key}` : `reset ${key}`}
+            onClick={() => {
+              const rest = { ...value };
+              delete rest[key];
+              onChange(rest);
+            }}
+          >
+            {isGroup ? 'reset section' : 'reset'}
+          </button>
         ) : null;
         const control = (
           <Field
@@ -163,6 +227,7 @@ export function ObjectFields({
             onChange={(next) => onChange({ ...value, [key]: next })}
             commit={commit}
             describedBy={described}
+            path={childPath}
           />
         );
         // A nested object, a dict or an array is a group of its own fields,
@@ -174,7 +239,11 @@ export function ObjectFields({
           <div className="e8-field" key={key}>
             {isGroup ? (
               <fieldset className="e8-field-group" id={id} aria-describedby={described}>
-                <legend>{label(child, key)}</legend>
+                <legend>
+                  {label(child, key)}
+                  {marker}
+                  {resetButton}
+                </legend>
                 {theHint}
                 {control}
               </fieldset>
@@ -184,10 +253,17 @@ export function ObjectFields({
                     id: `OneOrListField`'s list mode and `LiteralOrValueField`'s
                     string-literal switch have no single control the plain
                     `htmlFor` above can name, so they point their own
-                    `role="group"` wrapper at this instead. */}
-                <label htmlFor={id} id={`${id}-label`}>
-                  {label(child, key)}
-                </label>
+                    `role="group"` wrapper at this instead. The marker and
+                    reset button share this label-row span (not `.e8-field`
+                    directly) so they stay on the label's grid column
+                    instead of auto-flowing into the control's. */}
+                <span className="e8-field-label-row">
+                  <label htmlFor={id} id={`${id}-label`}>
+                    {label(child, key)}
+                  </label>
+                  {marker}
+                  {resetButton}
+                </span>
                 {control}
               </>
             )}
@@ -207,8 +283,42 @@ export function ObjectFields({
   );
 }
 
-export function Field({ id, node, value, onChange, commit, ariaLabel, describedBy }: FieldProps) {
+export function Field({
+  id,
+  node,
+  value,
+  onChange,
+  commit,
+  ariaLabel,
+  describedBy,
+  path,
+}: FieldProps) {
   const current = value ?? node.meta?.default;
+
+  // `fieldOverrides` draws a NON-union node whose dotted path matches — a
+  // union skips this so `oneOrList`/`literalOrValue` below still draw
+  // their switch; the switch's own recursive `Field` call for the value
+  // member carries the SAME `path` (see `LiteralOrValueField`), so the
+  // override reaches it on the next pass instead of being shut out by
+  // the union that wraps it.
+  const { fieldOverrides } = useContext(FormOptions);
+  if (node.type !== 'union') {
+    const Override = fieldOverrides[path];
+    if (Override) {
+      return (
+        <Override
+          id={id}
+          node={node}
+          value={value}
+          onChange={onChange}
+          commit={commit}
+          ariaLabel={ariaLabel}
+          describedBy={describedBy}
+          path={path}
+        />
+      );
+    }
+  }
 
   if (node.type === 'object' && node.dict) {
     return (
@@ -218,21 +328,47 @@ export function Field({ id, node, value, onChange, commit, ariaLabel, describedB
         value={(value ?? {}) as Record<string, unknown>}
         onChange={onChange}
         commit={commit}
+        path={path}
       />
     );
   }
 
   if (node.type === 'dict' && node.inner?.type === 'string') {
-    return <DictField id={id} node={node} value={value} onChange={onChange} commit={commit} />;
+    return (
+      <DictField
+        id={id}
+        node={node}
+        value={value}
+        onChange={onChange}
+        commit={commit}
+        path={path}
+      />
+    );
   }
 
   if (node.type === 'array' && node.inner) {
-    return <ArrayField id={id} node={node} value={value} onChange={onChange} commit={commit} />;
+    return (
+      <ArrayField
+        id={id}
+        node={node}
+        value={value}
+        onChange={onChange}
+        commit={commit}
+        path={path}
+      />
+    );
   }
 
   if (node.type === 'dict' && node.inner) {
     return (
-      <DictObjectField id={id} node={node} value={value} onChange={onChange} commit={commit} />
+      <DictObjectField
+        id={id}
+        node={node}
+        value={value}
+        onChange={onChange}
+        commit={commit}
+        path={path}
+      />
     );
   }
 
@@ -263,6 +399,7 @@ export function Field({ id, node, value, onChange, commit, ariaLabel, describedB
         onChange={onChange}
         commit={commit}
         describedBy={describedBy}
+        path={path}
       />
     );
   }
@@ -277,6 +414,7 @@ export function Field({ id, node, value, onChange, commit, ariaLabel, describedB
         onChange={onChange}
         commit={commit}
         describedBy={describedBy}
+        path={path}
       />
     );
   }
@@ -297,6 +435,7 @@ export function Field({ id, node, value, onChange, commit, ariaLabel, describedB
         commit={commit}
         ariaLabel={ariaLabel}
         describedBy={describedBy}
+        path={path}
       />
     );
   }
@@ -323,6 +462,7 @@ export function Field({ id, node, value, onChange, commit, ariaLabel, describedB
         commit={commit}
         ariaLabel={ariaLabel}
         describedBy={describedBy}
+        path={path}
       />
     );
   }
@@ -469,7 +609,7 @@ function ColorField({
   value,
   onChange,
   describedBy,
-}: Omit<FieldProps, 'commit' | 'ariaLabel'>) {
+}: Omit<FieldProps, 'commit' | 'ariaLabel' | 'path'>) {
   const current = (Number(value ?? node.meta?.default ?? 0) >>> 0) as number;
   const draft = useDraft<number>({
     dep: value,
@@ -479,7 +619,8 @@ function ColorField({
     onChange,
     commit: 'blur',
   });
-  const write = (e: ChangeEvent<HTMLInputElement>) => onChange(parseInt(e.target.value.slice(1), 16));
+  const write = (e: ChangeEvent<HTMLInputElement>) =>
+    onChange(parseInt(e.target.value.slice(1), 16));
   return (
     <span className="e8-color">
       <input
@@ -505,7 +646,16 @@ function ColorField({
   );
 }
 
-function StringField({ id, node, value, onChange, commit, ariaLabel, describedBy }: FieldProps) {
+function StringField({
+  id,
+  node,
+  value,
+  onChange,
+  commit,
+  ariaLabel,
+  describedBy,
+  path,
+}: FieldProps) {
   const current = value ?? node.meta?.default;
   const pickers = useContext(Pickers);
   const { pick, asset } = node.meta ?? {};
@@ -536,7 +686,7 @@ function StringField({ id, node, value, onChange, commit, ariaLabel, describedBy
       </select>
     );
   }
-  return <TextField {...{ id, node, value, onChange, commit, ariaLabel, describedBy }} />;
+  return <TextField {...{ id, node, value, onChange, commit, ariaLabel, describedBy, path }} />;
 }
 
 function TextField({ id, node, value, onChange, commit, ariaLabel, describedBy }: FieldProps) {
@@ -728,7 +878,7 @@ function defaults(node: SchemaNode): unknown {
  * a second, and the host's `value` only moves when the PUT lands, so the
  * second must not be built from the prop or it drops the first.
  */
-function ArrayField({ id, node, value, onChange, commit }: FieldProps) {
+function ArrayField({ id, node, value, onChange, commit, path }: FieldProps) {
   const items = (value ?? node.meta?.default ?? []) as unknown[];
   const inner = node.inner!;
   const latest = useRef(items);
@@ -756,6 +906,7 @@ function ArrayField({ id, node, value, onChange, commit }: FieldProps) {
             onChange={(next) => send(latest.current.map((it, j) => (j === i ? next : it)))}
             commit={commit}
             ariaLabel={inner.type === 'string' ? `item ${i + 1}` : undefined}
+            path={`${path}.${i}`}
           />
           <span className="e8-array-tools">
             <button
@@ -844,7 +995,7 @@ function ModeSwitch({
  * GAME row) a keystroke is not a `PUT`, and clearing an entry to retype it
  * does not momentarily commit `0`.
  */
-function OneOrListField({ id, node, value, onChange, commit, describedBy }: FieldProps) {
+function OneOrListField({ id, node, value, onChange, commit, describedBy, path }: FieldProps) {
   const [a, b] = node.list!;
   const [numMember, listMember] = a.type === 'number' ? [a, b] : [b, a];
   const current = value ?? node.meta?.default;
@@ -862,6 +1013,9 @@ function OneOrListField({ id, node, value, onChange, commit, describedBy }: Fiel
             { name: 'per reel', checked: false, onSelect: () => onChange([single]) },
           ]}
         />
+        {/* The scalar IS this field's whole value — same dotted `path` as
+            the union above it, so a `fieldOverrides` entry keyed by that
+            path reaches it here too. */}
         <Field
           id={id}
           node={numMember}
@@ -869,6 +1023,7 @@ function OneOrListField({ id, node, value, onChange, commit, describedBy }: Fiel
           onChange={onChange}
           commit={commit}
           describedBy={describedBy}
+          path={path}
         />
       </span>
     );
@@ -904,9 +1059,14 @@ function OneOrListField({ id, node, value, onChange, commit, describedBy }: Fiel
             commit={commit}
             ariaLabel={`reel ${i + 1}`}
             describedBy={describedBy}
+            path={`${path}.${i}`}
           />
         ))}
-        <button type="button" aria-label="+" onClick={() => onChange([...list, list[list.length - 1] ?? 0])}>
+        <button
+          type="button"
+          aria-label="+"
+          onClick={() => onChange([...list, list[list.length - 1] ?? 0])}
+        >
           +
         </button>
         <button
@@ -932,7 +1092,7 @@ function OneOrListField({ id, node, value, onChange, commit, describedBy }: Fiel
  * `defaults(other)`, never an empty shell the value's own `Field` would
  * then have to cope with.
  */
-function LiteralOrValueField({ id, node, value, onChange, commit, describedBy }: FieldProps) {
+function LiteralOrValueField({ id, node, value, onChange, commit, describedBy, path }: FieldProps) {
   const [a, b] = node.list!;
   const [literal, other] = a.type === 'const' ? [a, b] : [b, a];
   const current = value ?? node.meta?.default;
@@ -948,8 +1108,17 @@ function LiteralOrValueField({ id, node, value, onChange, commit, describedBy }:
           checked={on}
           onChange={(e) => onChange(e.target.checked ? defaults(other) : null)}
         />
+        {/* Same `path` as the union above — the value member IS this
+            field, just switched on; see `Field`'s override comment. */}
         {on ? (
-          <Field id={`${id}-value`} node={other} value={current} onChange={onChange} commit={commit} />
+          <Field
+            id={`${id}-value`}
+            node={other}
+            value={current}
+            onChange={onChange}
+            commit={commit}
+            path={path}
+          />
         ) : null}
       </span>
     );
@@ -976,7 +1145,14 @@ function LiteralOrValueField({ id, node, value, onChange, commit, describedBy }:
         ]}
       />
       {!on ? (
-        <Field id={`${id}-value`} node={other} value={current} onChange={onChange} commit={commit} />
+        <Field
+          id={`${id}-value`}
+          node={other}
+          value={current}
+          onChange={onChange}
+          commit={commit}
+          path={path}
+        />
       ) : null}
     </span>
   );
@@ -1009,7 +1185,7 @@ interface DictObjectRow {
   dirty: boolean;
 }
 
-function DictObjectField({ id, node, value, onChange, commit }: FieldProps) {
+function DictObjectField({ id, node, value, onChange, commit, path }: FieldProps) {
   const current = (value ?? node.meta?.default ?? {}) as Record<string, unknown>;
   const inner = node.inner!;
   const toRows = (source: Record<string, unknown>): DictObjectRow[] =>
@@ -1087,6 +1263,7 @@ function DictObjectField({ id, node, value, onChange, commit }: FieldProps) {
             value={row.value}
             onChange={(next) => editValue(index, next)}
             commit={commit}
+            path={`${path}.${row.key}`}
           />
           <button
             type="button"
