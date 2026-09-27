@@ -21,8 +21,8 @@ import { map, patchVariant, renameVariant, walk } from './SceneDocument';
  * shows `portrait.nodes[<id>]` merged over the node's own props and a
  * change writes only the keys that moved into that block
  * (`patchVariant`); otherwise the node's props, as before. A node whose
- * merged `pin` is set has its `x`/`y` labelled as offsets — that is what
- * the runtime reads them as.
+ * merged `pin` is set gets the offset wording in its `x`/`y` hint — that
+ * is what the runtime reads them as; the label stays `x`/`y` either way.
  *
  * A string field with `meta.asset` (`.extra('asset', ['png'])`) is a
  * select of the project's files with those extensions — `useAssetPicker`;
@@ -77,13 +77,18 @@ export function useNodePicker(ctx: Context): () => string[] {
 /** `COMMON` as JSON — exported so `SymbolsProperties` can build its own restricted schema (`Adjust`) from the same dict, rather than importing `COMMON` a second time. */
 export const COMMON_JSON = JSON.parse(JSON.stringify(COMMON)) as unknown;
 
-/** `x`/`y` re-described for a pinned node: the runtime reads them from the pin's point of the safe rect. */
-const OFFSETS = {
+/**
+ * `x`/`y` re-described as offsets, shared by a pinned node (the runtime
+ * reads them from the pin's point of the safe rect) and a symbol's Adjust
+ * group (`SymbolsProperties.tsx` — offsets from the cell centre): the KEY
+ * stays `x`/`y` either way, only this hint text changes.
+ */
+export const OFFSETS = {
   x: Schema.number().default(0).description('offset x, design px'),
   y: Schema.number().default(0).description('offset y, design px'),
 };
 
-/** `Schema.object({ ...COMMON.dict, ...own.dict })`, as JSON `SchemaForm` rebuilds; `null` when the type's schema is malformed. `pinned` swaps in the offset labels. */
+/** `Schema.object({ ...COMMON.dict, ...own.dict })`, as JSON `SchemaForm` rebuilds; `null` when the type's schema is malformed. `pinned` swaps in the offset hint for x/y. */
 export function mergedSchema(info: NodeTypeInfo | undefined, pinned = false): unknown {
   try {
     const common = new Schema(COMMON_JSON as never) as unknown as { dict: object };
@@ -95,8 +100,8 @@ export function mergedSchema(info: NodeTypeInfo | undefined, pinned = false): un
   }
 }
 
-/** The keys of `after` whose value is not `before`'s — what one form change moved. */
-function changed(before: Record<string, unknown>, after: Record<string, unknown>) {
+/** The keys of `after` whose value is not `before`'s — what one form change moved. Shared with `SymbolsProperties`, which reduces the same delta from two separate forms over the same value. */
+export function changed(before: Record<string, unknown>, after: Record<string, unknown>) {
   return Object.fromEntries(Object.entries(after).filter(([k, v]) => !Object.is(before[k], v)));
 }
 

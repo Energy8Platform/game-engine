@@ -439,6 +439,19 @@ describe('SymbolsDocument', () => {
       expect(reqs('symbol').at(-1)).toEqual({ id: '1', state: 'win' });
     });
 
+    // M4: `▶ Play` had no `disabled` at all — clickable with nothing to
+    // play (nothing selected, or a state the symbol hasn't got).
+    it('▶ Play is disabled with nothing selected, or a state the symbol has not got; enabled once there is something to play', async () => {
+      const { ctx } = await booted(); // TWO's symbol 2 has no `win`
+      renderDocument(ctx);
+      expect(screen.getByTestId('symbol-replay')).toBeDisabled();
+      act(() => ctx.symbols.select({ id: '2', state: 'win' }));
+      await waitFor(() => expect(screen.getByTestId('symbols-state-empty')).toBeTruthy());
+      expect(screen.getByTestId('symbol-replay')).toBeDisabled();
+      act(() => ctx.symbols.select({ id: '1', state: 'win' }));
+      await waitFor(() => expect(screen.getByTestId('symbol-replay')).not.toBeDisabled());
+    });
+
     it("the canvas' own error event shows in the status line", async () => {
       const { ctx } = await booted();
       renderDocument(ctx);
@@ -646,6 +659,31 @@ describe('SymbolsDocument', () => {
       fireEvent.click(screen.getByTestId('symbol-clear-death'));
       await waitFor(() => expect(docs()).toHaveLength(1));
       expect(docs()[0].symbols[0].states).toBeUndefined();
+    });
+
+    // M2: the symbol itself is still there (unlike the "another tab removed
+    // it" case above), but the NAMED state the selection points at is gone
+    // — a remote Clear, say. A built-in never vanishes this way (it's
+    // always at least the empty fallback), so only a named state needs the
+    // check; falling back to `static` keeps the canvas showing something
+    // instead of stranding the selection on a state that no longer exists.
+    it('a selection on a named state the doc no longer has falls back to { id, state: static }', async () => {
+      const { ctx, socket } = await booted({}, withDeath);
+      renderDocument(ctx);
+      act(() => ctx.symbols.select({ id: '1', state: 'death' }));
+      expect(await screen.findByTestId('symbols-header')).toHaveTextContent('1 · cherry · death');
+      // Another tab clears `death`: the `symbols` frame's def no longer has it.
+      act(() =>
+        socket.receive({
+          type: 'symbols',
+          doc: { version: 1, symbols: [TWO.symbols[0], TWO.symbols[1]] },
+          diagnostics: [],
+        }),
+      );
+      await waitFor(() =>
+        expect(ctx.symbols.selected()).toEqual({ id: '1', state: 'static' }),
+      );
+      expect(await screen.findByTestId('symbols-header')).toHaveTextContent('1 · cherry · static');
     });
   });
 });

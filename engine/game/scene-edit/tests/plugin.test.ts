@@ -286,7 +286,17 @@ describe('symbol mode', () => {
     await ready();
     const snap = (await call('snapshot')).result as { cell: { width: number; height: number } };
     expect(snap.cell).toEqual({ width: 120, height: 80 });
-    expect((app.stage.getChildByLabel('symbol-frame', true) as Graphics).tint).toBe(0x112233);
+    const frame = app.stage.getChildByLabel('symbol-frame', true) as Graphics;
+    expect(frame.tint).toBe(0x112233);
+    // M9: the earlier version of this test only asserted the colour (via
+    // `tint`) — alpha and radius come from the same `board.config` and were
+    // unchecked. Read them off the drawn fill/path instructions rather than
+    // any new test-only field, so this stays a check of the real draw call.
+    const fill = (frame.context as unknown as { instructions: { action: string; data: { style: { alpha: number }; path: { instructions: { action: string; data: unknown[] }[] } } }[] })
+      .instructions.find((i) => i.action === 'fill')!;
+    expect(fill.data.style.alpha).toBe(0.5);
+    const roundRect = fill.data.path.instructions.find((i) => i.action === 'roundRect')!;
+    expect(roundRect.data[4]).toBe(4); // [x, y, w, h, radius]
   });
 
   it('a screen resize re-lays out on the next frame: checker covers it, the cell stays centred', async () => {

@@ -3,13 +3,15 @@ import { ObjectFields, Pickers, type CommitMode, type SchemaNode } from './field
 
 export interface SchemaFormProps {
   /**
-   * The row this form belongs to (`CompositionRow.id`). Mixed into every
-   * field's DOM id so two rows whose schemas both declare a field of the
-   * same name (e.g. two plugins each with a `speed`) don't collide —
-   * without this, both would render `id="field-speed"`, the second
-   * `<label>` would steal focus onto the first row's `<input>`, and
+   * The row this form belongs to (`CompositionRow.id`, a symbol id, …).
+   * Mixed into every field's DOM id so two rows whose schemas both declare
+   * a field of the same name (e.g. two plugins each with a `speed`) don't
+   * collide — without this, both would render `id="field-speed"`, the
+   * second `<label>` would steal focus onto the first row's `<input>`, and
    * Playwright's `getByLabel` (what the e2e suite uses) would go ambiguous
-   * under strict mode.
+   * under strict mode. Sanitised before use (see `safeId`) — a symbol id
+   * may legally carry a space or other punctuation a file stem allows,
+   * which a raw DOM id must not.
    */
   rowId: string;
   /**
@@ -51,6 +53,18 @@ function rebuild(schema: unknown): SchemaNode | null {
 
 const NO_PICKERS: Record<string, () => string[]> = {};
 
+/**
+ * `rowId` becomes every field's id prefix (`id="field-<rowId>-<key>"`,
+ * `aria-describedby="field-<rowId>-<key>-hint"`). A symbol id or node id
+ * can carry any character a file stem allows, a space included — and a
+ * literal space inside one DOM id makes `aria-describedby` parse as TWO
+ * ids, breaking the hint's association for every field on the row. Replace
+ * every character outside the id-safe set so this can't happen.
+ */
+function safeId(raw: string): string {
+  return raw.replace(/[^A-Za-z0-9_-]/g, '_');
+}
+
 export function SchemaForm({
   rowId,
   schema,
@@ -66,7 +80,7 @@ export function SchemaForm({
     <div className="e8-schema-form">
       <Pickers.Provider value={pickers}>
         <ObjectFields
-          idPrefix={`field-${rowId}`}
+          idPrefix={`field-${safeId(rowId)}`}
           node={node}
           value={value}
           onChange={onChange}

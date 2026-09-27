@@ -121,8 +121,13 @@ export function ObjectFields({
     <>
       {fields.map(([key, child]) => {
         const id = `${idPrefix}-${key}`;
-        const nested = child.type === 'object' && child.dict;
+        const isGroup = (child.type === 'object' && child.dict) || child.type === 'dict' || child.type === 'array';
         const described = hint(child) ? `${id}-hint` : undefined;
+        const theHint = described ? (
+          <p className="e8-field-hint" id={described}>
+            {hint(child)}
+          </p>
+        ) : null;
         const control = (
           <Field
             id={id}
@@ -135,12 +140,15 @@ export function ObjectFields({
         );
         // A nested object, a dict or an array is a group of its own fields,
         // so its name goes on a `<legend>` rather than a `<label for>` —
-        // there is no single control for the label to point at.
+        // there is no single control for the label to point at. Its hint,
+        // for the same reason, renders INSIDE the fieldset right after the
+        // legend it explains, rather than after the whole `.e8-field` row.
         return (
           <div className="e8-field" key={key}>
-            {nested || child.type === 'dict' || child.type === 'array' ? (
+            {isGroup ? (
               <fieldset className="e8-field-group" id={id} aria-describedby={described}>
                 <legend>{label(child, key)}</legend>
+                {theHint}
                 {control}
               </fieldset>
             ) : (
@@ -149,16 +157,15 @@ export function ObjectFields({
                 {control}
               </>
             )}
-            {described ? (
-              <p className="e8-field-hint" id={described}>
-                {hint(child)}
-              </p>
-            ) : null}
             {/* This badge reflects what the plugin declared via
                 `extra: { applies: 'restart' }` — not a difference in host
                 behaviour: the host decides `reload` from the row's `hot`
                 and the changed top-level keys (see `runtime-assets.ts`). */}
             {needsRestart(child) ? <span className="e8-badge">restart</span> : null}
+            {/* A leaf field's hint renders AFTER the badge (not before): in
+                the 3-column `.e8-field` grid the badge is the control's own
+                row, and the hint wraps to the row under it (styles.css). */}
+            {!isGroup ? theHint : null}
           </div>
         );
       })}

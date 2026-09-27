@@ -82,3 +82,56 @@ describe('styles.css token guard', () => {
     expect(bad).toEqual([]);
   });
 });
+
+describe('I1 — the field hint sits under the control, not beside it', () => {
+  const css = readFileSync('src/styles.css', 'utf8');
+  const rule = (selector: string, body: string) => {
+    const re = new RegExp(`${selector.replace(/[.[\]]/g, '\\$&')}\\s*{([^}]*)}`);
+    return re.exec(body)?.[1];
+  };
+
+  // `.e8-field` is the 3-column `label | control | badge` grid: with the
+  // badge now DOM-before the hint (fields.tsx), the hint must be told to
+  // start at column 2 so it lands under the control instead of auto-placing
+  // into the (now taken) 3rd column.
+  it('the wide 3-column field grid pushes the hint under the control (column 2 through the end)', () => {
+    expect(rule('.e8-field > .e8-field-hint', css)).toMatch(/grid-column:\s*2\s*\/\s*-1/);
+  });
+
+  // `.e8-properties .e8-field` collapses to ONE column (the sidebar is too
+  // narrow for the 3-column layout) — a `grid-column: 2 / -1` there would
+  // create a stray implicit column 2 nothing else occupies.
+  it('the properties sidebar (one column) resets the hint back to the full row', () => {
+    expect(rule('.e8-properties .e8-field > .e8-field-hint', css)).toMatch(
+      /grid-column:\s*1\s*\/\s*-1/,
+    );
+  });
+
+  // The ≤768px media query also collapses `.e8-field` to one column
+  // (composition rows on a narrow pane) — same reset needed there. Brace-
+  // counted rather than a `[^}]*` regex: the query wraps a whole rule, so
+  // its own body contains a nested `{...}` a flat regex would cut short at.
+  it('the ≤768px media query also resets the hint back to the full row', () => {
+    const start = css.indexOf('@media (max-width: 768px)');
+    const open = css.indexOf('{', start);
+    let depth = 1;
+    let i = open + 1;
+    while (depth > 0) {
+      if (css[i] === '{') depth++;
+      else if (css[i] === '}') depth--;
+      i++;
+    }
+    const media = css.slice(open + 1, i - 1);
+    expect(rule('.e8-field > .e8-field-hint', media)).toMatch(/grid-column:\s*1\s*\/\s*-1/);
+  });
+});
+
+// M3: under ~550px of doc pane, cell size + zoom + Play used to clip
+// instead of wrapping onto their own row — the group had no `flex-wrap`.
+describe('M3 — the symbols toolbar right group wraps', () => {
+  it('.e8-symbols-toolbar-right has flex-wrap: wrap', () => {
+    const css = readFileSync('src/styles.css', 'utf8');
+    const rule = /\.e8-symbols-toolbar-right\s*{([^}]*)}/.exec(css)![1];
+    expect(rule).toMatch(/flex-wrap:\s*wrap/);
+  });
+});

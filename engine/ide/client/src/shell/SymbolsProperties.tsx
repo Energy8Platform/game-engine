@@ -12,7 +12,14 @@ import {
 import { useScenes } from '../plugins/scenes';
 import { useSymbols } from '../plugins/symbols';
 import { SchemaForm } from '../schema-form/SchemaForm';
-import { COMMON_JSON, mergedSchema, useAssetPicker, useNodePicker } from './PropertiesSidebar';
+import {
+  changed,
+  COMMON_JSON,
+  mergedSchema,
+  OFFSETS,
+  useAssetPicker,
+  useNodePicker,
+} from './PropertiesSidebar';
 import { removeState, setState, setStateType, setSymbol } from './symbols-doc';
 
 /**
@@ -102,23 +109,17 @@ const ADJUST_KEYS = ['x', 'y', 'scale', 'rotation', 'alpha', 'tint'] as const;
  * type's OWN schema already declares (`ownKeys` — `keysOf(own)`): a type
  * with its own `scale`, say, draws it once, in `State` — `Adjust` leaves
  * that key out rather than offering a second, colliding `scale` field.
+ * `x`/`y` come from `OFFSETS` rather than `COMMON` directly — a symbol's
+ * Adjust `x`/`y` are offsets from the cell centre, not an absolute
+ * position, the same re-description a pinned scene node's `x`/`y` get.
  */
 function adjustSchema(ownKeys: readonly string[]): unknown {
   const common = new Schema(COMMON_JSON as never) as unknown as { dict: Record<string, unknown> };
+  const dict: Record<string, unknown> = { ...common.dict, ...OFFSETS };
   const keys = ADJUST_KEYS.filter((k) => !ownKeys.includes(k));
   return JSON.parse(
-    JSON.stringify(
-      Schema.object(Object.fromEntries(keys.map((k) => [k, common.dict[k]])) as never),
-    ),
+    JSON.stringify(Schema.object(Object.fromEntries(keys.map((k) => [k, dict[k]])) as never)),
   );
-}
-
-/** The keys of `after` that differ from `before` — what one form's `onChange` actually moved. */
-function changedKeys(
-  before: Record<string, unknown>,
-  after: Record<string, unknown>,
-): Record<string, unknown> {
-  return Object.fromEntries(Object.entries(after).filter(([k, v]) => !Object.is(before[k], v)));
 }
 
 function Body({
@@ -172,7 +173,7 @@ function Body({
   // whole symbol deleted, while this write waited its turn) makes it a
   // no-op — `d` comes back unchanged, so `ctx.symbols.update` skips the PUT.
   const writeProps = (props: Record<string, unknown>) => (next: Record<string, unknown>) => {
-    const delta = changedKeys(props, next);
+    const delta = changed(props, next);
     write((d) => {
       const liveDef = d.symbols.find((s) => s.id === def.id);
       const live = liveDef && stateNode(liveDef, state);

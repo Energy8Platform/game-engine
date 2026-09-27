@@ -213,6 +213,24 @@ describe('SymbolsProperties', () => {
     }
   });
 
+  // M6: `COMMON.x`'s own hint reads "x, design px" — accurate for a scene
+  // node, but a symbol's Adjust `x`/`y` are offsets from the CELL CENTRE,
+  // not an absolute position. Reuses `PropertiesSidebar`'s `OFFSETS` (the
+  // same wording a pinned node's x/y already get) rather than inventing a
+  // second one.
+  it("Adjust's x/y hint is the offset wording, not COMMON's plain one", async () => {
+    const { ctx } = await booted();
+    act(() => ctx.symbols.select({ id: '1', state: 'static' }));
+    renderSide(ctx);
+    const adjustGroup = within(screen.getByTestId('symbol-props-adjust'));
+    expect(adjustGroup.getByLabelText('x', { exact: true })).toHaveAccessibleDescription(
+      'offset x, design px',
+    );
+    expect(adjustGroup.getByLabelText('y', { exact: true })).toHaveAccessibleDescription(
+      'offset y, design px',
+    );
+  });
+
   it('a scale change on a state carrying hidden common props (mask, pin) keeps them', async () => {
     const doc: SymbolsDoc = {
       version: 1,

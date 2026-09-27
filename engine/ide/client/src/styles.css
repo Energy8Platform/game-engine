@@ -1181,6 +1181,14 @@ button.e8-status-item {
   font-size: var(--e8-size-label);
   line-height: 1.35;
 }
+/* A leaf field's hint (`.e8-field`'s 3-column `label | control | badge`
+   grid): auto-placement would otherwise drop it into the 3rd (badge)
+   column, beside the control — start it at column 2 instead, so it wraps
+   onto its own row under the control, with the badge staying on the
+   control's row. */
+.e8-field > .e8-field-hint {
+  grid-column: 2 / -1;
+}
 .e8-unsupported-note {
   color: var(--e8-fg-muted);
   font-style: normal;
@@ -1296,6 +1304,11 @@ button.e8-status-item {
   .e8-field {
     grid-template-columns: 1fr;
   }
+  /* `.e8-field` is one column here — the wide grid's `grid-column: 2 / -1`
+     above would open a stray implicit column 2 nothing else occupies. */
+  .e8-field > .e8-field-hint {
+    grid-column: 1 / -1;
+  }
 }
 
 /* Properties (right sidebar): the schema form's three-column field grid
@@ -1307,6 +1320,10 @@ button.e8-status-item {
 }
 .e8-properties .e8-field {
   grid-template-columns: minmax(0, 1fr);
+}
+/* Same reset as the ≤768px query, same reason: one column here too. */
+.e8-properties .e8-field > .e8-field-hint {
+  grid-column: 1 / -1;
 }
 .e8-properties .e8-explorer-header .e8-explorer-input {
   flex: 1;
@@ -1529,6 +1546,7 @@ button.e8-status-item {
 .e8-symbols-toolbar-right {
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
   gap: 8px;
   margin-left: auto;
 }

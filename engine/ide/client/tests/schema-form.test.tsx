@@ -255,6 +255,34 @@ describe('SchemaForm', () => {
     expect(document.querySelector('.e8-field-hint')).toBeNull();
   });
 
+  // I1: the hint used to render as the THIRD item of `.e8-field`'s row —
+  // beside the control, with the `restart` badge (a later sibling) wrapping
+  // to a row of its own. It must render AFTER the badge, so the badge sits
+  // on the control's row and the hint is the one that wraps under it.
+  it('a leaf field with a description and a restart badge: the badge precedes the hint in DOM order', () => {
+    const restartSchema = JSON.parse(
+      JSON.stringify(
+        Schema.object({
+          width: Schema.number()
+            .default(1920)
+            .description('design px')
+            .extra('extra', { applies: 'restart' }),
+        }).toJSON(),
+      ),
+    );
+    render(<SchemaForm rowId="row" schema={restartSchema} value={{}} onChange={() => {}} />);
+    const field = screen.getByLabelText('width').closest('.e8-field')!;
+    const order = [...field.children].map((el) =>
+      el.classList.contains('e8-badge')
+        ? 'badge'
+        : el.classList.contains('e8-field-hint')
+          ? 'hint'
+          : el.tagName.toLowerCase(),
+    );
+    expect(order.indexOf('badge')).toBeGreaterThan(-1);
+    expect(order.indexOf('badge')).toBeLessThan(order.indexOf('hint'));
+  });
+
   it('a group field puts its key on the legend and its description as the group hint', () => {
     const winSchema = JSON.parse(
       JSON.stringify(
@@ -268,6 +296,30 @@ describe('SchemaForm', () => {
     render(<SchemaForm rowId="row" schema={winSchema} value={{}} onChange={() => {}} />);
     const group = screen.getByRole('group', { name: 'win' });
     expect(group).toHaveAccessibleDescription('win highlight');
+  });
+
+  // I1: the group's hint used to render AFTER the whole `<fieldset>`, so it
+  // sat far from the `<legend>` it explains. It must be a descendant of the
+  // fieldset, right after the legend.
+  it("a group field's hint is a descendant of its fieldset, following the legend", () => {
+    const winSchema = JSON.parse(
+      JSON.stringify(
+        Schema.object({
+          win: Schema.object({ glow: Schema.boolean().default(true) }).description(
+            'win highlight',
+          ),
+        }).toJSON(),
+      ),
+    );
+    render(<SchemaForm rowId="row" schema={winSchema} value={{}} onChange={() => {}} />);
+    const group = screen.getByRole('group', { name: 'win' });
+    const hint = group.querySelector('.e8-field-hint')!;
+    expect(hint).toBeTruthy();
+    expect(hint).toHaveTextContent('win highlight');
+    const legend = group.querySelector('legend')!;
+    // `legend` precedes `hint` among the fieldset's children.
+    const kids = [...group.children];
+    expect(kids.indexOf(legend)).toBeLessThan(kids.indexOf(hint));
   });
 
   it('renders a number field with the bounds from the schema', () => {
@@ -438,6 +490,26 @@ describe('SchemaForm', () => {
     fireEvent.change(inputs[1], { target: { value: '9' } });
     expect(onChangeB).toHaveBeenCalledWith({ speed: 9 });
     expect(onChangeA).not.toHaveBeenCalled();
+  });
+
+  // M8: a symbol id (or any other `rowId` source) may legally carry
+  // whitespace — "wild card" is a legal file stem. A raw space in the id
+  // prefix would make `aria-describedby="field-symbol.wild card...-hint"`
+  // parse as TWO ids, so the control's accessible description would break.
+  it('a rowId with a space still gives the control a working accessible description', () => {
+    const hinted = JSON.parse(
+      JSON.stringify(
+        Schema.object({
+          speed: Schema.number().default(8).description('reel speed'),
+        }).toJSON(),
+      ),
+    );
+    render(
+      <SchemaForm rowId="symbol.wild card.static" schema={hinted} value={{}} onChange={() => {}} />,
+    );
+    const input = screen.getByLabelText('speed');
+    expect(input).toHaveAccessibleDescription('reel speed');
+    expect(input.getAttribute('aria-describedby')).not.toMatch(/\s/);
   });
 
   describe('dict of strings', () => {

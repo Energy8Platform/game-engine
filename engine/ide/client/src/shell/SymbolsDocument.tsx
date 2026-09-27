@@ -9,6 +9,7 @@ import {
 import type { Context } from 'cordis';
 import Schema from 'schemastery';
 import {
+  BUILTIN_STATES,
   diagnostic,
   stateNode,
   type Diagnostic,
@@ -62,7 +63,11 @@ import {
  * (`symbol`, skipped when nothing is selected — the canvas keeps whatever
  * it last showed), then asks `snapshot` for the cell size. `replaceSymbols`
  * and `symbol` repeat on every later doc/selection change; a doc change
- * also re-asks `snapshot` (a board change can resize the cell).
+ * also re-asks `snapshot`, though `symbols.yml` itself never moves the
+ * board — the one thing that WOULD resize the cell, a live edit to
+ * `reels1`'s `board.cellSize`, is not caught here at all (scene-edit reads
+ * it once at boot): a reels edit needs a canvas reload to show up here
+ * until slice 41 wires the board up live.
  *
  * Every write is a REDUCER over the doc, queued through `ctx.symbols.update`
  * (the Flow document's `commit`, moved into the service so `SymbolsProperties`
@@ -166,7 +171,7 @@ export function SymbolsDocument({ ctx }: { ctx: Context }) {
   const tell = (method: string, params: unknown) => {
     void rpcRef.current?.call(method, params).catch(() => {});
   };
-  /** The board's cell size, in design px — asked fresh whenever the doc changes, since a board change can resize it. */
+  /** The board's cell size, in design px — re-asked whenever the SYMBOLS doc changes (a symbol edit never moves it, but asking is cheap); a `reels1` edit that actually resizes the cell is not seen live here at all — see the class doc above. */
   const askSnapshot = () => {
     void rpcRef.current
       ?.call<{ cell?: { width: number; height: number } }>('snapshot')
@@ -223,9 +228,18 @@ export function SymbolsDocument({ ctx }: { ctx: Context }) {
   // going to `null`) can leave a selection the doc no longer has: dropped
   // here rather than left for the render below to paper over, and keyed
   // on the doc alone so clearing it (which changes `selected`, not `doc`)
-  // never re-triggers this effect.
+  // never re-triggers this effect. The def surviving but a NAMED state on
+  // it gone (a remote Clear) is the narrower case: falls back to `static`
+  // rather than deselecting — a built-in never vanishes this way, so only
+  // a named state needs the check.
   useEffect(() => {
-    if (selected !== null && !symbols.some((s) => s.id === selected.id)) ctx.symbols.select(null);
+    if (selected === null) return;
+    const def = symbols.find((s) => s.id === selected.id);
+    if (!def) return void ctx.symbols.select(null);
+    const named = !(BUILTIN_STATES as readonly string[]).includes(selected.state);
+    if (named && !(def.states && Object.hasOwn(def.states, selected.state))) {
+      ctx.symbols.select({ id: selected.id, state: 'static' });
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [docKey]);
   // A new canvas (reload / project / preview address) has not answered
@@ -512,6 +526,7 @@ export function SymbolsDocument({ ctx }: { ctx: Context }) {
                   className="e8-symbols-play"
                   data-testid="symbol-replay"
                   title="play"
+                  disabled={selected === null || !selectedDef || stateMissing}
                   onClick={() => selected !== null && tell('symbol', selected)}
                 >
                   ▶ Play
