@@ -213,7 +213,17 @@ export function ReelsDocument({ ctx }: { ctx: Context }) {
     }
   };
 
-  const anticipationOn = anticipation1 !== null && anticipation1.config.enabled !== false;
+  // Fix round 1: this used to read `enabled !== false` — "on unless
+  // explicitly turned off" — so a project whose `anticipation1` row is
+  // PRESENT but carries no `enabled` key at all (the row's own schema
+  // default, and exactly what `e8-base` composes it with — see
+  // `reels-anticipation`'s schema doc: "composed but OFF") read as ON. A
+  // real project's Scatters button was enabled from the moment the
+  // document opened, before anyone touched the Anticipation section —
+  // measured against `first-slot` in `reels.spec.ts`. `=== true` is the
+  // honest mirror of the schema's own default: off unless a patch (or
+  // this document) actually sets it.
+  const anticipationOn = anticipation1?.config.enabled === true;
   const scattersDisabled = busy || !anticipationOn;
 
   return (

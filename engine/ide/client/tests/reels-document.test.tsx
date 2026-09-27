@@ -468,6 +468,20 @@ describe('ReelsDocument — canvas actions', () => {
     expect(screen.getByTestId('reels-action-scatters')).toBeDisabled();
   });
 
+  // Fix round 1: `anticipation1` present with an EMPTY config — no
+  // `enabled` key at all — is exactly what `e8-base` composes the row
+  // with (its own schema default is `false`, and the bundle's comment
+  // says so: "composed but OFF"). The gate used to read `enabled !==
+  // false`, so an absent key (`undefined !== false`) came out enabled —
+  // the opposite of the row's own stated default. Caught end to end in
+  // `reels.spec.ts` against the real `first-slot` project, which is
+  // exactly this shape (no patch touches `anticipation1` at all).
+  it('reels-action-scatters is disabled with anticipation1 present but its config empty (the row default)', async () => {
+    const { ctx } = await harness([row('reels1'), row('anticipation1', {})]);
+    renderDocument(ctx);
+    expect(screen.getByTestId('reels-action-scatters')).toBeDisabled();
+  });
+
   it('reels-action-tumble exists only with cascade1', async () => {
     const { ctx, setRows } = await harness([row('reels1')]);
     renderDocument(ctx);

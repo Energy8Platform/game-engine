@@ -442,7 +442,8 @@ function bootReels(board?: unknown, gameRows?: unknown, symbols?: unknown) {
   };
   const ready = () => vi.waitFor(() => expect(events().some((e) => e.event === 'ready')).toBe(true));
   const frame = () => (app.ticker.add.mock.calls[0][0] as () => void)();
-  return { ctx, app, scenes, fiber, events, call, ready, frame };
+  const edit = () => (window as unknown as { __e8edit: Pick<plugin.SceneEdit, 'emitted' | 'snapshot'> }).__e8edit;
+  return { ctx, app, scenes, fiber, events, call, ready, frame, edit };
 }
 
 describe('reels mode', () => {
@@ -471,6 +472,26 @@ describe('reels mode', () => {
     expect(box.position.y).toBeCloseTo(144 - (300 / 2) * s, 5);
     const snap = (await call('snapshot')).result;
     expect(snap).toEqual({ mode: 'reels', cols: 5, rows: [3, 3, 3, 3, 3], fitted: { w: s * 500, h: s * 300 }, busy: false });
+  });
+
+  // Fix round 1: `bootReels` registered `snapshot`/`rows`/the lab actions on
+  // the wire but never installed `window.__e8edit` — symbol mode and scene
+  // mode both do (see their own tests just above/below this describe
+  // block), and a browser e2e reading the canvas's OWN state independently
+  // of the `ReelsDocument`'s wire calls needs the same hook reels mode was
+  // missing. Same pair of assertions as symbol mode's own
+  // "`__e8edit` exposes emitted…" test, plus scene mode's own
+  // "disposing the fiber tears everything down" — one row of coverage per
+  // sibling mode, not a new shape of test.
+  it('__e8edit exposes emitted (ready included) and snapshot matching the wire; gone after dispose', async () => {
+    const board = fakeBoard();
+    const { call, ready, edit, fiber } = bootReels(board);
+    await ready();
+    expect(edit().emitted().some((e) => e.event === 'ready')).toBe(true);
+    const wireSnap = (await call('snapshot')).result;
+    expect(edit().snapshot()).toEqual(wireSnap);
+    await fiber.dispose();
+    expect((window as unknown as { __e8edit?: unknown }).__e8edit).toBeUndefined();
   });
 
   it('a new board (the old provider disposed, a second provided) replaces the mounted view — the old one only removed, not destroyed', async () => {

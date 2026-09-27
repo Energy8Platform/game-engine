@@ -84,14 +84,31 @@ export interface SymbolSnapshot {
   screen: { w: number; h: number };
 }
 
+/**
+ * What reels mode's `snapshot` answers instead — no nodes, the project's
+ * board alone. `rows` is per-reel row counts (`rowsPerReel` when the grid
+ * sets it, else `cols` copies of the uniform `rows`); `fitted` is the
+ * board's current on-screen size (its measured local bounds times the
+ * fit's own scale); `busy` mirrors the lab's own serial gate (Task 4) —
+ * true for the duration of whichever `spin`/`scatters`/`win`/`tumble` is
+ * in flight.
+ */
+export interface ReelsSnapshot {
+  mode: 'reels';
+  cols: number;
+  rows: number[];
+  fitted: { w: number; h: number };
+  busy: boolean;
+}
+
 /** Which layer of the document an edit lands in: the node's own props (`null`), or `portrait.nodes[<id>]` while the safe rect is portrait (spec §7). */
 export type Variant = 'portrait' | null;
 /** The `edit` event's payload: `x`/`y` are OFFSETS from the pin point when the node's merged props carry a `pin`. */
 export interface EditPayload { node: string; props: Record<string, number>; variant: Variant }
 
-/** `window.__e8edit` on the editor page — test hooks, like `__e8` on the game page. Symbol mode exposes only `emitted`/`snapshot`/`frameOf` (no node to `select`, no `grid`, nothing to `pickAndSelect`). */
+/** `window.__e8edit` on the editor page — test hooks, like `__e8` on the game page. Symbol mode exposes only `emitted`/`snapshot`/`frameOf` (no node to `select`, no `grid`, nothing to `pickAndSelect`); reels mode exposes only `emitted`/`snapshot` (nothing to pick, nothing frame-animated at this level). */
 export interface SceneEdit {
-  snapshot(): Snapshot | SymbolSnapshot;
+  snapshot(): Snapshot | SymbolSnapshot | ReelsSnapshot;
   select(node: string | null): void;
   grid(on: boolean, step: number): void;
   /** Screen coords — what a `pointerdown` on the stage does. */
@@ -610,10 +627,19 @@ export function apply(ctx: Context, config: SceneEditConfig): void {
       );
       return { results };
     });
-    wire.handle('snapshot', () => {
+    const snapshot = (): ReelsSnapshot => {
       const { cols, rows } = shapeOf(currentBoard());
       return { mode: 'reels', cols, rows, fitted: { w: laid.bw * box.scale.x, h: laid.bh * box.scale.y }, busy };
-    });
+    };
+    wire.handle('snapshot', () => snapshot());
+    // Same test-hook slot symbol/scene mode install (`emitted`/`snapshot`
+    // only — no node to `select`, no `frameOf`): a browser e2e reads
+    // `emitted()` for `ready` and `snapshot()` for the live board shape,
+    // independently of the `rows`/`spin`/… wire calls the real
+    // `ReelsDocument` drives it with.
+    const winHook = window as unknown as { __e8edit?: Pick<SceneEdit, 'emitted' | 'snapshot'> };
+    winHook.__e8edit = { emitted: () => [...emitted], snapshot };
+    ctx.effect(() => () => { if (winHook.__e8edit?.snapshot === snapshot) delete winHook.__e8edit; }, 'scene-edit:reels-hook');
     emit('ready', { reels: true });
   }
 
