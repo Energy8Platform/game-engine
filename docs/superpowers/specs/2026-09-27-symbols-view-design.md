@@ -72,7 +72,9 @@ Above the canvas (a row, never clipped):
 - on the right, `cell <w>×<h>` (the board's cell size, from `snapshot`);
 - `fit` / `1:1` / `2×` (a segmented control; the choice is per-viewer in
   `localStorage['e8.symbols-zoom']`, try/catch, default `fit`);
-- `▶ Play` — replays the selected state (the existing `symbol` call).
+- `▶ Play` — replays the selected state (the existing `symbol` call);
+  disabled when nothing is selected or the state is absent (amended by the
+  final review).
 
 ## 4. What a symbol is, on the screen
 
@@ -88,6 +90,9 @@ Above the canvas (a row, never clipped):
   - "pick a symbol on the left".
 - **A state the symbol has not got** (selected chip empty): the canvas says
   `no <state> yet — drop a file on the chip, or Create in Properties`.
+- **A selection that no longer exists** (amended while running): a symbol
+  removed by another tab clears the selection and the help shows; a named
+  state removed falls back to the symbol's `static`.
 
 ## 5. Properties, grouped
 
@@ -102,7 +107,12 @@ Above the canvas (a row, never clipped):
 
 `width`, `height`, `visible`, `anchor`, `anchorX`, `anchorY`, `mask`, `pin`
 are not shown for a symbol (an existing value in the YAML is kept — the
-form only hides the fields; a write keeps every prop it did not touch). A
+form only hides the fields; a write keeps every prop it did not touch).
+Amended while running: a write applies only the keys the form changed onto
+the state's props as they stand in the document at the write's turn, so a
+State edit and an Adjust edit in flight together both land; a type's own
+field of an Adjust name (`scale`) is shown in State only; `x`/`y` carry
+the offset hint (`offset x, design px`). A
 named state keeps its `Remove state` button; an absent state keeps
 `Create <state>`.
 
@@ -116,6 +126,11 @@ named state keeps its `Remove state` button; an absent state keeps
 - Every SchemaForm (composition rows, scene properties, flow properties,
   symbols) gets it; e2e that find a field by its description text move to
   the key.
+- Amended by the final review: the hint sits under the control (after the
+  `restart` badge, spanning the control's column in the composition's
+  3-column grid); a group's hint sits inside its fieldset under the
+  legend; field ids are sanitised (a row id with a space still ties its
+  hints).
 
 ## 7. Tests
 
