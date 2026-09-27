@@ -1,21 +1,37 @@
 import { act, fireEvent, screen, waitFor, within } from '@testing-library/react';
 import { describe, expect, it } from 'vitest';
-import type { SymbolsDoc } from '@energy8engine/contracts';
-import { accept, boot, harness, KNOWN, renderSide, TWO } from './symbols-harness';
+import Schema from 'schemastery';
+import type { NodeTypeInfo, SymbolsDoc } from '@energy8engine/contracts';
+import {
+  accept,
+  boot,
+  FILES,
+  harness,
+  KNOWN,
+  renderSide,
+  TWO,
+  TYPES,
+  type Route,
+} from './symbols-harness';
 
 /**
  * The symbol inspector, rendered through the plugin's own `shell.sideRight`
  * registration (key `symbols`). Every edit is asserted as the `{ doc }`
- * PUT body that went out.
+ * PUT body that went out. `types` overrides the harness's default node
+ * types, for the one test that needs a type with its own `scale` prop.
  */
-async function booted(routes: Parameters<typeof harness>[0] = {}, doc: SymbolsDoc = TWO) {
+async function booted(
+  routes: Parameters<typeof harness>[0] = {},
+  doc: SymbolsDoc = TWO,
+  opts: { types?: readonly NodeTypeInfo[] } = {},
+) {
   const h = await harness(
     {
       'GET /api/symbols': boot({ doc, known: KNOWN, diagnostics: [] }),
       'PUT /api/symbols': accept,
       ...routes,
     },
-    { scenes: [{ id: 'base_game', nodes: [{ id: 'logo', type: 'image', props: {} }] }] },
+    { scenes: [{ id: 'base_game', nodes: [{ id: 'logo', type: 'image', props: {} }] }], ...opts },
   );
   await waitFor(() => expect(h.ctx.symbols.doc()).toEqual(doc));
   const docs = () => h.puts().map((b) => (b as { doc: SymbolsDoc }).doc);
@@ -263,5 +279,95 @@ describe('SymbolsProperties', () => {
     expect(
       within(screen.getByTestId('symbol-props-state')).getByTestId('prop-state-create'),
     ).toBeTruthy();
+  });
+
+  it("a State write and an Adjust write in flight together both land — the second doesn't clobber the first", async () => {
+    const doc: SymbolsDoc = {
+      version: 1,
+      symbols: [
+        {
+          ...TWO.symbols[0],
+          static: { type: 'image', props: { src: 'assets/1.png', mask: true } },
+        },
+        TWO.symbols[1],
+      ],
+    };
+    // The first PUT is held open until `release()` — the second write
+    // (below) is fired while it is still in flight and Body has not
+    // re-rendered, so both forms still show the doc's ORIGINAL props.
+    let release!: () => void;
+    const held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    let calls = 0;
+    const putRoute: Route = async (body) => {
+      calls += 1;
+      if (calls === 1) await held;
+      return accept(body);
+    };
+    const { ctx, docs } = await booted(
+      {
+        'PUT /api/symbols': putRoute,
+        // A second .png so `src` has another value to pick — the fixture's
+        // default `FILES` carries only the one already selected.
+        'GET /api/files': () => ({
+          body: {
+            entries: [...FILES, { path: 'assets/2.png', kind: 'file', size: 1 }],
+            diagnostics: [],
+          },
+        }),
+      },
+      doc,
+    );
+    act(() => ctx.symbols.select({ id: '1', state: 'static' }));
+    renderSide(ctx);
+
+    // `src` (State): an asset field is a <select>, its change commits at
+    // once — but only once the picker's own `GET /api/files` has resolved
+    // and the new option is actually there to select.
+    const src = screen.getByLabelText('src', { exact: true }) as HTMLSelectElement;
+    await waitFor(() => expect([...src.options].map((o) => o.value)).toContain('assets/2.png'));
+    fireEvent.change(src, { target: { value: 'assets/2.png' } });
+    // `scale` (Adjust): committed before the `src` PUT has answered.
+    const scale = screen.getByLabelText('scale', { exact: true }) as HTMLInputElement;
+    fireEvent.change(scale, { target: { value: '2' } });
+    fireEvent.blur(scale);
+
+    release();
+    await waitFor(() => expect(docs()).toHaveLength(2));
+    expect(docs()[1].symbols[0].static).toEqual({
+      type: 'image',
+      props: { src: 'assets/2.png', mask: true, scale: 2 },
+    });
+  });
+
+  it("a type's own field of the same name wins over Adjust's — drawn once, in State, not twice", async () => {
+    const types = TYPES.map((t) =>
+      t.type !== 'image'
+        ? t
+        : {
+            ...t,
+            schema: JSON.parse(
+              JSON.stringify(
+                Schema.object({
+                  src: Schema.string().required().extra('asset', ['png']).description('image file'),
+                  scale: Schema.number().default(1).description("the type's own scale"),
+                }),
+              ),
+            ),
+          },
+    );
+    const { ctx } = await booted({}, TWO, { types });
+    act(() => ctx.symbols.select({ id: '1', state: 'static' }));
+    renderSide(ctx);
+    expect(screen.getAllByLabelText('scale', { exact: true })).toHaveLength(1);
+    expect(
+      within(screen.getByTestId('symbol-props-state')).getByLabelText('scale', { exact: true }),
+    ).toBeTruthy();
+    expect(
+      within(screen.getByTestId('symbol-props-adjust')).queryByLabelText('scale', {
+        exact: true,
+      }),
+    ).toBeNull();
   });
 });
