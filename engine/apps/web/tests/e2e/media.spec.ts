@@ -117,11 +117,11 @@ test('Properties: fps a number, sheet a select of .json files; a dropped .json i
 
   // The type's own fields arrive with the game's `node-types` report
   // (until then the form is the common props alone), labelled by their
-  // schema descriptions — `engine/game/node-media/src/spritesheet.ts`.
-  const fps = right.getByLabel('frames per second');
+  // schema KEY — `engine/game/node-media/src/spritesheet.ts`.
+  const fps = right.getByLabel('fps');
   await expect(fps).toHaveValue('8', { timeout: 10_000 });
   await expect(fps).toHaveAttribute('type', 'number');
-  const sheet = right.getByLabel('spritesheet JSON, project-relative');
+  const sheet = right.getByLabel('sheet');
   await expect(sheet).toHaveJSProperty('tagName', 'SELECT');
   await expect(sheet).toHaveValue('assets/coin.json');
   await expect(sheet.locator('option[value="assets/coin.json"]')).toHaveCount(1);

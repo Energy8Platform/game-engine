@@ -64,10 +64,18 @@ export interface FieldProps {
   commit: CommitMode;
   /** For a control with no `<label for>` of its own — a string item in an array. */
   ariaLabel?: string;
+  /** The id of this field's hint `<p>` (`ObjectFields`), tied to the control with `aria-describedby`. */
+  describedBy?: string;
 }
 
+/** A field's label is the key as written in the YAML — never the description (that's `hint`, a muted line under the control). */
 export function label(node: SchemaNode, key: string): string {
-  return node.meta?.description ?? key;
+  return key;
+}
+
+/** The field's description, rendered as a hint under its control — `undefined` when it has none, so nothing renders. */
+export function hint(node: SchemaNode): string | undefined {
+  return node.meta?.description || undefined;
 }
 
 export function needsRestart(node: SchemaNode): boolean {
@@ -114,6 +122,7 @@ export function ObjectFields({
       {fields.map(([key, child]) => {
         const id = `${idPrefix}-${key}`;
         const nested = child.type === 'object' && child.dict;
+        const described = hint(child) ? `${id}-hint` : undefined;
         const control = (
           <Field
             id={id}
@@ -121,6 +130,7 @@ export function ObjectFields({
             value={value[key]}
             onChange={(next) => onChange({ ...value, [key]: next })}
             commit={commit}
+            describedBy={described}
           />
         );
         // A nested object, a dict or an array is a group of its own fields,
@@ -129,7 +139,7 @@ export function ObjectFields({
         return (
           <div className="e8-field" key={key}>
             {nested || child.type === 'dict' || child.type === 'array' ? (
-              <fieldset className="e8-field-group" id={id}>
+              <fieldset className="e8-field-group" id={id} aria-describedby={described}>
                 <legend>{label(child, key)}</legend>
                 {control}
               </fieldset>
@@ -139,6 +149,11 @@ export function ObjectFields({
                 {control}
               </>
             )}
+            {described ? (
+              <p className="e8-field-hint" id={described}>
+                {hint(child)}
+              </p>
+            ) : null}
             {/* This badge reflects what the plugin declared via
                 `extra: { applies: 'restart' }` — not a difference in host
                 behaviour: the host decides `reload` from the row's `hot`
@@ -151,7 +166,7 @@ export function ObjectFields({
   );
 }
 
-export function Field({ id, node, value, onChange, commit, ariaLabel }: FieldProps) {
+export function Field({ id, node, value, onChange, commit, ariaLabel, describedBy }: FieldProps) {
   const current = value ?? node.meta?.default;
 
   if (node.type === 'object' && node.dict) {
@@ -185,6 +200,7 @@ export function Field({ id, node, value, onChange, commit, ariaLabel }: FieldPro
     return (
       <select
         id={id}
+        aria-describedby={describedBy}
         value={String(current ?? '')}
         onChange={(e: ChangeEvent<HTMLSelectElement>) => onChange(e.target.value)}
       >
@@ -198,13 +214,23 @@ export function Field({ id, node, value, onChange, commit, ariaLabel }: FieldPro
   }
 
   if (node.type === 'number') {
-    return <NumberField id={id} node={node} value={value} onChange={onChange} commit={commit} />;
+    return (
+      <NumberField
+        id={id}
+        node={node}
+        value={value}
+        onChange={onChange}
+        commit={commit}
+        describedBy={describedBy}
+      />
+    );
   }
 
   if (node.type === 'boolean') {
     return (
       <input
         id={id}
+        aria-describedby={describedBy}
         type="checkbox"
         checked={current === true}
         onChange={(e: ChangeEvent<HTMLInputElement>) => onChange(e.target.checked)}
@@ -221,6 +247,7 @@ export function Field({ id, node, value, onChange, commit, ariaLabel }: FieldPro
         onChange={onChange}
         commit={commit}
         ariaLabel={ariaLabel}
+        describedBy={describedBy}
       />
     );
   }
@@ -229,7 +256,7 @@ export function Field({ id, node, value, onChange, commit, ariaLabel }: FieldPro
   // …). Rendering it editable would let a keystroke silently replace
   // a structured value with a plain string — read-only-and-labelled is the
   // honest gap; a later task can upgrade it to a real editor.
-  return <UnsupportedField id={id} node={node} value={current} />;
+  return <UnsupportedField id={id} node={node} value={current} describedBy={describedBy} />;
 }
 
 /**
@@ -316,7 +343,7 @@ function useDraft<T>({
   };
 }
 
-function NumberField({ id, node, value, onChange, commit }: FieldProps) {
+function NumberField({ id, node, value, onChange, commit, describedBy }: FieldProps) {
   const draft = useDraft<number | undefined>({
     dep: value,
     current: (value ?? node.meta?.default) as number | undefined,
@@ -332,6 +359,7 @@ function NumberField({ id, node, value, onChange, commit }: FieldProps) {
   return (
     <input
       id={id}
+      aria-describedby={describedBy}
       type="number"
       value={draft.raw}
       min={node.meta?.min}
@@ -345,7 +373,7 @@ function NumberField({ id, node, value, onChange, commit }: FieldProps) {
   );
 }
 
-function StringField({ id, node, value, onChange, commit, ariaLabel }: FieldProps) {
+function StringField({ id, node, value, onChange, commit, ariaLabel, describedBy }: FieldProps) {
   const current = value ?? node.meta?.default;
   const pickers = useContext(Pickers);
   const { pick, asset } = node.meta ?? {};
@@ -364,6 +392,7 @@ function StringField({ id, node, value, onChange, commit, ariaLabel }: FieldProp
       <select
         id={id}
         aria-label={ariaLabel}
+        aria-describedby={describedBy}
         value={text}
         onChange={(e: ChangeEvent<HTMLSelectElement>) => onChange(e.target.value)}
       >
@@ -375,10 +404,10 @@ function StringField({ id, node, value, onChange, commit, ariaLabel }: FieldProp
       </select>
     );
   }
-  return <TextField {...{ id, node, value, onChange, commit, ariaLabel }} />;
+  return <TextField {...{ id, node, value, onChange, commit, ariaLabel, describedBy }} />;
 }
 
-function TextField({ id, node, value, onChange, commit, ariaLabel }: FieldProps) {
+function TextField({ id, node, value, onChange, commit, ariaLabel, describedBy }: FieldProps) {
   const current = value ?? node.meta?.default;
   const draft = useDraft<string>({
     dep: value,
@@ -393,6 +422,7 @@ function TextField({ id, node, value, onChange, commit, ariaLabel }: FieldProps)
       id={id}
       type="text"
       aria-label={ariaLabel}
+      aria-describedby={describedBy}
       value={draft.raw}
       onFocus={draft.onFocus}
       onChange={draft.onChange}
@@ -776,12 +806,29 @@ function DictObjectField({ id, node, value, onChange, commit }: FieldProps) {
 }
 
 /** Read-only stand-in for a field kind the form does not know how to edit. */
-function UnsupportedField({ id, node, value }: { id: string; node: SchemaNode; value: unknown }) {
+function UnsupportedField({
+  id,
+  node,
+  value,
+  describedBy,
+}: {
+  id: string;
+  node: SchemaNode;
+  value: unknown;
+  describedBy?: string;
+}) {
   const display =
     value === undefined ? '' : typeof value === 'object' ? JSON.stringify(value) : String(value);
   return (
     <span className="e8-unsupported">
-      <input id={id} type="text" value={display} readOnly aria-readonly="true" />
+      <input
+        id={id}
+        aria-describedby={describedBy}
+        type="text"
+        value={display}
+        readOnly
+        aria-readonly="true"
+      />
       <em className="e8-unsupported-note"> unsupported ({node.type})</em>
     </span>
   );

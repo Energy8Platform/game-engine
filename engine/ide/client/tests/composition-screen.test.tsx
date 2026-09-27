@@ -98,7 +98,7 @@ describe('CompositionScreen', () => {
         diagnostics: [],
       },
     });
-    fireEvent.change(screen.getByLabelText('reel speed'), { target: { value: '3' } });
+    fireEvent.change(screen.getByLabelText('speed'), { target: { value: '3' } });
     expect(JSON.parse(sent[0])).toEqual({ type: 'update', id: 'a:probe1', config: { speed: 3 } });
   });
 
@@ -258,7 +258,7 @@ describe('CompositionScreen — game rows', () => {
         ]}
       />,
     );
-    expect(screen.getByLabelText('canvas width, px')).toHaveValue(1280);
+    expect(screen.getByLabelText('width')).toHaveValue(1280);
     expect(screen.getByTestId('row-boot1').querySelector('input')).toBeNull();
     expect(screen.getByTestId('row-boot1')).toHaveTextContent('e8-base');
   });
@@ -273,7 +273,7 @@ describe('CompositionScreen — game rows', () => {
     );
     const badges = screen.getAllByText('restart');
     expect(badges).toHaveLength(1);
-    expect(badges[0].parentElement).toContainElement(screen.getByLabelText('canvas width, px'));
+    expect(badges[0].parentElement).toContainElement(screen.getByLabelText('width'));
   });
 
   it('a cold row wears a cold badge; a hot one does not', async () => {
@@ -305,7 +305,7 @@ describe('CompositionScreen — game rows', () => {
         rows={[gameRow({ id: 'renderer1', schema: RENDERER_SCHEMA, config: { width: 1280 } })]}
       />,
     );
-    const width = screen.getByLabelText('canvas width, px');
+    const width = screen.getByLabelText('width');
     // Three keystrokes, one PUT: a game row commits on blur (review ruling 2).
     for (const text of ['5', '50', '500']) fireEvent.change(width, { target: { value: text } });
     expect(puts).toHaveLength(0);

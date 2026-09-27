@@ -48,7 +48,7 @@ test('a field the plugin declared restart-requiring shows the restart badge', as
 
 test('turning a knob lands on disk', async ({ page }) => {
   await page.goto('/');
-  await page.getByLabel('reel speed').fill('5');
+  await page.getByLabel('speed').fill('5');
   await expect
     .poll(() => readFileSync(COMPOSITION, 'utf8'), { timeout: 10_000 })
     .toContain('speed: 5');

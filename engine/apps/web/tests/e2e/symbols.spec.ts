@@ -201,7 +201,8 @@ test('the Preview draws a symbol sprite after a spin, and Properties shows src a
   await page.getByTestId('symbol-chip-1-static').click();
   const right = page.getByTestId('side-right-symbols');
   await expect(right.getByTestId('prop-state-type')).toHaveValue('image');
-  const src = right.getByLabel('image path, project-relative');
+  // `exact`: `src` is a substring of the same schema's `srcKey`.
+  const src = right.getByLabel('src', { exact: true });
   await expect(src).toHaveJSProperty('tagName', 'SELECT');
   await expect(src).toHaveValue('assets/symbols/1.png');
 });

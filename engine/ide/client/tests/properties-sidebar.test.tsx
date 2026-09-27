@@ -142,12 +142,12 @@ describe('PropertiesSidebar', () => {
     renderSide(ctx);
     expect((screen.getByTestId('prop-id') as HTMLInputElement).value).toBe('logo');
     expect(screen.getByTestId('prop-type')).toHaveTextContent('image');
-    expect((screen.getByLabelText('x, design px') as HTMLInputElement).value).toBe('10');
+    expect((screen.getByLabelText('x') as HTMLInputElement).value).toBe('10');
     expect((screen.getByLabelText('src') as HTMLInputElement).value).toBe('logo.png');
 
     // A PUT re-reads and revalidates the whole project: typing is a draft,
     // blur (or Enter) is the one write.
-    const x = screen.getByLabelText('x, design px');
+    const x = screen.getByLabelText('x');
     fireEvent.change(x, { target: { value: '2' } });
     fireEvent.change(x, { target: { value: '25' } });
     expect(puts()).toHaveLength(0);
@@ -166,17 +166,10 @@ describe('PropertiesSidebar', () => {
     const { ctx, puts } = await harness();
     act(() => ctx.scenes.select({ scene: 'base_game', node: 'logo' }));
     renderSide(ctx);
-    for (const label of [
-      'width, design px',
-      'height, design px',
-      '#rrggbb, where the view has a tint',
-      'overrides anchor on x',
-      'overrides anchor on y',
-      'masks the parent with this node',
-    ])
+    for (const label of ['width', 'height', 'tint', 'anchorX', 'anchorY', 'mask'])
       expect(screen.getByLabelText(label)).toBeTruthy();
 
-    const width = screen.getByLabelText('width, design px');
+    const width = screen.getByLabelText('width');
     fireEvent.change(width, { target: { value: '64' } });
     fireEvent.blur(width);
     await waitFor(() => expect(puts()).toHaveLength(1));
@@ -283,7 +276,7 @@ describe('PropertiesSidebar', () => {
     });
     act(() => ctx.scenes.select({ scene: 'base_game', node: 'logo' }));
     renderSide(ctx);
-    const src = screen.getByLabelText('image') as HTMLSelectElement;
+    const src = screen.getByLabelText('src') as HTMLSelectElement;
     expect(src.tagName).toBe('SELECT');
     await waitFor(() =>
       expect([...src.options].map((o) => o.value)).toEqual([
@@ -332,7 +325,7 @@ describe('PropertiesSidebar', () => {
     });
     act(() => ctx.scenes.select({ scene: 'base_game', node: 'title' }));
     renderSide(ctx);
-    const follow = screen.getByLabelText('node to follow') as HTMLSelectElement;
+    const follow = screen.getByLabelText('follow') as HTMLSelectElement;
     expect(follow.tagName).toBe('SELECT');
     expect([...follow.options].map((o) => o.value)).toEqual([
       '',
@@ -359,7 +352,7 @@ describe('PropertiesSidebar', () => {
     act(() => ctx.scenes.select({ scene: 'base_game', node: 'title' }));
     renderSide(ctx);
     expect(screen.getByTestId('prop-variant')).toHaveTextContent('portrait');
-    const x = screen.getByLabelText('x, design px');
+    const x = screen.getByLabelText('x');
     fireEvent.change(x, { target: { value: '25' } });
     fireEvent.blur(x);
     await waitFor(() => expect(puts()).toHaveLength(1));
@@ -367,7 +360,7 @@ describe('PropertiesSidebar', () => {
     expect(puts()[0].portrait).toEqual({ nodes: { title: { x: 25 } } });
     // The answer shows through: the form's x is the override's, its src still the node's.
     await waitFor(() =>
-      expect((screen.getByLabelText('x, design px') as HTMLInputElement).value).toBe('25'),
+      expect((screen.getByLabelText('x') as HTMLInputElement).value).toBe('25'),
     );
     expect((screen.getByLabelText('src') as HTMLInputElement).value).toBe('title.png');
     // A second edit merges into the same entry.
@@ -391,7 +384,7 @@ describe('PropertiesSidebar', () => {
     act(() => ctx.scenes.select({ scene: 'base_game', node: 'title' }));
     renderSide(ctx);
     expect(screen.queryByTestId('prop-variant')).toBeNull();
-    const x = screen.getByLabelText('x, design px');
+    const x = screen.getByLabelText('x');
     fireEvent.change(x, { target: { value: '25' } });
     fireEvent.blur(x);
     await waitFor(() => expect(puts()).toHaveLength(1));
@@ -423,7 +416,7 @@ describe('PropertiesSidebar', () => {
     act(() => ctx.scenes.select({ scene: 'base_game', node: 'logo' }));
     renderSide(ctx);
     expect(screen.queryByTestId('prop-variant')).toBeNull();
-    const x = screen.getByLabelText('x, design px');
+    const x = screen.getByLabelText('x');
     fireEvent.change(x, { target: { value: '25' } });
     fireEvent.blur(x);
     await waitFor(() => expect(puts()).toHaveLength(1));
@@ -431,11 +424,13 @@ describe('PropertiesSidebar', () => {
     expect(puts()[0].nodes[0].children?.[0].props).toEqual({ src: 'logo.png', x: 25 });
   });
 
-  it("pin is a select of the nine points (and ''); with a pin set, x/y are labelled as offsets — the override's pin counts", async () => {
+  it("pin is a select of the nine points (and ''); with a pin set, x/y's hint switches to offsets — the override's pin counts", async () => {
+    // `x`/`y` are labelled by their KEY regardless of `pin` (Task 2) — what
+    // `OFFSETS` swaps is the DESCRIPTION, now the hint under the control.
     const { ctx, puts } = await harness();
     act(() => ctx.scenes.select({ scene: 'base_game', node: 'title' }));
     renderSide(ctx);
-    const pin = screen.getByLabelText(/anchors x\/y to this point/) as HTMLSelectElement;
+    const pin = screen.getByLabelText('pin') as HTMLSelectElement;
     expect(pin.tagName).toBe('SELECT');
     expect([...pin.options].map((o) => o.value)).toEqual([
       '',
@@ -449,28 +444,28 @@ describe('PropertiesSidebar', () => {
       'bottom',
       'bottom-right',
     ]);
-    expect(screen.getByLabelText('x, design px')).toBeTruthy();
-    expect(screen.queryByLabelText('offset x, design px')).toBeNull();
+    expect(screen.getByLabelText('x')).toHaveAccessibleDescription('x, design px');
     fireEvent.change(pin, { target: { value: 'bottom-right' } });
     await waitFor(() => expect(puts()).toHaveLength(1));
     expect(puts()[0].nodes[1].props).toEqual({ src: 'title.png', pin: 'bottom-right' });
-    await waitFor(() => expect(screen.getByLabelText('offset x, design px')).toBeTruthy());
-    expect(screen.getByLabelText('offset y, design px')).toBeTruthy();
-    expect(screen.queryByLabelText('x, design px')).toBeNull();
+    await waitFor(() =>
+      expect(screen.getByLabelText('x')).toHaveAccessibleDescription('offset x, design px'),
+    );
+    expect(screen.getByLabelText('y')).toHaveAccessibleDescription('offset y, design px');
     // Back to absolute, then a portrait override pinning it: the merged value decides.
-    fireEvent.change(screen.getByLabelText(/anchors x\/y to this point/), {
-      target: { value: '' },
-    });
+    fireEvent.change(screen.getByLabelText('pin'), { target: { value: '' } });
     await waitFor(() => expect(puts()).toHaveLength(2));
-    await waitFor(() => expect(screen.getByLabelText('x, design px')).toBeTruthy());
+    await waitFor(() =>
+      expect(screen.getByLabelText('x')).toHaveAccessibleDescription('x, design px'),
+    );
     act(() => ctx.scenes.setVariant('base_game', 'portrait'));
-    fireEvent.change(screen.getByLabelText(/anchors x\/y to this point/), {
-      target: { value: 'top' },
-    });
+    fireEvent.change(screen.getByLabelText('pin'), { target: { value: 'top' } });
     await waitFor(() => expect(puts()).toHaveLength(3));
     expect(puts()[2].portrait).toEqual({ nodes: { title: { pin: 'top' } } });
     expect(puts()[2].nodes[1].props).toEqual({ src: 'title.png', pin: '' });
-    await waitFor(() => expect(screen.getByLabelText('offset x, design px')).toBeTruthy());
+    await waitFor(() =>
+      expect(screen.getByLabelText('x')).toHaveAccessibleDescription('offset x, design px'),
+    );
   });
 
   it('a selected node that is no longer in the document renders nothing but keeps the root', async () => {

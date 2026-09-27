@@ -189,8 +189,10 @@ test('switching base_game from classic to cascade in the IDE changes what a spin
   // — a rebind is applied in place, and the markers below prove it.
   await toComposition(page);
   await expect(page.getByText('@energy8engine/ide-bridge')).toBeVisible();
-  const mechanicField = page.getByLabel('stage mechanic');
-  const stageField = page.getByLabel('stage (empty — the single one the composition bound)');
+  // `exact`: Playwright's `getByLabel` matches substrings by default, and
+  // `stage`/`mechanic` sit on the same composition screen as other rows' fields.
+  const mechanicField = page.getByLabel('mechanic', { exact: true });
+  const stageField = page.getByLabel('stage', { exact: true });
   // Both empty, and both free text boxes rather than closed `<select>`s.
   // Which mechanics exist is what a composition registered at runtime, and
   // which stages a game has is what its math declares — so neither is an
@@ -304,7 +306,7 @@ test("under cascade the plan removes exactly what each round measured and refill
   const frame = await readyFrame(page);
   const bound = () => frame.evaluate(() => (window as any).__e8.bound('base_game'));
   await toComposition(page);
-  await page.getByLabel('stage mechanic').fill('cascade');
+  await page.getByLabel('mechanic', { exact: true }).fill('cascade');
   await previewFrame(page);
   await expect.poll(bound, { timeout: 20_000 }).toBe('cascade');
 

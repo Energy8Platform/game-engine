@@ -1175,6 +1175,12 @@ button.e8-status-item {
 .e8-field input[type='checkbox'] {
   justify-self: start;
 }
+.e8-field-hint {
+  margin: 2px 0 0;
+  color: var(--e8-fg-muted);
+  font-size: var(--e8-size-label);
+  line-height: 1.35;
+}
 .e8-unsupported-note {
   color: var(--e8-fg-muted);
   font-style: normal;

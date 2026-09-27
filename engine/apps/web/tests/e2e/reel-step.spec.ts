@@ -146,7 +146,9 @@ async function winUnder(
     // Preview back in front. The frame itself stays the same one: a
     // rebind is applied in place (`runtime.spec.ts` proves no reload).
     await page.getByTestId('activity-composition').click();
-    await page.getByLabel('stage mechanic').fill(mechanic);
+    // `exact`: Playwright's `getByLabel` matches substrings by default, and
+    // `mechanic` sits on the same composition screen as other rows' fields.
+    await page.getByLabel('mechanic', { exact: true }).fill(mechanic);
     await previewFrame(page);
     await expect.poll(bound, { timeout: 25_000 }).toBe(mechanic);
   }

@@ -157,7 +157,7 @@ describe('SchemaForm — pick', () => {
         pickers={{ scene: () => ['base_game', 'bonus'] }}
       />,
     );
-    const select = screen.getByLabelText('scene id') as HTMLSelectElement;
+    const select = screen.getByLabelText('scene') as HTMLSelectElement;
     expect(select.tagName).toBe('SELECT');
     expect([...select.options].map((o) => o.value)).toEqual(['', 'base_game', 'bonus', 'gone']);
     expect(select.value).toBe('gone');
@@ -169,7 +169,7 @@ describe('SchemaForm — pick', () => {
     render(
       <SchemaForm rowId="row" schema={pickSchema} value={{ scene: 'x' }} onChange={() => {}} />,
     );
-    const input = screen.getByLabelText('scene id') as HTMLInputElement;
+    const input = screen.getByLabelText('scene') as HTMLInputElement;
     expect(input.tagName).toBe('INPUT');
     expect(input.value).toBe('x');
   });
@@ -201,7 +201,7 @@ describe('SchemaForm — asset', () => {
       />,
     );
     expect(asset).toHaveBeenCalledWith(['png', 'jpg']);
-    const select = screen.getByLabelText('image path') as HTMLSelectElement;
+    const select = screen.getByLabelText('src') as HTMLSelectElement;
     expect(select.tagName).toBe('SELECT');
     expect([...select.options].map((o) => o.value)).toEqual([
       '',
@@ -218,22 +218,61 @@ describe('SchemaForm — asset', () => {
     render(
       <SchemaForm rowId="row" schema={assetSchema} value={{ src: 'x.png' }} onChange={() => {}} />,
     );
-    const input = screen.getByLabelText('image path') as HTMLInputElement;
+    const input = screen.getByLabelText('src') as HTMLInputElement;
     expect(input.tagName).toBe('INPUT');
     expect(input.value).toBe('x.png');
   });
 });
 
 describe('SchemaForm', () => {
-  it('labels each field with its description', () => {
+  it('labels each field by its key', () => {
     render(<SchemaForm rowId="row" schema={schema} value={{}} onChange={() => {}} />);
-    expect(screen.getByLabelText('reel speed')).toBeTruthy();
-    expect(screen.getByLabelText('game title')).toBeTruthy();
+    expect(screen.getByLabelText('speed')).toBeTruthy();
+    expect(screen.getByLabelText('title')).toBeTruthy();
+  });
+
+  it('labels a field by its key and shows the description as a hint tied to the control', () => {
+    const cellSizeSchema = JSON.parse(
+      JSON.stringify(
+        Schema.object({
+          cellSize: Schema.number().default(96).description('Square cell size.'),
+        }).toJSON(),
+      ),
+    );
+    render(<SchemaForm rowId="row" schema={cellSizeSchema} value={{}} onChange={() => {}} />);
+    const input = screen.getByLabelText('cellSize');
+    expect(input).toHaveAccessibleDescription('Square cell size.');
+    expect(screen.getByText('Square cell size.')).toHaveClass('e8-field-hint');
+  });
+
+  it('a field with no description has no hint and no aria-describedby', () => {
+    const gapSchema = JSON.parse(
+      JSON.stringify(Schema.object({ gap: Schema.number().default(6) }).toJSON()),
+    );
+    render(<SchemaForm rowId="row" schema={gapSchema} value={{}} onChange={() => {}} />);
+    const input = screen.getByLabelText('gap');
+    expect(input).not.toHaveAttribute('aria-describedby');
+    expect(document.querySelector('.e8-field-hint')).toBeNull();
+  });
+
+  it('a group field puts its key on the legend and its description as the group hint', () => {
+    const winSchema = JSON.parse(
+      JSON.stringify(
+        Schema.object({
+          win: Schema.object({ glow: Schema.boolean().default(true) }).description(
+            'win highlight',
+          ),
+        }).toJSON(),
+      ),
+    );
+    render(<SchemaForm rowId="row" schema={winSchema} value={{}} onChange={() => {}} />);
+    const group = screen.getByRole('group', { name: 'win' });
+    expect(group).toHaveAccessibleDescription('win highlight');
   });
 
   it('renders a number field with the bounds from the schema', () => {
     render(<SchemaForm rowId="row" schema={schema} value={{ speed: 8 }} onChange={() => {}} />);
-    const input = screen.getByLabelText('reel speed') as HTMLInputElement;
+    const input = screen.getByLabelText('speed') as HTMLInputElement;
     expect(input.type).toBe('number');
     expect(input.min).toBe('1');
     expect(input.max).toBe('20');
@@ -249,13 +288,13 @@ describe('SchemaForm', () => {
         onChange={onChange}
       />,
     );
-    fireEvent.change(screen.getByLabelText('reel speed'), { target: { value: '3' } });
+    fireEvent.change(screen.getByLabelText('speed'), { target: { value: '3' } });
     expect(onChange).toHaveBeenCalledWith({ speed: 3, title: 'Moon' });
   });
 
   it('renders a union as a select of its constants', () => {
     render(<SchemaForm rowId="row" schema={schema} value={{}} onChange={() => {}} />);
-    const select = screen.getByLabelText('fill direction') as HTMLSelectElement;
+    const select = screen.getByLabelText('direction') as HTMLSelectElement;
     expect([...select.options].map((o) => o.value)).toEqual(['up', 'down']);
   });
 
@@ -266,19 +305,19 @@ describe('SchemaForm', () => {
 
   it('falls back to the schema default when the value has no entry', () => {
     render(<SchemaForm rowId="row" schema={schema} value={{}} onChange={() => {}} />);
-    expect((screen.getByLabelText('reel speed') as HTMLInputElement).value).toBe('8');
+    expect((screen.getByLabelText('speed') as HTMLInputElement).value).toBe('8');
   });
 
   it('does not commit a value when a number field is cleared', () => {
     const onChange = vi.fn();
     render(<SchemaForm rowId="row" schema={schema} value={{ speed: 8 }} onChange={onChange} />);
-    fireEvent.change(screen.getByLabelText('reel speed'), { target: { value: '' } });
+    fireEvent.change(screen.getByLabelText('speed'), { target: { value: '' } });
     expect(onChange).not.toHaveBeenCalled();
   });
 
   it('lets the user retype after clearing a number field, instead of reverting to the committed value', () => {
     render(<ControlledForm initial={{ speed: 8 }} />);
-    const input = screen.getByLabelText('reel speed') as HTMLInputElement;
+    const input = screen.getByLabelText('speed') as HTMLInputElement;
     fireEvent.change(input, { target: { value: '' } });
     expect(input.value).toBe('');
     fireEvent.change(input, { target: { value: '5' } });
@@ -290,7 +329,7 @@ describe('SchemaForm', () => {
     render(
       <SchemaForm rowId="row" schema={anySchema} value={{ board: [[1]] }} onChange={onChange} />,
     );
-    const input = screen.getByLabelText('initial board') as HTMLInputElement;
+    const input = screen.getByLabelText('board') as HTMLInputElement;
     expect(input.readOnly).toBe(true);
     expect(screen.getByText(/unsupported \(any\)/)).toBeTruthy();
     fireEvent.change(input, { target: { value: 'x' } });
@@ -310,7 +349,7 @@ describe('SchemaForm', () => {
         onChange={onChange}
       />,
     );
-    const group = screen.getByRole('group', { name: 'wave envelope' });
+    const group = screen.getByRole('group', { name: 'wave' });
     expect(group).toBeTruthy();
     const input = screen.getByLabelText('amplitude') as HTMLInputElement;
     expect(input.type).toBe('number');
@@ -368,7 +407,7 @@ describe('SchemaForm', () => {
 
   it('skips a dict entry whose ref is dangling instead of throwing while rendering the rest', () => {
     render(<SchemaForm rowId="row" schema={danglingRefSchema} value={{}} onChange={() => {}} />);
-    expect(screen.getByLabelText('reel speed')).toBeTruthy();
+    expect(screen.getByLabelText('speed')).toBeTruthy();
     expect(screen.queryByLabelText('bogus')).toBeNull();
   });
 
@@ -392,7 +431,7 @@ describe('SchemaForm', () => {
       </div>,
     );
 
-    const inputs = screen.getAllByLabelText('reel speed') as HTMLInputElement[];
+    const inputs = screen.getAllByLabelText('speed') as HTMLInputElement[];
     expect(inputs).toHaveLength(2);
     expect(inputs[0].id).not.toBe(inputs[1].id);
 
@@ -411,7 +450,7 @@ describe('SchemaForm', () => {
           onChange={() => {}}
         />,
       );
-      const group = screen.getByRole('group', { name: 'stage id → mechanic id' });
+      const group = screen.getByRole('group', { name: 'stages' });
       const keys = group.querySelectorAll<HTMLInputElement>('input[data-dict="key"]');
       const values = group.querySelectorAll<HTMLInputElement>('input[data-dict="value"]');
       expect([...keys].map((k) => k.value)).toEqual(['main', 'bonus']);
@@ -591,7 +630,7 @@ describe('SchemaForm', () => {
           commit="blur"
         />,
       );
-      const input = screen.getByLabelText('reel speed') as HTMLInputElement;
+      const input = screen.getByLabelText('speed') as HTMLInputElement;
       type(input, '480');
       expect(onChange).not.toHaveBeenCalled();
       expect(input.value).toBe('480');
@@ -611,7 +650,7 @@ describe('SchemaForm', () => {
           commit="blur"
         />,
       );
-      const input = screen.getByLabelText('reel speed');
+      const input = screen.getByLabelText('speed');
       type(input, '12');
       fireEvent.blur(input);
       fireEvent.keyDown(input, { key: 'Enter' });
@@ -629,7 +668,7 @@ describe('SchemaForm', () => {
           commit="blur"
         />,
       );
-      const input = screen.getByLabelText('reel speed');
+      const input = screen.getByLabelText('speed');
       type(input, '12');
       fireEvent.keyDown(input, { key: 'Enter' });
       expect(onChange).toHaveBeenCalledTimes(1);
@@ -647,7 +686,7 @@ describe('SchemaForm', () => {
           commit="blur"
         />,
       );
-      const input = screen.getByLabelText('reel speed');
+      const input = screen.getByLabelText('speed');
       fireEvent.blur(input);
       fireEvent.change(input, { target: { value: '' } });
       fireEvent.blur(input);
@@ -665,7 +704,7 @@ describe('SchemaForm', () => {
           commit="blur"
         />,
       );
-      const input = screen.getByLabelText('game title') as HTMLInputElement;
+      const input = screen.getByLabelText('title') as HTMLInputElement;
       type(input, 'Sun');
       expect(onChange).not.toHaveBeenCalled();
       expect(input.value).toBe('Sun');
@@ -691,7 +730,7 @@ describe('SchemaForm', () => {
         />
       );
       const { rerender } = render(form(8));
-      const input = screen.getByLabelText('reel speed') as HTMLInputElement;
+      const input = screen.getByLabelText('speed') as HTMLInputElement;
       fireEvent.focus(input);
       fireEvent.change(input, { target: { value: '4' } });
       rerender(form(99));
@@ -713,7 +752,7 @@ describe('SchemaForm', () => {
         />
       );
       const { rerender } = render(form(8));
-      const input = screen.getByLabelText('reel speed') as HTMLInputElement;
+      const input = screen.getByLabelText('speed') as HTMLInputElement;
       fireEvent.focus(input);
       fireEvent.change(input, { target: { value: '99' } });
       rerender(form(99));
@@ -732,7 +771,7 @@ describe('SchemaForm', () => {
         />
       );
       const { rerender } = render(form(8));
-      const input = screen.getByLabelText('reel speed') as HTMLInputElement;
+      const input = screen.getByLabelText('speed') as HTMLInputElement;
       rerender(form(99));
       expect(input.value).toBe('99');
     });
@@ -749,7 +788,7 @@ describe('SchemaForm', () => {
         />
       );
       const { rerender } = render(form('Moon'));
-      const input = screen.getByLabelText('game title') as HTMLInputElement;
+      const input = screen.getByLabelText('title') as HTMLInputElement;
       fireEvent.focus(input);
       fireEvent.change(input, { target: { value: 'Sun' } });
       rerender(form('Mars'));
@@ -770,7 +809,7 @@ describe('SchemaForm', () => {
         />
       );
       const { rerender } = render(form(8));
-      const input = screen.getByLabelText('reel speed') as HTMLInputElement;
+      const input = screen.getByLabelText('speed') as HTMLInputElement;
       fireEvent.focus(input);
       rerender(form(99));
       fireEvent.blur(input);
@@ -788,7 +827,7 @@ describe('SchemaForm', () => {
           commit="blur"
         />,
       );
-      const input = screen.getByLabelText('reel speed');
+      const input = screen.getByLabelText('speed');
       const event = new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true });
       input.dispatchEvent(event);
       expect(event.defaultPrevented).toBe(true);
@@ -797,9 +836,9 @@ describe('SchemaForm', () => {
     it("the default stays 'change': the IDE's rows commit per keystroke", () => {
       const onChange = vi.fn();
       render(<SchemaForm rowId="row" schema={schema} value={{ speed: 8 }} onChange={onChange} />);
-      type(screen.getByLabelText('reel speed'), '48');
+      type(screen.getByLabelText('speed'), '48');
       expect(onChange).toHaveBeenCalledTimes(2);
-      type(screen.getByLabelText('game title'), 'ab');
+      type(screen.getByLabelText('title'), 'ab');
       expect(onChange).toHaveBeenCalledTimes(4);
     });
   });

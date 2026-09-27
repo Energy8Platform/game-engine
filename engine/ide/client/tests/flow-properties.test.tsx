@@ -144,11 +144,11 @@ describe('FlowProperties', () => {
     renderSide(ctx);
     expect((screen.getByTestId('prop-id') as HTMLInputElement).value).toBe('base');
     expect(screen.getByTestId('prop-kind')).toHaveTextContent('show');
-    const scene = screen.getByLabelText('scene id') as HTMLSelectElement;
+    const scene = screen.getByLabelText('scene') as HTMLSelectElement;
     expect(scene.tagName).toBe('SELECT');
     expect([...scene.options].map((o) => o.value)).toEqual(['', 'base_game', 'bonus']);
     expect(scene.value).toBe('base_game');
-    expect((screen.getByLabelText('transition id') as HTMLInputElement).tagName).toBe('INPUT');
+    expect((screen.getByLabelText('transition') as HTMLInputElement).tagName).toBe('INPUT');
     fireEvent.change(scene, { target: { value: 'bonus' } });
     await waitFor(() => expect(puts()).toHaveLength(1));
     expect(puts()[0].nodes[1]).toEqual({ ...FIVE.nodes[1], props: { scene: 'bonus' } });
@@ -161,9 +161,9 @@ describe('FlowProperties', () => {
     const { ctx, puts } = await booted({}, doc);
     act(() => ctx.flow.select('wait-1'));
     renderSide(ctx);
-    const ms = screen.getByLabelText('milliseconds') as HTMLInputElement;
+    const ms = screen.getByLabelText('ms') as HTMLInputElement;
     expect(ms.type).toBe('number');
-    expect(screen.getByLabelText('event name')).toBeTruthy();
+    expect(screen.getByLabelText('event')).toBeTruthy();
     fireEvent.change(ms, { target: { value: '500' } });
     expect(puts()).toHaveLength(0);
     fireEvent.blur(ms);
@@ -180,15 +180,13 @@ describe('FlowProperties', () => {
     act(() => h.ctx.flow.select('spin'));
     renderSide(h.ctx);
 
-    const action = screen.getByLabelText('action name: a literal, `$expr`, or a `{…}` template') as HTMLInputElement;
+    const action = screen.getByLabelText('action') as HTMLInputElement;
     expect(action.tagName).toBe('INPUT');
     expect(action.type).toBe('text');
     expect(action.readOnly).toBe(false);
     expect(action.value).toBe('spin'); // the bare node's props carry no `action` — the schema default shows
 
-    const betLevel = screen.getByLabelText(
-      'bet level (a number): a literal, `$expr`, or a `{…}` template',
-    ) as HTMLInputElement;
+    const betLevel = screen.getByLabelText('betLevel') as HTMLInputElement;
     expect(betLevel.tagName).toBe('INPUT');
     expect(betLevel.type).toBe('text');
     expect(betLevel.readOnly).toBe(false);
@@ -234,9 +232,7 @@ describe('FlowProperties', () => {
     act(() => h.ctx.flow.select('prop-1'));
     renderSide(h.ctx);
 
-    const target = screen.getByLabelText(
-      '`<scene>/<node>`: a literal, `$expr`, or a `{…}` template',
-    ) as HTMLSelectElement;
+    const target = screen.getByLabelText('target') as HTMLSelectElement;
     expect(target.tagName).toBe('SELECT');
     expect([...target.options].map((o) => o.value)).toEqual([
       '',
@@ -245,14 +241,12 @@ describe('FlowProperties', () => {
       'bonus/b',
     ]);
 
-    const propName = screen.getByLabelText('prop name') as HTMLInputElement;
+    const propName = screen.getByLabelText('prop') as HTMLInputElement;
     expect(propName.tagName).toBe('INPUT');
     expect(propName.type).toBe('text');
     expect(propName.readOnly).toBe(false);
 
-    const value = screen.getByLabelText(
-      "literal, coerced by the prop's schema type (number/boolean/string), or `$expr` / a `{…}` template",
-    ) as HTMLInputElement;
+    const value = screen.getByLabelText('value') as HTMLInputElement;
     expect(value.tagName).toBe('INPUT');
     expect(value.type).toBe('text');
     expect(value.readOnly).toBe(false);
@@ -285,7 +279,7 @@ describe('FlowProperties', () => {
     );
     act(() => ctx.flow.select('sound-1'));
     renderSide(ctx);
-    const src = screen.getByLabelText('sound file') as HTMLSelectElement;
+    const src = screen.getByLabelText('src') as HTMLSelectElement;
     expect(src.tagName).toBe('SELECT');
     await waitFor(() =>
       expect([...src.options].map((o) => o.value)).toEqual(['', 'assets/win.mp3']),
@@ -318,7 +312,7 @@ describe('FlowProperties', () => {
     await waitFor(() => expect(h.ctx.flow.doc()).toEqual(doc));
     act(() => h.ctx.flow.select('tween-1'));
     renderSide(h.ctx);
-    const target = screen.getByLabelText('target node') as HTMLSelectElement;
+    const target = screen.getByLabelText('target') as HTMLSelectElement;
     expect(target.tagName).toBe('SELECT');
     expect([...target.options].map((o) => o.value)).toEqual([
       '',
@@ -384,7 +378,7 @@ describe('FlowProperties', () => {
     });
     act(() => ctx.flow.select('base'));
     renderSide(ctx);
-    fireEvent.change(screen.getByLabelText('scene id'), { target: { value: '' } });
+    fireEvent.change(screen.getByLabelText('scene'), { target: { value: '' } });
     expect(await screen.findByTestId('prop-error')).toHaveTextContent(refusal.message);
   });
 

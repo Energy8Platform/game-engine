@@ -145,7 +145,8 @@ test('adding a node shows its properties on the right and writes the file', asyn
   await expect(right.getByTestId('prop-type')).toHaveText('container');
 
   // `commit="blur"`: the PUT goes on Enter (or blur), not per keystroke.
-  const x = right.getByLabel('x, design px');
+  // `exact`: `x` is a substring of `anchorX`/`anchorY`, also on this form.
+  const x = right.getByLabel('x', { exact: true });
   await expect(x).toHaveValue('0');
   await x.fill('12');
   await x.press('Enter');

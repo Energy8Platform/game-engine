@@ -52,14 +52,14 @@ describe('SymbolsProperties', () => {
     const type = screen.getByTestId('prop-state-type') as HTMLSelectElement;
     expect([...type.options].map((o) => o.value)).toEqual(['image', 'spritesheet']);
     expect(type.value).toBe('spritesheet');
-    const sheet = screen.getByLabelText('sheet file') as HTMLSelectElement;
+    const sheet = screen.getByLabelText('sheet') as HTMLSelectElement;
     expect(sheet.tagName).toBe('SELECT');
     await waitFor(() =>
       expect([...sheet.options].map((o) => o.value)).toEqual(['', 'assets/coin.json']),
     );
     expect((screen.getByLabelText('loop') as HTMLInputElement).checked).toBe(false);
     // The common props ride along: the wrapper applies them.
-    const x = screen.getByLabelText('x, design px') as HTMLInputElement;
+    const x = screen.getByLabelText('x') as HTMLInputElement;
     fireEvent.change(x, { target: { value: '4' } });
     fireEvent.blur(x);
     await waitFor(() => expect(docs()).toHaveLength(1));
@@ -89,7 +89,7 @@ describe('SymbolsProperties', () => {
     await waitFor(() =>
       expect((screen.getByTestId('prop-state-type') as HTMLSelectElement).value).toBe('image'),
     );
-    expect(screen.getByLabelText('image file')).toBeTruthy();
+    expect(screen.getByLabelText('src')).toBeTruthy();
   });
 
   it('a state the def has not got is a Create button that PUTs an empty image', async () => {
