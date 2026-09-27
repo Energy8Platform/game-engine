@@ -33,5 +33,7 @@ await game.ctx.plugin(sceneEdit, {
   // here because `?symbol=` (no chip picked yet) must still enter symbol
   // mode with `''`, not fall through to scene mode with `scene: ''`.
   symbol: params.has('symbol') ? params.get('symbol')! : undefined,
+  // The Reels document's canvas: `editor.html?reels=` shows the project's board alone.
+  reels: params.has('reels'),
   parentOrigin,
 });

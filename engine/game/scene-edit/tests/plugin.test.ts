@@ -299,6 +299,18 @@ describe('symbol mode', () => {
     expect(roundRect.data[4]).toBe(4); // [x, y, w, h, radius]
   });
 
+  it('a board provided AFTER boot updates the cell size and redraws the frame on the next frame (slice 40 debt: cellSize/frameStyle used to be read once, at boot)', async () => {
+    const { symbols } = fakeSymbols();
+    const { ctx, app, call, ready, frame } = bootSymbol(symbols);
+    await ready();
+    ctx.provide('board', { cellSize: { width: 120, height: 120 } });
+    frame();
+    const snap = (await call('snapshot')).result as { cell: { width: number; height: number } };
+    expect(snap.cell).toEqual({ width: 120, height: 120 });
+    const frameG = app.stage.getChildByLabel('symbol-frame', true) as Graphics;
+    expect(frameG.getLocalBounds().width).toBe(120);
+  });
+
   it('a screen resize re-lays out on the next frame: checker covers it, the cell stays centred', async () => {
     const { symbols } = fakeSymbols();
     const { app, frame, ready } = bootSymbol(symbols);
@@ -369,6 +381,124 @@ describe('symbol mode', () => {
     const snap = (await call('snapshot')).result as { screen: { w: number; h: number } };
     expect(snap.screen.w).toBeCloseTo(172.8, 3);
     expect(snap.screen.h).toBeCloseTo(115.2, 3);
+  });
+});
+
+/** A `ReelsBoard`-shaped fake: a `w×h` `Graphics` child under `view`, a 5×3 grid, and the three step methods a real board has (unused by reels mode itself — Task 4's test actions call them). */
+function fakeBoard(w = 500, h = 300) {
+  const view = new Container();
+  view.addChild(new Graphics().rect(0, 0, w, h).fill(0xffffff));
+  return {
+    view,
+    cellSize: { width: 96, height: 96 },
+    config: { grid: { cols: 5, rows: 3 } as { cols: number; rows: number; rowsPerReel?: number[] } },
+    spinTo: vi.fn(async () => {}),
+    revealWins: vi.fn(async () => {}),
+    tumble: vi.fn(async () => {}),
+  };
+}
+
+/** Same fake-wire harness as `boot()`, wired for `reels: true`. `board`/`gameRows` are `ctx.provide`d only when given. */
+function bootReels(board?: unknown, gameRows?: unknown) {
+  const ctx = new Context();
+  const app = { stage: new Container(), ticker: { add: vi.fn(), remove: vi.fn() }, canvas: document.createElement('canvas'), screen: { width: 480, height: 288 } };
+  ctx.provide('renderer', { app });
+  const nodeTypes = createNodeTypes();
+  ctx.provide('nodeTypes', nodeTypes);
+  const scenes = createScenes({ root: app.stage, design: { width: 960, height: 576 }, nodeTypes, loader, ctx });
+  ctx.provide('scenes', scenes);
+  if (board !== undefined) ctx.provide('board', board);
+  if (gameRows !== undefined) ctx.provide('gameRows', gameRows);
+  const posted: Frame[] = [];
+  let listener: ((e: { data: unknown; origin: string }) => void) | undefined;
+  let id = 0;
+  const fiber = ctx.plugin(plugin, {
+    scene: 'a', reels: true, parentOrigin: 'http://ide',
+    post: (msg: unknown) => posted.push(msg as Frame),
+    listen: (fn) => { listener = fn; return () => { listener = undefined; }; },
+  });
+  const events = () => posted.filter((m) => m.type === 'e8:ide:evt').map(({ event, payload }) => ({ event, payload }));
+  const call = async (method: string, params: unknown = {}) => {
+    const reqId = ++id;
+    listener?.({ data: { type: 'e8:ide:req', id: reqId, method, params }, origin: 'http://ide' });
+    await vi.waitFor(() => expect(posted.some((m) => m.type === 'e8:ide:res' && m.id === reqId)).toBe(true));
+    return posted.find((m) => m.type === 'e8:ide:res' && m.id === reqId)!;
+  };
+  const ready = () => vi.waitFor(() => expect(events().some((e) => e.event === 'ready')).toBe(true));
+  const frame = () => (app.ticker.add.mock.calls[0][0] as () => void)();
+  return { ctx, app, scenes, fiber, events, call, ready, frame };
+}
+
+describe('reels mode', () => {
+  it('emits ready ({ reels: true }); reels-box holds board.view; the scenes root is hidden; reels-checker covers the screen', async () => {
+    const board = fakeBoard();
+    const { app, scenes, events, ready } = bootReels(board);
+    await ready();
+    expect(events()[0]).toEqual({ event: 'ready', payload: { reels: true } });
+    expect(scenes.container.visible).toBe(false);
+    const box = app.stage.getChildByLabel('reels-box')!;
+    expect(box.children).toContain(board.view);
+    const checker = app.stage.getChildByLabel('reels-checker')!;
+    const b = checker.getBounds();
+    expect([b.minX, b.minY, b.maxX, b.maxY]).toEqual([0, 0, 480, 288]);
+  });
+
+  it('fits the board to the screen with a 24px margin, centred; snapshot reports mode/cols/rows/fitted/busy', async () => {
+    const board = fakeBoard(500, 300);
+    const { app, call, ready } = bootReels(board);
+    await ready();
+    // min((480-48)/500, (288-48)/300) = min(0.864, 0.8) = 0.8
+    const s = Math.min((480 - 48) / 500, (288 - 48) / 300);
+    const box = app.stage.getChildByLabel('reels-box')!;
+    expect(box.scale.x).toBeCloseTo(s, 5);
+    expect(box.position.x).toBeCloseTo(240 - (500 / 2) * s, 5);
+    expect(box.position.y).toBeCloseTo(144 - (300 / 2) * s, 5);
+    const snap = (await call('snapshot')).result;
+    expect(snap).toEqual({ mode: 'reels', cols: 5, rows: [3, 3, 3, 3, 3], fitted: { w: s * 500, h: s * 300 }, busy: false });
+  });
+
+  it('a new board (the old provider disposed, a second provided) replaces the mounted view — the old one only removed, not destroyed', async () => {
+    const { ctx, app, ready, frame } = bootReels();
+    const first = fakeBoard();
+    const disposeFirst = ctx.provide('board', first);
+    await ready();
+    const box = app.stage.getChildByLabel('reels-box')!;
+    expect(box.children).toContain(first.view);
+    disposeFirst();
+    const second = fakeBoard();
+    ctx.provide('board', second);
+    frame();
+    expect(box.children).toContain(second.view);
+    expect(box.children).not.toContain(first.view);
+    expect(first.view.destroyed).toBe(false); // the row's own `board.destroy()` does that, not this mode
+  });
+
+  it("rows hands each row's config to gameRows.update and reports its verdict; no gameRows answers unknown for every row", async () => {
+    const gameRows = { update: vi.fn(async () => 'updated' as const) };
+    const { call, ready } = bootReels(fakeBoard(), gameRows);
+    await ready();
+    const res = await call('rows', { rows: [{ id: 'reels1', config: { grid: { cols: 6 } } }] });
+    expect(gameRows.update).toHaveBeenCalledWith('reels1', { grid: { cols: 6 } });
+    expect(res.result).toEqual({ results: [{ id: 'reels1', result: 'updated' }] });
+
+    const { call: callNoRows, ready: readyNoRows } = bootReels(fakeBoard());
+    await readyNoRows();
+    const noGameRows = await callNoRows('rows', { rows: [{ id: 'reels1', config: {} }, { id: 'reels2', config: {} }] });
+    expect(noGameRows.result).toEqual({ results: [{ id: 'reels1', result: 'unknown' }, { id: 'reels2', result: 'unknown' }] });
+  });
+
+  it('a screen resize re-fits on the next frame', async () => {
+    const board = fakeBoard(500, 300);
+    const { app, call, frame, ready } = bootReels(board);
+    await ready();
+    app.screen.width = 960; app.screen.height = 576;
+    frame();
+    const s = Math.min((960 - 48) / 500, (576 - 48) / 300);
+    const snap = (await call('snapshot')).result as { fitted: { w: number; h: number } };
+    expect(snap.fitted.w).toBeCloseTo(s * 500, 5);
+    expect(snap.fitted.h).toBeCloseTo(s * 300, 5);
+    const checker = app.stage.getChildByLabel('reels-checker')!;
+    expect([checker.getBounds().maxX, checker.getBounds().maxY]).toEqual([960, 576]);
   });
 });
 

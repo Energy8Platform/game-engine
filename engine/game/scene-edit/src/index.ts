@@ -5,7 +5,9 @@
  * to the IDE over the `e8:ide:*` postMessage wire. It never writes a
  * file — the parent is the one writer. With `config.symbol !== undefined`
  * (an id, or `''` for none picked yet) it shows one `symbols.yml` state
- * instead — no scene, no gizmo/grid/keyboard/drop.
+ * instead — no scene, no gizmo/grid/keyboard/drop. With `config.reels ===
+ * true` it shows the project's reel board alone instead, the same
+ * no-scene shape, fitted to the screen.
  */
 import type { Context } from 'cordis';
 import { sceneRounding, type SafeArea, type SceneDoc, type SymbolsDoc, type SymbolState } from '@energy8engine/contracts';
@@ -45,6 +47,14 @@ export interface SceneEditConfig {
    * key left out entirely) is the only value that means scene mode.
    */
   symbol?: string;
+  /**
+   * Reels mode: show the project's reel board alone instead of `scene` —
+   * `scene`, the gizmo, the grid, the keyboard and the drop handler are all
+   * skipped, same as symbol mode. Checked BEFORE `symbol` in `apply`
+   * (`editor.html?reels=` sets it — the Reels document's canvas; unlike
+   * symbol mode there is no id to pick, one project has one board).
+   */
+  reels?: boolean;
 }
 
 export interface Bounds { x: number; y: number; w: number; h: number }
@@ -89,6 +99,35 @@ export interface SceneEdit {
 const isField = (t: EventTarget | null): boolean =>
   t instanceof HTMLElement && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable);
 
+/**
+ * An 8px two-tone checkerboard filling the screen — the "nothing to look
+ * at here" backdrop both symbol mode and reels mode draw under their
+ * preview. `resize` redraws only when the size actually changed: a zoom or
+ * a board swap that leaves the screen alone must not repaint it.
+ */
+function makeChecker(label: string): { graphics: Graphics; resize(w: number, h: number): void; destroy(): void } {
+  const graphics = new Graphics();
+  graphics.label = label;
+  const CHECK = 8;
+  let laid = { w: -1, h: -1 };
+  return {
+    graphics,
+    resize(w, h) {
+      if (laid.w === w && laid.h === h) return;
+      laid = { w, h };
+      graphics.clear();
+      graphics.rect(0, 0, w, h).fill({ color: 0x2a2f3a });
+      for (let y = 0; y < h; y += CHECK)
+        for (let x = (y / CHECK) % 2 === 0 ? 0 : CHECK; x < w; x += CHECK * 2)
+          graphics.rect(x, y, Math.min(CHECK, w - x), Math.min(CHECK, h - y));
+      graphics.fill({ color: 0x3a4152 });
+    },
+    destroy() {
+      graphics.destroy();
+    },
+  };
+}
+
 export function apply(ctx: Context, config: SceneEditConfig): void {
   // "an editor canvas is on this page" — the scenes runtime reads it to
   // suppress its own `ui.tap` emit (see that row's `onDown`). The editor
@@ -118,6 +157,14 @@ export function apply(ctx: Context, config: SceneEditConfig): void {
   // provides `safeArea` (the IDE's preset band, `?safeBottom=`), and a
   // resize here without it would undo that fit until the next one.
   scenes.resize(app.screen.width, app.screen.height, ctx.reflect.get('safeArea', false) as SafeArea | undefined);
+
+  // Reels mode: the project's board alone, no scene/gizmo/grid/keyboard/drop.
+  // Checked before `symbol` — a page never sets both, but the board is the
+  // one this canvas exists to show if it somehow did.
+  if (config.reels === true) {
+    bootReels();
+    return;
+  }
 
   // Symbol mode: one symbols.yml state on the canvas, nothing scene-shaped
   // armed. Gated on `!== undefined`, not truthiness: `''` is a real symbol
@@ -201,59 +248,67 @@ export function apply(ctx: Context, config: SceneEditConfig): void {
     if (!symbols) { emit('error', { message: 'no "symbols" service' }); return; }
     root.visible = false;
 
-    const board = ctx.reflect.get('board', false) as
-      | { cellSize?: { width: number; height: number }; config?: { grid?: { frameStyle?: CellFrameStyle } } }
-      | undefined;
-    const cellSize = board?.cellSize ?? { width: 96, height: 96 };
-    const frameStyle = { ...DEFAULT_CELL_FRAME_STYLE, ...(board?.config?.grid?.frameStyle ?? {}) };
+    // Read fresh every `layout()` tick, not once here: a hot `reels1`
+    // re-apply (`gameRows.update`) swaps the `board` service for a new one
+    // (a different cell size, a different frame style), and this preview
+    // has no other way to notice — it is not the one that applied `board`.
+    const boardStyle = () => {
+      const board = ctx.reflect.get('board', false) as
+        | { cellSize?: { width: number; height: number }; config?: { grid?: { frameStyle?: CellFrameStyle } } }
+        | undefined;
+      return {
+        cellSize: board?.cellSize ?? { width: 96, height: 96 },
+        frameStyle: { ...DEFAULT_CELL_FRAME_STYLE, ...(board?.config?.grid?.frameStyle ?? {}) },
+      };
+    };
+    let { cellSize, frameStyle } = boardStyle();
     type Zoom = 'fit' | '1:1' | '2x';
     const ZOOMS: readonly Zoom[] = ['fit', '1:1', '2x'];
     let zoom: Zoom = 'fit';
 
     const previewBox = new Container();
     previewBox.label = 'symbol-preview';
-    const frameG = new Graphics()
-      .roundRect(-cellSize.width / 2, -cellSize.height / 2, cellSize.width, cellSize.height, frameStyle.radius)
-      .fill({ color: frameStyle.idle.color, alpha: frameStyle.idle.alpha });
-    frameG.tint = frameStyle.idle.color; // what SymbolCell stores, read by tests
+    const frameG = new Graphics();
     frameG.label = 'symbol-frame';
     previewBox.addChild(frameG); // replaces the old outline; the view is added after it
     app.stage.addChild(previewBox);
-    const checker = new Graphics();
-    checker.label = 'symbol-checker';
-    app.stage.addChildAt(checker, 0); // under the preview box
+    const checker = makeChecker('symbol-checker');
+    app.stage.addChildAt(checker.graphics, 0); // under the preview box
     ctx.effect(() => () => {
       app.stage.removeChild(previewBox);
-      app.stage.removeChild(checker);
+      app.stage.removeChild(checker.graphics);
       previewBox.destroy({ children: true });
       checker.destroy();
       root.visible = true;
     }, 'scene-edit:symbol-preview');
 
-    const CHECK = 8;
-    const drawChecker = (w: number, h: number) => {
-      checker.clear();
-      checker.rect(0, 0, w, h).fill({ color: 0x2a2f3a });
-      for (let y = 0; y < h; y += CHECK)
-        for (let x = (y / CHECK) % 2 === 0 ? 0 : CHECK; x < w; x += CHECK * 2)
-          checker.rect(x, y, Math.min(CHECK, w - x), Math.min(CHECK, h - y));
-      checker.fill({ color: 0x3a4152 });
+    const drawFrame = () => {
+      frameG
+        .clear()
+        .roundRect(-cellSize.width / 2, -cellSize.height / 2, cellSize.width, cellSize.height, frameStyle.radius)
+        .fill({ color: frameStyle.idle.color, alpha: frameStyle.idle.alpha });
+      frameG.tint = frameStyle.idle.color; // what SymbolCell stores, read by tests
     };
     const scaleFor = (w: number, h: number) =>
       zoom === '1:1' ? 1 : zoom === '2x' ? 2
         : (Math.min(w, h) * 0.6) / Math.max(cellSize.width, cellSize.height);
     let laidOutScreen = { w: -1, h: -1 };
     let laidOutZoom = '' as string;
+    let laidOutStyle = ''; // JSON of the last drawn cellSize/frameStyle — see `boardStyle` above
     const layout = () => {
       const { width: w, height: h } = app.screen;
-      // The checkerboard only cares about the screen — a zoom change alone
-      // must not repaint it (a screen resize's own change still does).
+      checker.resize(w, h); // redraws only on a size change
       const screenChanged = laidOutScreen.w !== w || laidOutScreen.h !== h;
-      if (screenChanged) {
-        laidOutScreen = { w, h };
-        drawChecker(w, h);
+      if (screenChanged) laidOutScreen = { w, h };
+      const style = boardStyle();
+      const styleKey = JSON.stringify(style);
+      const styleChanged = styleKey !== laidOutStyle;
+      if (styleChanged) {
+        laidOutStyle = styleKey;
+        ({ cellSize, frameStyle } = style);
+        drawFrame();
       }
-      if (!screenChanged && laidOutZoom === zoom) return;
+      if (!screenChanged && !styleChanged && laidOutZoom === zoom) return;
       laidOutZoom = zoom;
       previewBox.position.set(w / 2, h / 2);
       previewBox.scale.set(scaleFor(w, h));
@@ -333,6 +388,93 @@ export function apply(ctx: Context, config: SceneEditConfig): void {
     ctx.effect(() => () => { if (winHook.__e8edit?.frameOf === frameOf) delete winHook.__e8edit; }, 'scene-edit:hook');
 
     void symbols.ready.catch(() => {}).then(() => { if (alive) emit('ready', { symbol: id }); });
+  }
+
+  /**
+   * `config.reels === true`: the project's reel board alone, fitted to the
+   * screen with a margin — same idle-canvas shape as `bootSymbol` (composed
+   * game hidden, checkerboard backdrop), but nothing to pick: what shows is
+   * whatever the `board` service (the `reels1` row's `ReelsBoard`)
+   * currently provides. Nothing else mounts `board.view` on this page — no
+   * flow runs (`editorPage: true`), no scene is shown — so this mode is the
+   * one place it reaches the screen. `currentBoard()` is read fresh every
+   * tick, not once here: a hot `reels1` re-apply (`gameRows.update`)
+   * disposes the old board and `ctx.provide`s a new one, and `layout()`
+   * follows it, swapping `box`'s child without tearing the mode down — the
+   * old view is only removed, never destroyed; its owner (the row) does
+   * that. `rows` is the one write this mode makes, and it is not a second
+   * writer: it hands each row's config straight to `gameRows.update`, the
+   * same door `ide-bridge` uses for a hot row edit from the IDE side.
+   */
+  function bootReels(): void {
+    const root = scenes.container;
+    root.visible = false;
+    const checker = makeChecker('reels-checker');
+    const box = new Container();
+    box.label = 'reels-box';
+    app.stage.addChild(checker.graphics, box);
+
+    /** The slice of `ReelsBoard` (`@energy8engine/game-reels`) this mode reads — not a dependency of this package, so declared structurally instead of imported. */
+    interface ReelsBoardLike {
+      readonly view: Container;
+      readonly config?: { grid?: { cols?: number; rows?: number; rowsPerReel?: number[] } };
+    }
+    const currentBoard = () => ctx.reflect.get('board', false) as ReelsBoardLike | undefined;
+
+    let mounted: Container | null = null;
+    const MARGIN = 24;
+    let laid = { w: -1, h: -1, view: null as Container | null, bw: -1, bh: -1 };
+    const layout = () => {
+      const board = currentBoard();
+      const view = board?.view ?? null;
+      if (view !== mounted) {
+        if (mounted && mounted.parent === box) box.removeChild(mounted);
+        mounted = view;
+        if (view) box.addChild(view);
+      }
+      const { width: w, height: h } = app.screen;
+      checker.resize(w, h); // redraws only on a size change
+      if (!view) return;
+      const b = view.getLocalBounds();
+      if (laid.w === w && laid.h === h && laid.view === view && laid.bw === b.width && laid.bh === b.height) return;
+      laid = { w, h, view, bw: b.width, bh: b.height };
+      const s = Math.min((w - 2 * MARGIN) / b.width, (h - 2 * MARGIN) / b.height);
+      box.scale.set(s);
+      box.position.set(w / 2 - (b.x + b.width / 2) * s, h / 2 - (b.y + b.height / 2) * s);
+    };
+    layout();
+    app.ticker.add(layout);
+    ctx.effect(() => () => {
+      app.ticker.remove(layout);
+      if (mounted?.parent === box) box.removeChild(mounted);
+      box.destroy();
+      checker.destroy();
+      root.visible = true;
+    }, 'scene-edit:reels');
+
+    /** The one `gameRows` method reels mode calls — see `@energy8engine/game-runtime`'s `GameRowsService`; not a dependency of this package either. */
+    interface GameRowsUpdater {
+      update(id: string, config: Record<string, unknown>): Promise<'updated' | 'unknown' | 'failed'>;
+    }
+    wire.handle('rows', async (p) => {
+      const rows = (p as { rows?: { id: string; config: Record<string, unknown> }[] })?.rows ?? [];
+      const gameRows = ctx.reflect.get('gameRows', false) as GameRowsUpdater | undefined;
+      const results = await Promise.all(
+        rows.map(async ({ id, config }) => ({
+          id,
+          result: gameRows ? await gameRows.update(id, config) : ('unknown' as const),
+        })),
+      );
+      return { results };
+    });
+    wire.handle('snapshot', () => {
+      const grid = currentBoard()?.config?.grid;
+      const cols = grid?.cols ?? 0;
+      const rows = grid?.rowsPerReel ?? Array.from({ length: cols }, () => grid?.rows ?? 0);
+      // `busy` is Task 4's (a test action in flight) — always false here.
+      return { mode: 'reels', cols, rows, fitted: { w: laid.bw * box.scale.x, h: laid.bh * box.scale.y }, busy: false };
+    });
+    emit('ready', { reels: true });
   }
 
   function boot(): void {
