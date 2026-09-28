@@ -54,9 +54,13 @@ stay where they are).
   (an override), else the active tab's `sidebar`, else nothing (the
   column collapses to 0).
 - An activity button (`opens: 'sidebar'`) sets the override to its key;
-  pressing it again while shown clears it. Activating another tab (a tab
-  click, opening a document, Back/Forward) clears it. The boot default
-  (Explorer / Projects) is that same override.
+  pressing it again while shown clears it. The override yields to a tab
+  with its own left sidebar: when the active tab changes (a tab click,
+  opening a document, Back/Forward) to one that declares a `sidebar`, the
+  override is cleared; a tab that declares none keeps it showing — so a
+  file opened from the Explorer leaves the Explorer in place, and opening
+  Symbols shows the symbol list. The boot default (Explorer / Projects) is
+  that same override, set only while no document is active.
 - The activity button is highlighted while its view is the one shown.
 
 ## 4. The right sidebar
