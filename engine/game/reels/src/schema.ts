@@ -25,7 +25,7 @@ import Schema from 'schemastery';
 const frameState = (color: number, alpha: number) =>
   Schema.object({
     color: Schema.number().role('color').default(color).description('frame colour, 0xRRGGBB'),
-    alpha: Schema.number().default(alpha).description('frame opacity, 0–1'),
+    alpha: Schema.number().min(0).max(1).step(0.01).role('slider').default(alpha).description('frame opacity, 0–1'),
   });
 
 const PerAxisGap = Schema.union([Schema.number(), Schema.array(Schema.number())]);

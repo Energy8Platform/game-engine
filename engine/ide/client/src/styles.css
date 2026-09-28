@@ -1317,6 +1317,19 @@ input[type='radio'] {
 .e8-color input[type='color'][data-unset] {
   opacity: 0.35;
 }
+/* Task: frame alpha slider (`SliderField`) — the range and its value box, side by side. */
+.e8-slider {
+  display: flex;
+  align-items: center;
+  gap: var(--e8-gap);
+}
+.e8-slider input[type='range'] {
+  flex: 1;
+  accent-color: var(--e8-accent);
+}
+.e8-slider input[type='number'] {
+  width: 64px;
+}
 /* A compact two-segment switch — `one | per reel`, `<literal> | these`. */
 .e8-segmented {
   display: inline-flex;

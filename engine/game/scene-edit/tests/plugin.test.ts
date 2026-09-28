@@ -5,6 +5,7 @@ import { Container, Graphics, Texture, type FederatedPointerEvent } from 'pixi.j
 import Schema from 'schemastery';
 import type { SceneDoc, SymbolsDoc } from '@energy8engine/contracts';
 import { container, createNodeTypes, createScenes, image, type AssetLoader, type NodeType } from '@energy8engine/scenes';
+import { SymbolCell } from '@energy8engine/reel-core';
 import * as plugin from '../src/index';
 
 const loader: AssetLoader = { load: async () => {}, unload: async () => {}, get: () => Texture.EMPTY };
@@ -299,6 +300,24 @@ describe('symbol mode', () => {
     expect(roundRect.data[4]).toBe(4); // [x, y, w, h, radius]
   });
 
+  // The bug `resolveFrameStyle` fixes: a colour-only `idle` (exactly what
+  // the Reels document's colour picker writes to `board.config.grid.frameStyle`)
+  // used to lose `alpha` to a shallow `{ ...DEFAULT, ...frameStyle }` spread
+  // — the whole `idle` object got replaced, `alpha` came back `undefined`,
+  // and the fill's alpha was `NaN`.
+  it('a colour-only idle frameStyle draws with alpha 0.34 (not NaN) and the set colour', async () => {
+    const board = { config: { grid: { frameStyle: { idle: { color: 0x112233 } } } } };
+    const { symbols } = fakeSymbols();
+    const { app, call, ready } = bootSymbol(symbols, 'coin', board);
+    await ready();
+    await call('snapshot');
+    const frame = app.stage.getChildByLabel('symbol-frame', true) as Graphics;
+    expect(frame.tint).toBe(0x112233);
+    const fill = (frame.context as unknown as { instructions: { action: string; data: { style: { alpha: number } } }[] })
+      .instructions.find((i) => i.action === 'fill')!;
+    expect(fill.data.style.alpha).toBe(0.34);
+  });
+
   it('a board provided AFTER boot updates the cell size and redraws the frame on the next frame (slice 40 debt: cellSize/frameStyle used to be read once, at boot)', async () => {
     const { symbols } = fakeSymbols();
     const { ctx, app, call, ready, frame } = bootSymbol(symbols);
@@ -471,7 +490,7 @@ describe('reels mode', () => {
     expect(box.position.x).toBeCloseTo(240 - (500 / 2) * s, 5);
     expect(box.position.y).toBeCloseTo(144 - (300 / 2) * s, 5);
     const snap = (await call('snapshot')).result;
-    expect(snap).toEqual({ mode: 'reels', cols: 5, rows: [3, 3, 3, 3, 3], fitted: { w: s * 500, h: s * 300 }, busy: false, symbols: null });
+    expect(snap).toEqual({ mode: 'reels', cols: 5, rows: [3, 3, 3, 3, 3], fitted: { w: s * 500, h: s * 300 }, busy: false, symbols: null, frame: null });
   });
 
   // For the browser e2e: what the board's cells actually hold (a painted
@@ -488,6 +507,26 @@ describe('reels mode', () => {
     await ready();
     const snap = (await call('snapshot')).result as { symbols: (string | null)[][] };
     expect(snap.symbols).toEqual([['wild', null], [null, '4']]);
+  });
+
+  // The e2e's own window onto the live draw call: a real `SymbolCell`
+  // (`@energy8engine/reel-core`) is a `Container` whose first child is its
+  // frame `Graphics` — public at runtime, so `snapshot().frame.idleAlpha`
+  // can read it off cell (0,0) without any new accessor on `SymbolCell`
+  // itself. Built with a colour-only `idle` frameStyle, same shape the
+  // Reels document's colour picker writes, to prove the alpha is the
+  // resolved default (0.34), not `NaN`.
+  it("snapshot's frame.idleAlpha reads the live board's first cell frame", async () => {
+    const cell = new SymbolCell({ size: 32, resolve: () => null, frameStyle: { idle: { color: 0xabcdef } } });
+    const board = {
+      ...fakeBoard(),
+      config: { grid: { cols: 1, rows: 1 } },
+      grid: { getCell: () => cell },
+    };
+    const { call, ready } = bootReels(board);
+    await ready();
+    const snap = (await call('snapshot')).result as { frame: { idleAlpha: number } | null };
+    expect(snap.frame).toEqual({ idleAlpha: 0.34 });
   });
 
   // Fix round 1: `bootReels` registered `snapshot`/`rows`/the lab actions on

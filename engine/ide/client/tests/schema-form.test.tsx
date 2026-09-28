@@ -1358,6 +1358,74 @@ describe('SchemaForm — colour, one-or-list, literal-or-value', () => {
 });
 
 /**
+ * Frame alpha: a `.role('slider')` number with both `min`/`max` (the
+ * `frameStyle.*.alpha` shape `reels/src/schema.ts` now declares) draws a
+ * native range plus a small value box, the way `.role('color')` pairs a
+ * swatch with a hex text field above.
+ */
+describe('SchemaForm — slider', () => {
+  const sliderSchema = Schema.object({
+    alpha: Schema.number().min(0).max(1).step(0.01).role('slider').default(0.34),
+  });
+
+  it('a slider role with bounds renders a range labelled by the key, and a value box', () => {
+    renderStaticForm(sliderSchema, { alpha: 0.5 });
+    const range = screen.getByLabelText('alpha') as HTMLInputElement;
+    expect(range).toHaveAttribute('type', 'range');
+    expect(range).toHaveValue('0.5');
+    expect(screen.getByRole('spinbutton', { name: 'alpha value' })).toHaveValue(0.5);
+  });
+
+  // Same "preview while it moves, write once" rule `ColorField`'s swatch
+  // follows: React's `onChange` on a range is the `input` event (one per
+  // step while dragging), so only the native `change` (or a blur) commits.
+  it('the range previews while dragged and writes once, on its native change', () => {
+    const onChange = renderStaticForm(sliderSchema, { alpha: 0.2 });
+    const range = screen.getByLabelText('alpha');
+    fireEvent.input(range, { target: { value: '0.5' } });
+    fireEvent.input(range, { target: { value: '0.7' } });
+    expect(onChange).not.toHaveBeenCalled();
+    expect(range).toHaveValue('0.7'); // the preview follows the drag
+    fireEvent.change(range, { target: { value: '0.7' } });
+    expect(onChange).toHaveBeenCalledTimes(1);
+    expect(onChange).toHaveBeenLastCalledWith({ alpha: 0.7 });
+    fireEvent.blur(range);
+    expect(onChange).toHaveBeenCalledTimes(1); // already settled
+  });
+
+  it("the value box goes through NumberField/useDraft: commit: 'blur' buffers keystrokes and writes once on blur", () => {
+    const onChange = renderStaticForm(sliderSchema, { alpha: 0.2 }, { commit: 'blur' });
+    const valueBox = screen.getByRole('spinbutton', { name: 'alpha value' });
+    fireEvent.change(valueBox, { target: { value: '0.5' } });
+    expect(onChange).not.toHaveBeenCalled();
+    fireEvent.blur(valueBox);
+    expect(onChange).toHaveBeenCalledTimes(1);
+    expect(onChange).toHaveBeenLastCalledWith({ alpha: 0.5 });
+  });
+
+  it('the value box clamps a typed value past max down to max', () => {
+    const onChange = renderStaticForm(sliderSchema, { alpha: 0.2 }, { commit: 'blur' });
+    const valueBox = screen.getByRole('spinbutton', { name: 'alpha value' });
+    fireEvent.change(valueBox, { target: { value: '2' } });
+    fireEvent.blur(valueBox);
+    expect(onChange).toHaveBeenCalledTimes(1);
+    expect(onChange).toHaveBeenLastCalledWith({ alpha: 1 });
+  });
+
+  it('unset with a default shows the default on both controls and writes nothing on render', () => {
+    const onChange = renderStaticForm(sliderSchema, {});
+    expect(screen.getByLabelText('alpha')).toHaveValue('0.34');
+    expect(screen.getByRole('spinbutton', { name: 'alpha value' })).toHaveValue(0.34);
+    expect(onChange).not.toHaveBeenCalled();
+  });
+
+  it('a slider role without both bounds falls back to the plain number field', () => {
+    renderStaticForm(Schema.object({ speed: Schema.number().role('slider').default(8) }), {});
+    expect(screen.getByLabelText('speed')).toHaveAttribute('type', 'number');
+  });
+});
+
+/**
  * Task 2 of the reels-editor slice: the Composition screen's game rows edit
  * `row.config`, which holds ONLY what the patch sets — so "resettable"
  * means "reset-able back to whatever schemastery would default it to",

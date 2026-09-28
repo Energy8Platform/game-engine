@@ -436,6 +436,23 @@ export function Field({
     );
   }
 
+  // `.role('slider')` needs BOTH bounds to draw a range — without one of
+  // them there is nothing to set the track's ends from, so it falls through
+  // to the plain `NumberField` below instead.
+  if (node.type === 'number' && node.meta?.role === 'slider' && node.meta?.min !== undefined && node.meta?.max !== undefined) {
+    return (
+      <SliderField
+        id={id}
+        node={node}
+        value={value}
+        onChange={onChange}
+        commit={commit}
+        describedBy={describedBy}
+        path={path}
+      />
+    );
+  }
+
   if (node.type === 'number') {
     return (
       <NumberField
@@ -705,6 +722,103 @@ function ColorField({
         onChange={draft.onChange}
         onBlur={draft.onBlur}
         onKeyDown={draft.onKeyDown}
+      />
+    </span>
+  );
+}
+
+/**
+ * A `.role('slider')` number with both `min`/`max` (`Field` only dispatches
+ * here once it has checked both are set): a native range plus a small
+ * number box beside it, the way `ColorField` pairs a swatch with a hex
+ * text field.
+ *
+ * The range's own `onChange` prop is React's `input` event — one per pixel
+ * while the user drags — so, like the swatch, it only moves a local
+ * `preview`; the NATIVE `change` event (attached through the ref, React has
+ * no prop for it) or a blur commits it once. UNLIKE `ColorField`'s hex
+ * field (hardcoded to `commit: 'blur'` — a hex can't be parsed one
+ * keystroke at a time), the number box reuses `NumberField` as-is, so it
+ * respects whatever `commit` mode the form was given. Its own `onChange` is
+ * wrapped just enough to clamp into `[min, max]` — `NumberField`/`useDraft`
+ * have no clamping of their own (a plain bounded number field today just
+ * sets the HTML `min`/`max` attributes, which typing does not enforce).
+ */
+function SliderField({
+  id,
+  node,
+  value,
+  onChange,
+  commit,
+  describedBy,
+  path,
+}: Omit<FieldProps, 'ariaLabel'>) {
+  const min = node.meta!.min!;
+  const max = node.meta!.max!;
+  const current = (value ?? node.meta?.default) as number | undefined;
+
+  const range = useRef<HTMLInputElement>(null);
+  const [preview, setPreview] = useState<number | null>(null);
+  /** The range moved since the last commit — a focus-and-blur alone writes nothing. */
+  const moved = useRef(false);
+  /** What was last handed up (or the latest prop): a blur right after `change` must not send it twice. */
+  const sent = useRef(current);
+  useEffect(() => {
+    sent.current = current;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [value]);
+  const settle = useRef(() => {});
+  settle.current = () => {
+    const el = range.current;
+    if (!moved.current || !el) return;
+    moved.current = false;
+    setPreview(null);
+    const next = Number(el.value);
+    if (next === sent.current) return;
+    sent.current = next;
+    onChange(next);
+  };
+  useEffect(() => {
+    const el = range.current;
+    if (!el) return;
+    const onNativeChange = () => {
+      moved.current = true;
+      settle.current();
+    };
+    el.addEventListener('change', onNativeChange);
+    return () => el.removeEventListener('change', onNativeChange);
+  }, []);
+
+  const key = path.split('.').pop();
+  const shown = preview ?? current ?? min;
+  const clamp = (n: number) => Math.min(max, Math.max(min, n));
+
+  return (
+    <span className="e8-slider">
+      <input
+        ref={range}
+        id={id}
+        aria-describedby={describedBy}
+        type="range"
+        min={min}
+        max={max}
+        step={node.meta?.step}
+        value={shown}
+        onChange={(e: ChangeEvent<HTMLInputElement>) => {
+          moved.current = true;
+          setPreview(Number(e.target.value));
+        }}
+        onBlur={() => settle.current()}
+      />
+      <NumberField
+        id={`${id}-value`}
+        node={node}
+        value={value}
+        onChange={(next) => onChange(clamp(next as number))}
+        commit={commit}
+        ariaLabel={`${key} value`}
+        describedBy={describedBy}
+        path={path}
       />
     </span>
   );

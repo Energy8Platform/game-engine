@@ -95,6 +95,7 @@ type ReelsSnapshot = {
   fitted: { w: number; h: number };
   busy: boolean;
   symbols: (string | null)[][] | null;
+  frame: { idleAlpha: number } | null;
 };
 
 async function openReels(page: Page): Promise<void> {
@@ -153,12 +154,22 @@ test('the Reels document edits the reel rows, rebuilds the lab board, spins it, 
     await expect(page.getByTestId('reels-action-scatters')).toBeEnabled({ timeout: 10_000 });
   });
 
-  await test.step('a colour under Grid > frameStyle > idle > color writes a number', async () => {
+  await test.step('a colour under Grid > frameStyle > idle > color writes a number, and the alpha the picker never touched stays the default on the live board (frame-alpha slice)', async () => {
     const idle = page.locator('#field-reels-reels1-frameStyle-idle');
     const hex = idle.getByRole('textbox', { name: 'color hex' });
     await hex.fill('#ff0000');
     await hex.blur();
     await expect.poll(() => patchConfig('reels1')?.grid?.frameStyle?.idle?.color).toBe(16711680);
+    // The colour picker writes ONLY `color` — `alpha` must not appear in
+    // the patch at all (a shallow merge on the read side would have lost
+    // it to `undefined`/NaN instead; a deep-per-state one, which
+    // `resolveFrameStyle` now is, never touches it).
+    expect(patchConfig('reels1')?.grid?.frameStyle?.idle?.alpha).toBeUndefined();
+    // …and the lab canvas still draws a finite (default) alpha for it —
+    // `frame.idleAlpha`, off the live board's first cell frame (real
+    // `SymbolCell`s are reachable `Container`s; see `scene-edit`'s
+    // `idleAlphaOf`).
+    await expect.poll(async () => (await snapshot()).frame?.idleAlpha).toBe(0.34);
   });
 
   await test.step('reset cols: the patch drops it, the default (5) stands', async () => {

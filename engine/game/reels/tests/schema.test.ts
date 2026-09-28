@@ -32,6 +32,15 @@ describe('@energy8engine/reels/schema', () => {
     expect(node.dict!.grid.dict!.frameStyle.dict!.idle.dict!.color.meta.role).toBe('color');
   });
 
+  // Frame alpha: the IDE's SliderField dispatches on `meta.role === 'slider'`
+  // plus both bounds off the rebuilt JSON — same round-trip requirement as
+  // the colour role above.
+  it('the frame alpha carries role: slider, min 0, max 1, step 0.01, surviving JSON', () => {
+    const node = new Schema(JSON.parse(JSON.stringify(Config))) as Schema;
+    const meta = node.dict!.grid.dict!.frameStyle.dict!.idle.dict!.alpha.meta;
+    expect(meta).toMatchObject({ role: 'slider', min: 0, max: 1, step: 0.01 });
+  });
+
   // Final review I6: `frameStyle`'s colours had no default, so the IDE's
   // colour widget showed `#000000` for a frame that actually draws
   // `0x223047`. `SymbolCell`'s own built-in style is what they pin to.

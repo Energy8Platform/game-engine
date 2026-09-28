@@ -3,12 +3,27 @@ import { Container, Graphics, Text } from 'pixi.js';
 import { Tween, Easing } from '@energy8engine/tween';
 import type { SymbolResolver, SymbolView } from './SymbolView';
 
+/** One frame state's look, as a CALLER may partially override it (a colour-only `{ color }` is
+ * exactly what the Reels document's colour picker writes) — `resolveFrameStyle` below is what
+ * turns this into the fully-populated state `_drawFrame` actually draws. */
+export interface CellFrameStateStyle {
+  color?: number;
+  alpha?: number;
+}
 export interface CellFrameStyle {
   radius?: number;
-  idle?: { color: number; alpha: number };
-  winning?: { color: number; alpha: number };
-  removed?: { color: number; alpha: number };
-  fresh?: { color: number; alpha: number };
+  idle?: CellFrameStateStyle;
+  winning?: CellFrameStateStyle;
+  removed?: CellFrameStateStyle;
+  fresh?: CellFrameStateStyle;
+}
+/** `resolveFrameStyle`'s return shape — every state fully populated, never partial. */
+export interface ResolvedCellFrameStyle {
+  radius: number;
+  idle: Required<CellFrameStateStyle>;
+  winning: Required<CellFrameStateStyle>;
+  removed: Required<CellFrameStateStyle>;
+  fresh: Required<CellFrameStateStyle>;
 }
 export interface CellData {
   symbol: string | null;
@@ -29,13 +44,41 @@ export interface SymbolCellConfig {
 }
 
 /** `SymbolCell`'s idle/winning/removed/fresh frame colours — also what a board-less symbol-mode canvas frames its preview with (`@energy8engine/scene-edit`'s `bootSymbol`). */
-export const DEFAULT_CELL_FRAME_STYLE: Readonly<Required<CellFrameStyle>> = Object.freeze({
+export const DEFAULT_CELL_FRAME_STYLE: Readonly<ResolvedCellFrameStyle> = Object.freeze({
   radius: 8,
   idle: { color: 0x223047, alpha: 0.34 },
   winning: { color: 0x00d4ff, alpha: 0.95 },
   removed: { color: 0x223047, alpha: 0.12 },
   fresh: { color: 0xffffff, alpha: 0.6 },
 });
+
+/**
+ * Merges a partial `CellFrameStyle` onto `DEFAULT_CELL_FRAME_STYLE`, PER STATE — not the shallow
+ * `{ ...DEFAULT, ...partial }` this replaces, which lost a state's `alpha` the instant a caller set
+ * only its `color` (exactly what the Reels document's colour picker writes): the whole `idle` object
+ * got replaced, `alpha` came back `undefined`, and Pixi's fill got `NaN`. A SET `alpha` (including
+ * `0`) is used exactly; an unset one falls back to that state's default; a `color`-only state keeps
+ * its default alpha. An `undefined` value INSIDE a partial state (`{ color: 1, alpha: undefined }`,
+ * what a cleared form field can send) is ignored rather than spread over the default — only defined
+ * keys are copied. `SymbolCell`'s own constructor and `@energy8engine/scene-edit`'s symbol-mode
+ * preview (`boardStyle`) both resolve through this instead of their own spread.
+ */
+export function resolveFrameStyle(partial?: CellFrameStyle): ResolvedCellFrameStyle {
+  const state = (key: 'idle' | 'winning' | 'removed' | 'fresh'): Required<CellFrameStateStyle> => {
+    const override = partial?.[key];
+    const defined = override
+      ? (Object.fromEntries(Object.entries(override).filter(([, v]) => v !== undefined)) as CellFrameStateStyle)
+      : {};
+    return { ...DEFAULT_CELL_FRAME_STYLE[key], ...defined };
+  };
+  return {
+    radius: partial?.radius ?? DEFAULT_CELL_FRAME_STYLE.radius,
+    idle: state('idle'),
+    winning: state('winning'),
+    removed: state('removed'),
+    fresh: state('fresh'),
+  };
+}
 
 const cellDims = (size: number | { width: number; height: number }) =>
   typeof size === 'number' ? { width: size, height: size } : size;
@@ -46,7 +89,7 @@ export class SymbolCell extends Container {
   private _w: number;
   private _h: number;
   private _resolve: SymbolResolver;
-  private _style: Required<CellFrameStyle>;
+  private _style: ResolvedCellFrameStyle;
   private _frame: Graphics;
   private _view: SymbolView | null = null;
   private _data: CellData = { symbol: null };
@@ -62,7 +105,7 @@ export class SymbolCell extends Container {
     this._w = width;
     this._h = height;
     this._resolve = config.resolve;
-    this._style = { ...DEFAULT_CELL_FRAME_STYLE, ...(config.frameStyle ?? {}) } as Required<CellFrameStyle>;
+    this._style = resolveFrameStyle(config.frameStyle);
     this._frame = new Graphics();
     this.addChild(this._frame);
     this.addChild(this._badges);

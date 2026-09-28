@@ -49,6 +49,25 @@ describe('SymbolCell', () => {
     // the frame is the first child; its tint is the idle colour (`_drawFrame` stores it)
     expect((cell.children[0] as { tint: number }).tint).toBe(0x223047);
   });
+
+  // The bug this fixes: a colour-only `idle` used to lose `alpha` to a
+  // shallow `{ ...DEFAULT, ...frameStyle }` spread (the whole `idle` object
+  // got replaced, `alpha` came back `undefined`, Pixi's fill got `NaN`).
+  // Read the frame Graphics' own fill instruction — same approach
+  // `@energy8engine/scene-edit`'s `plugin.test.ts` uses to check alpha —
+  // rather than a new test-only field.
+  it('a colour-only idle frameStyle draws the idle frame with a finite (default) alpha', () => {
+    const cell = new SymbolCell({
+      size: 100,
+      resolve: resolver,
+      frameStyle: { idle: { color: 0xff0000 } },
+    });
+    const frame = cell.children[0] as Graphics;
+    const fill = (frame.context as unknown as { instructions: { action: string; data: { style: { alpha: number } } }[] })
+      .instructions.find((i) => i.action === 'fill')!;
+    expect(fill.data.style.alpha).toBe(0.34);
+    expect(frame.tint).toBe(0xff0000);
+  });
 });
 
 describe('F9 — a cell keeps its view for the same symbol', () => {

@@ -22,7 +22,7 @@ import {
 } from '@energy8engine/contracts';
 import type {} from '@energy8engine/scenes/runtime';
 import { COMMON, pinPoint, type Fit, type Orientation, type Pin } from '@energy8engine/scenes';
-import { DEFAULT_CELL_FRAME_STYLE, type CellFrameStyle } from '@energy8engine/reel-core';
+import { resolveFrameStyle, type CellFrameStyle } from '@energy8engine/reel-core';
 import { Container, Graphics, type FederatedPointerEvent } from 'pixi.js';
 import { createGizmo, type GizmoTarget } from './gizmo';
 import { clusterTumble, lineWin, randomBoard, scatterBoard, type Rand, type Shape } from './lab';
@@ -101,6 +101,10 @@ export interface ReelsSnapshot {
   busy: boolean;
   /** What each cell of the live board holds, `board[col][row]` (`null` empty); `null` for a board with no `grid` to read. */
   symbols: (string | null)[][] | null;
+  /** The board's first cell's currently-drawn frame alpha — the `frameStyle`-alpha e2e's
+   * only window onto the live draw call; `null` for a board with no `grid` (or a cell whose
+   * frame Graphics isn't reachable — a test fake, say). See `idleAlphaOf` below. */
+  frame: { idleAlpha: number } | null;
 }
 
 /** Which layer of the document an edit lands in: the node's own props (`null`), or `portrait.nodes[<id>]` while the safe rect is portrait (spec §7). */
@@ -287,7 +291,10 @@ export function apply(ctx: Context, config: SceneEditConfig): void {
         | undefined;
       return {
         cellSize: board?.cellSize ?? { width: 96, height: 96 },
-        frameStyle: { ...DEFAULT_CELL_FRAME_STYLE, ...(board?.config?.grid?.frameStyle ?? {}) },
+        // `resolveFrameStyle` (not a shallow `{ ...DEFAULT, ...frameStyle }`): a colour-only `idle`
+        // (exactly what the Reels document's colour picker writes) must keep its default alpha
+        // instead of losing it to a replaced `idle` object — see `SymbolCell.ts`.
+        frameStyle: resolveFrameStyle(board?.config?.grid?.frameStyle),
       };
     };
     let { cellSize, frameStyle } = boardStyle();
@@ -467,18 +474,38 @@ export function apply(ctx: Context, config: SceneEditConfig): void {
      * `tumble()` have something to read before any lab `spin()` has run.
      * The real board has none, so on it those two always need a `spin()`
      * first. `grid` is only read by `snapshot` (what the cells hold — a
-     * painted start board included), never by an action.
+     * painted start board included, plus one cell's drawn frame alpha —
+     * never by an action. A real cell (`@energy8engine/reel-core`'s
+     * `SymbolCell`) is a `Container` whose first child is its frame
+     * `Graphics` — public at runtime even though `CellLike`
+     * (`@energy8engine/reels`) never names it; `children` here is that
+     * same reachable shape, typed just enough for `idleAlphaOf` below. A
+     * test fake with no `children` on its cells answers `null`, same as no
+     * `grid` at all.
      */
     interface ReelsBoardLike {
       readonly view: Container;
       readonly config?: { grid?: { cols?: number; rows?: number; rowsPerReel?: number[] } };
-      readonly grid?: { getCell(col: number, row: number): { data: { symbol: string | null } } | undefined };
+      readonly grid?: {
+        getCell(col: number, row: number): {
+          data: { symbol: string | null };
+          children?: readonly { context?: { instructions?: readonly { action: string; data?: { style?: { alpha: number } } }[] } }[];
+        } | undefined;
+      };
       spinTo(step: SpinToStep): Promise<void>;
       revealWins(step: RevealWinsStep): Promise<void>;
       tumble(step: TumbleStep): Promise<void>;
       symbols?(): string[][];
     }
     const currentBoard = () => ctx.reflect.get('board', false) as ReelsBoardLike | undefined;
+
+    /** The alpha off a cell's own frame Graphics (its first child) — the fill instruction's
+     * style, same as `boardStyle`'s draw above and `plugin.test.ts`'s own checks. `null` when
+     * the cell has no reachable frame (no `children[0]`, or it never drew a `fill`). */
+    const idleAlphaOf = (cell: NonNullable<ReturnType<NonNullable<ReelsBoardLike['grid']>['getCell']>> | undefined): number | null => {
+      const fill = cell?.children?.[0]?.context?.instructions?.find((i) => i.action === 'fill');
+      return fill?.data?.style?.alpha ?? null;
+    };
 
     let mounted: Container | null = null;
     const MARGIN = 24;
@@ -647,7 +674,9 @@ export function apply(ctx: Context, config: SceneEditConfig): void {
       const symbols = grid
         ? rows.map((height, col) => Array.from({ length: height }, (_, row) => grid.getCell(col, row)?.data.symbol ?? null))
         : null;
-      return { mode: 'reels', cols, rows, fitted: { w: laid.bw * box.scale.x, h: laid.bh * box.scale.y }, busy, symbols };
+      const idleAlpha = grid ? idleAlphaOf(grid.getCell(0, 0)) : null;
+      const frame = idleAlpha === null ? null : { idleAlpha };
+      return { mode: 'reels', cols, rows, fitted: { w: laid.bw * box.scale.x, h: laid.bh * box.scale.y }, busy, symbols, frame };
     };
     wire.handle('snapshot', () => snapshot());
     // Same test-hook slot symbol/scene mode install (`emitted`/`snapshot`
