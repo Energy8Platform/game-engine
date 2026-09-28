@@ -68,7 +68,6 @@ export {
   DEFAULT_PREVIEW_STATE,
   previewAddress,
   readPreviewState,
-  validBalance,
   type PreviewState,
 } from './screens/Preview';
 export { DiagnosticsPanel, type DiagnosticsPanelProps } from './screens/DiagnosticsPanel';

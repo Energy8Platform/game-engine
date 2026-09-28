@@ -10,6 +10,7 @@ import {
   readPreviewState,
   type PreviewState,
 } from '../src/index';
+import { BALANCE_LEVELS } from '../src/screens/balanceLevels';
 
 /**
  * Falling tests for Task 12, step 1: the preview panel draws an iframe at
@@ -97,21 +98,25 @@ function row(overrides: Partial<CompositionRow>): CompositionRow {
 
 describe('previewAddress', () => {
   const base = 'http://127.0.0.1:5679/';
-  it('carries lang and currency always, and nothing else by default', () => {
-    expect(previewAddress(base, DEFAULT_PREVIEW_STATE)).toBe(
-      'http://127.0.0.1:5679/?lang=en&currency=USD',
-    );
+  it('carries lang, currency, balance and wallet always', () => {
+    const url = new URL(previewAddress(base, DEFAULT_PREVIEW_STATE));
+    expect(url.searchParams.get('lang')).toBe('en');
+    expect(url.searchParams.get('currency')).toBe('USD');
+    expect(url.searchParams.get('balance')).toBe('10000');
+    expect(url.searchParams.get('wallet')).toBe('0');
+
+    const picked = new URL(previewAddress(base, { ...DEFAULT_PREVIEW_STATE, balance: 100, wallet: 3 }));
+    expect(picked.searchParams.get('balance')).toBe('100');
+    expect(picked.searchParams.get('wallet')).toBe('3');
   });
-  it('adds balance when set, social=1 when on, device=mobile for a Mobile preset', () => {
+  it('adds social=1 when on, device=mobile for a Mobile preset', () => {
     const url = new URL(
       previewAddress(base, {
         ...DEFAULT_PREVIEW_STATE,
         preset: 'Mobile S',
-        balance: '50',
         social: true,
       }),
     );
-    expect(url.searchParams.get('balance')).toBe('50');
     expect(url.searchParams.get('social')).toBe('1');
     expect(url.searchParams.get('device')).toBe('mobile');
     expect(url.searchParams.has('game')).toBe(false);
@@ -153,6 +158,36 @@ describe('readPreviewState', () => {
     } finally {
       spy.mockRestore();
     }
+  });
+
+  it('a stored balance level as a string loads as a number', () => {
+    localStorage.setItem('e8.preview', JSON.stringify({ balance: '1000' }));
+    expect(readPreviewState().balance).toBe(1000);
+  });
+
+  it('a stored balance that is not one of the levels falls back to the default', () => {
+    localStorage.setItem('e8.preview', JSON.stringify({ balance: '250' }));
+    expect(readPreviewState().balance).toBe(10_000);
+  });
+
+  it('a stored empty-string balance falls back to the default', () => {
+    localStorage.setItem('e8.preview', JSON.stringify({ balance: '' }));
+    expect(readPreviewState().balance).toBe(10_000);
+  });
+
+  it('a stored balance already a number loads as-is', () => {
+    localStorage.setItem('e8.preview', JSON.stringify({ balance: 100 }));
+    expect(readPreviewState().balance).toBe(100);
+  });
+
+  it('a stored wallet that is a non-negative integer loads as-is', () => {
+    localStorage.setItem('e8.preview', JSON.stringify({ wallet: 5 }));
+    expect(readPreviewState().wallet).toBe(5);
+  });
+
+  it.each([-1, 1.5, 'x'])('a stored wallet of %p falls back to 0', (wallet) => {
+    localStorage.setItem('e8.preview', JSON.stringify({ wallet }));
+    expect(readPreviewState().wallet).toBe(0);
   });
 });
 
@@ -340,28 +375,54 @@ describe('Preview', () => {
     expect(new URL(after.src).searchParams.get('currency')).toBe('EUR');
   });
 
-  it('an invalid balance marks the field invalid on blur and sends nothing', async () => {
+  it('the balance select lists the eleven harness levels in order, 10K selected by default', async () => {
+    localStorage.clear();
+    const { ctx } = await harness();
+    render(<Preview ctx={ctx} />);
+    const select = screen.getByTestId('preview-balance') as HTMLSelectElement;
+    expect(Array.from(select.options).map((o) => o.textContent)).toEqual(
+      BALANCE_LEVELS.map((l) => l.label),
+    );
+    expect(select.value).toBe('10000');
+  });
+
+  it('choosing a balance level relaunches (a new iframe element) with that balance and a bumped wallet', async () => {
+    localStorage.clear();
+    const { ctx } = await harness();
+    render(<Preview ctx={ctx} />);
+    const before = screen.getByTitle('game preview');
+    await userEvent.selectOptions(screen.getByTestId('preview-balance'), '1000');
+    const after = screen.getByTitle('game preview') as HTMLIFrameElement;
+    expect(after).not.toBe(before);
+    expect(new URL(after.src).searchParams.get('balance')).toBe('1000');
+    expect(new URL(after.src).searchParams.get('wallet')).toBe('1');
+  });
+
+  it('↺ (reset balance) relaunches with the same balance and wallet + 1', async () => {
+    localStorage.clear();
+    const { ctx } = await harness();
+    render(<Preview ctx={ctx} />);
+    const before = screen.getByTitle('game preview');
+    await userEvent.click(screen.getByTestId('preview-balance-reset'));
+    const after = screen.getByTitle('game preview') as HTMLIFrameElement;
+    expect(after).not.toBe(before);
+    expect(new URL(after.src).searchParams.get('balance')).toBe(String(DEFAULT_PREVIEW_STATE.balance));
+    expect(new URL(after.src).searchParams.get('wallet')).toBe('1');
+  });
+
+  it('↻ (refresh) remounts the iframe with a byte-identical src; a second click remounts again', async () => {
     localStorage.clear();
     const { ctx } = await harness();
     render(<Preview ctx={ctx} />);
     const before = screen.getByTitle('game preview') as HTMLIFrameElement;
-    const balance = screen.getByTestId('preview-balance');
-    await userEvent.type(balance, 'abc');
-    await userEvent.tab();
-    expect(balance).toHaveAttribute('aria-invalid', 'true');
+    await userEvent.click(screen.getByTestId('preview-refresh'));
     const after = screen.getByTitle('game preview') as HTMLIFrameElement;
-    expect(after).toBe(before);
-    expect(new URL(after.src).searchParams.has('balance')).toBe(false);
-  });
-
-  it('a valid balance committed with Enter reaches the address', async () => {
-    localStorage.clear();
-    const { ctx } = await harness();
-    render(<Preview ctx={ctx} />);
-    const balance = screen.getByTestId('preview-balance');
-    await userEvent.type(balance, '250{Enter}');
-    const iframe = screen.getByTitle('game preview') as HTMLIFrameElement;
-    expect(new URL(iframe.src).searchParams.get('balance')).toBe('250');
+    expect(after).not.toBe(before);
+    expect(after.src).toBe(before.src);
+    await userEvent.click(screen.getByTestId('preview-refresh'));
+    const third = screen.getByTitle('game preview') as HTMLIFrameElement;
+    expect(third).not.toBe(after);
+    expect(third.src).toBe(after.src);
   });
 
   it('the social checkbox toggles social=1 in the address', async () => {
@@ -377,15 +438,15 @@ describe('Preview', () => {
     localStorage.clear();
     const { ctx } = await harness();
     const { unmount } = render(<Preview ctx={ctx} />);
-    await userEvent.selectOptions(screen.getByTestId('preview-currency'), 'EUR');
+    await userEvent.selectOptions(screen.getByTestId('preview-balance'), '1000');
     unmount();
 
     const stored: PreviewState = JSON.parse(localStorage.getItem('e8.preview')!);
-    expect(stored.currency).toBe('EUR');
+    expect(stored.balance).toBe(1000);
 
     render(<Preview ctx={ctx} />);
-    const iframe = screen.getByTitle('game preview') as HTMLIFrameElement;
-    expect(new URL(iframe.src).searchParams.get('currency')).toBe('EUR');
+    const select = screen.getByTestId('preview-balance') as HTMLSelectElement;
+    expect(select.value).toBe('1000');
   });
 
   it('the preset, language, currency and balance controls each have an accessible name', async () => {
@@ -395,5 +456,9 @@ describe('Preview', () => {
     expect(screen.getByLabelText('language')).toBe(screen.getByTestId('preview-lang'));
     expect(screen.getByLabelText('currency')).toBe(screen.getByTestId('preview-currency'));
     expect(screen.getByLabelText('balance')).toBe(screen.getByTestId('preview-balance'));
+    expect(screen.getByRole('button', { name: 'refresh' })).toBe(screen.getByTestId('preview-refresh'));
+    expect(screen.getByRole('button', { name: 'reset balance' })).toBe(
+      screen.getByTestId('preview-balance-reset'),
+    );
   });
 });

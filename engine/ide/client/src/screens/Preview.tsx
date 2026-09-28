@@ -3,6 +3,7 @@ import type { Context } from 'cordis';
 import { DEV_CURRENCIES } from '@energy8engine/contracts';
 import { useGameComposition } from '../plugins/game-composition';
 import { useWorkspace } from '../plugins/workspace';
+import { BALANCE_LEVELS, isBalanceLevel } from './balanceLevels';
 import { LANGS } from './langs';
 import { SCREEN_PRESETS, screenPreset } from './screenPresets';
 
@@ -77,8 +78,10 @@ export interface PreviewState {
   rotated: boolean;
   lang: string;
   currency: string;
-  /** Currency units as typed; `''` is the host's default. */
-  balance: string;
+  /** A harness balance level (major units) — see `balanceLevels.ts`. */
+  balance: number;
+  /** Bumped on every balance pick and on `↺`, so each is a fresh wallet (Task 1's `?wallet=<n>` contract). */
+  wallet: number;
   social: boolean;
 }
 
@@ -87,15 +90,12 @@ export const DEFAULT_PREVIEW_STATE: PreviewState = {
   rotated: false,
   lang: 'en',
   currency: 'USD',
-  balance: '',
+  balance: 10_000,
+  wallet: 0,
   social: false,
 };
 
 const STORAGE_KEY = 'e8.preview';
-
-/** A balance the toolbar may send: empty, or a finite number ≥ 0. */
-export const validBalance = (value: string) =>
-  value.trim() === '' || (Number.isFinite(Number(value)) && Number(value) >= 0);
 
 /**
  * The game's address for one toolbar state — the harness's launch URL
@@ -107,7 +107,8 @@ export function previewAddress(base: string, s: PreviewState): string {
   const url = new URL(base);
   url.searchParams.set('lang', s.lang);
   url.searchParams.set('currency', s.currency);
-  if (s.balance.trim() !== '') url.searchParams.set('balance', String(Number(s.balance)));
+  url.searchParams.set('balance', String(s.balance));
+  url.searchParams.set('wallet', String(s.wallet));
   if (s.social) url.searchParams.set('social', '1');
   if (s.preset.startsWith('Mobile')) url.searchParams.set('device', 'mobile');
   return url.toString();
@@ -127,13 +128,14 @@ export function readPreviewState(): PreviewState {
   const preset = str(stored.preset);
   const lang = str(stored.lang);
   const currency = str(stored.currency);
-  const balance = str(stored.balance);
+  const n = Number(stored.balance);
   return {
     preset: preset && screenPreset(preset) ? preset : d.preset,
     rotated: typeof stored.rotated === 'boolean' ? stored.rotated : d.rotated,
     lang: lang && LANGS.some((l) => l.code === lang) ? lang : d.lang,
     currency: currency && Object.hasOwn(DEV_CURRENCIES, currency) ? currency : d.currency,
-    balance: balance !== undefined && validBalance(balance) ? balance : d.balance,
+    balance: Number.isFinite(n) && isBalanceLevel(n) ? n : d.balance,
+    wallet: Number.isInteger(stored.wallet) && (stored.wallet as number) >= 0 ? (stored.wallet as number) : d.wallet,
     social: typeof stored.social === 'boolean' ? stored.social : d.social,
   };
 }
@@ -177,26 +179,25 @@ function writePreviewState(s: PreviewState): void {
  * changes `device` in the address, which IS as much a new game as a
  * `previewUrl`/`reload` change — so that one relaunches like any other
  * address change (currency, lang, balance, social).
+ *
+ * `↻` (`refreshes`) is a relaunch at the SAME address: `previewAddress`
+ * already sends `balance`/`currency`/`wallet` on every request, and
+ * `session-host` folds them into its `sessionStorage` wallet key
+ * (`e8:wallet:<gameId>:<balance>:<currency>:<wallet>`, Task 1) — so an
+ * unchanged address means an unchanged key, and the wallet survives the
+ * refresh even though the iframe element itself is new. A balance pick or
+ * `↺` bumps `wallet`, which DOES change the address (and so the key) —
+ * a deliberate fresh wallet, not a refresh.
  */
 export function Preview({ ctx }: PreviewProps) {
   const { reloads } = useGameComposition(ctx);
   const [state, setState] = useState<PreviewState>(readPreviewState);
-  const [draft, setDraft] = useState(state.balance);
-  const [invalid, setInvalid] = useState(false);
+  const [refreshes, setRefreshes] = useState(0);
 
   function update(patch: Partial<PreviewState>) {
     const next = { ...state, ...patch };
     writePreviewState(next);
     setState(next);
-  }
-
-  function commitBalance() {
-    if (!validBalance(draft)) {
-      setInvalid(true);
-      return;
-    }
-    setInvalid(false);
-    update({ balance: draft });
   }
 
   const preset = screenPreset(state.preset) ?? screenPreset(DEFAULT_PREVIEW_STATE.preset)!;
@@ -222,6 +223,16 @@ export function Preview({ ctx }: PreviewProps) {
 
         <button type="button" data-testid="preview-rotate" onClick={() => update({ rotated: !state.rotated })}>
           Rotate
+        </button>
+
+        <button
+          type="button"
+          data-testid="preview-refresh"
+          aria-label="refresh"
+          title="refresh"
+          onClick={() => setRefreshes((n) => n + 1)}
+        >
+          ↻
         </button>
 
         <label htmlFor="preview-lang">language</label>
@@ -253,22 +264,27 @@ export function Preview({ ctx }: PreviewProps) {
         </select>
 
         <label htmlFor="preview-balance">balance</label>
-        <input
+        <select
           id="preview-balance"
           data-testid="preview-balance"
-          inputMode="decimal"
-          placeholder="1000"
-          value={draft}
-          aria-invalid={invalid || undefined}
-          onChange={(event) => {
-            setDraft(event.target.value);
-            setInvalid(false);
-          }}
-          onBlur={commitBalance}
-          onKeyDown={(event) => {
-            if (event.key === 'Enter') commitBalance();
-          }}
-        />
+          value={String(state.balance)}
+          onChange={(event) => update({ balance: Number(event.target.value), wallet: state.wallet + 1 })}
+        >
+          {BALANCE_LEVELS.map((l) => (
+            <option key={l.value} value={String(l.value)}>
+              {l.label}
+            </option>
+          ))}
+        </select>
+        <button
+          type="button"
+          data-testid="preview-balance-reset"
+          aria-label="reset balance"
+          title="reset balance"
+          onClick={() => update({ wallet: state.wallet + 1 })}
+        >
+          ↺
+        </button>
 
         <label>
           <input
@@ -287,7 +303,7 @@ export function Preview({ ctx }: PreviewProps) {
           return (
             <div className="e8-preview-stage" data-testid="preview-stage">
               <iframe
-                key={`${reloads}:${active}:${src}`}
+                key={`${reloads}:${refreshes}:${active}:${src}`}
                 className="e8-preview"
                 title="game preview"
                 width={w}
