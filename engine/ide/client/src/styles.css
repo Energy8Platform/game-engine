@@ -367,6 +367,14 @@ label {
 .e8-shell.e8-side-right-collapsed .e8-side-right {
   display: none;
 }
+/* The right sidebar's own drag handle: `.e8-resize-x`'s shape and grip,
+   moved to its LEFT edge — the one place a handle sits there, since
+   dragging it widens the column from the other side than the left
+   sidebar's own handle does. */
+.e8-side-right > .e8-resize-x {
+  right: auto;
+  left: 0;
+}
 /* Both collapsed at once: `.e8-sidebar-collapsed` above sets every column
    on its own (it has to — no other rule owns the left two), so a rule
    that only touched the right column here would lose that one's zeroed

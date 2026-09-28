@@ -1453,6 +1453,56 @@ describe('sidebars follow the active tab', () => {
   });
 });
 
+describe('sidebars stay mounted', () => {
+  it('a sidebar entry keeps its own state, hidden rather than unmounted, when another shows in its place', async () => {
+    // Mirrors "typed text survives a tab switch" for the document panes:
+    // the SAME node, not a fresh mount fed from some cache.
+    const ctx = harness();
+    ctx.slots.register({ name: 'shell.sidebar', key: 'a', title: 'A' }, () => (
+      <input data-testid="sidebar-a-input" />
+    ));
+    ctx.slots.register({ name: 'shell.sidebar', key: 'b', title: 'B' }, () => <div>B</div>);
+    ctx.shell.showSidebar('a');
+    render(<Shell ctx={ctx} />);
+    // Never shown, so not mounted at all — not merely hidden.
+    expect(screen.queryByTestId('sidebar-b')).toBeNull();
+    const input = screen.getByTestId<HTMLInputElement>('sidebar-a-input');
+    await userEvent.type(input, 'hello');
+    act(() => ctx.shell.showSidebar('b'));
+    expect(screen.getByTestId('sidebar-a')).not.toBeVisible();
+    expect(screen.getByTestId('sidebar-a-input')).toBe(input); // still mounted
+    expect(input.value).toBe('hello');
+    act(() => ctx.shell.showSidebar('a'));
+    expect(screen.getByTestId('sidebar-a-input')).toBe(input); // the same node back
+    expect(input.value).toBe('hello');
+    expect(screen.getByTestId('sidebar-a')).toBeVisible();
+  });
+
+  it("the activity button of the override is highlighted; a tab's own sidebar highlights no activity button", async () => {
+    const ctx = harness();
+    ctx.slots.register(
+      { name: 'shell.activity', key: 'a', title: 'A', icon: 'a', opens: 'sidebar' },
+      Nop,
+    );
+    ctx.slots.register(
+      { name: 'shell.activity', key: 'explorer', title: 'Explorer', icon: 'e', opens: 'sidebar' },
+      Nop,
+    );
+    ctx.slots.register({ name: 'shell.sidebar', key: 'a', title: 'A' }, Dummy);
+    ctx.slots.register({ name: 'shell.sidebar', key: 'explorer', title: 'Explorer' }, Dummy);
+    ctx.slots.register({ name: 'shell.document', key: 'd', title: 'D', sidebar: 'a' }, Dummy);
+    ctx.shell.openContributed('d');
+    render(<Shell ctx={ctx} />);
+    // The active tab's OWN sidebar is showing — no activity button lit,
+    // even though its key matches one.
+    expect(screen.getByTestId('activity-a')).toHaveAttribute('aria-pressed', 'false');
+    await userEvent.click(screen.getByTestId('activity-explorer'));
+    // An override is showing now — its own button lights, the tab's does not.
+    expect(screen.getByTestId('activity-explorer')).toHaveAttribute('aria-pressed', 'true');
+    expect(screen.getByTestId('activity-a')).toHaveAttribute('aria-pressed', 'false');
+  });
+});
+
 describe('right sidebar', () => {
   it('is collapsed with nothing registered', () => {
     const ctx = harness();
@@ -1461,7 +1511,7 @@ describe('right sidebar', () => {
     expect(screen.getByTestId('shell').className).toContain('e8-side-right-collapsed');
   });
 
-  it("shows the active tab's contribution while its flag is on, and hides when it goes off", () => {
+  it("shows the active tab's contribution while its flag is on, and hides (not unmounts) when it goes off", () => {
     const ctx = harness();
     ctx.shell.open({ key: 'a', title: 'A', component: Dummy, closable: true, sideRight: 'props' });
     render(<Shell ctx={ctx} />);
@@ -1472,10 +1522,22 @@ describe('right sidebar', () => {
     expect(screen.getByTestId('side-right-props')).toHaveTextContent('props here');
     expect(screen.getByTestId('shell').className).not.toContain('e8-side-right-collapsed');
     act(() => ctx.shell.setSideRight('props', false));
-    expect(screen.queryByTestId('side-right-props')).toBeNull();
+    // Once shown, `side-right-props` stays in the DOM — hidden, not
+    // removed — the same rule the document panes and the panel's own
+    // entries already keep; only the collapsed class says nothing is
+    // showing.
+    expect(screen.getByTestId('side-right-props')).not.toBeVisible();
+    expect(screen.getByTestId('shell').className).toContain('e8-side-right-collapsed');
   });
 
-  it('a retracted contribution collapses the region even while its key is shown', () => {
+  it('a retracted contribution stops rendering, though its key stays flagged on', () => {
+    // The collapsed class is keyed on the effective key alone (`sideRight
+    // === undefined`), not on whether a component still backs it — the
+    // same simplification the left sidebar's own collapse already made.
+    // A plugin unloaded out from under a still-flagged key leaves the
+    // column open (nothing tells the shell to give it up) but empty:
+    // `sideRightEntries` no longer has a component for that key, so
+    // there is nothing left to keep mounted.
     const ctx = harness();
     ctx.shell.open({ key: 'a', title: 'A', component: Dummy, closable: true, sideRight: 'props' });
     render(<Shell ctx={ctx} />);
@@ -1485,6 +1547,72 @@ describe('right sidebar', () => {
     );
     act(() => ctx.shell.setSideRight('props', true));
     act(() => off());
-    expect(screen.getByTestId('shell').className).toContain('e8-side-right-collapsed');
+    expect(screen.getByTestId('shell').className).not.toContain('e8-side-right-collapsed');
+    expect(screen.queryByTestId('side-right-props')).toBeNull();
+  });
+
+  it('an entry never shown is not mounted at all', () => {
+    const ctx = harness();
+    ctx.shell.open({ key: 'a', title: 'A', component: Dummy, closable: true, sideRight: 'x' });
+    ctx.slots.register({ name: 'shell.sideRight', key: 'x', title: 'X' }, Dummy);
+    ctx.slots.register({ name: 'shell.sideRight', key: 'y', title: 'Y' }, Dummy);
+    render(<Shell ctx={ctx} />);
+    act(() => ctx.shell.setSideRight('x', true));
+    expect(screen.getByTestId('side-right-x')).toBeVisible();
+    expect(screen.queryByTestId('side-right-y')).toBeNull();
+  });
+
+  it('a side-right entry keeps its own state, hidden rather than unmounted, when another shows in its place', async () => {
+    // Mirrors "typed text survives a tab switch" for the document panes:
+    // the SAME node, not a fresh mount fed from some cache.
+    const ctx = harness();
+    ctx.shell.open({ key: 'a', title: 'A', component: Dummy, closable: true, sideRight: 'a' });
+    ctx.shell.open({ key: 'b', title: 'B', component: Dummy, closable: true, sideRight: 'b' });
+    ctx.slots.register({ name: 'shell.sideRight', key: 'a', title: 'A' }, () => (
+      <input data-testid="side-right-a-input" />
+    ));
+    ctx.slots.register({ name: 'shell.sideRight', key: 'b', title: 'B' }, () => <div>B</div>);
+    ctx.shell.activate('a');
+    ctx.shell.setSideRight('a', true);
+    ctx.shell.setSideRight('b', true);
+    render(<Shell ctx={ctx} />);
+    const input = screen.getByTestId<HTMLInputElement>('side-right-a-input');
+    await userEvent.type(input, 'hello');
+    act(() => ctx.shell.activate('b'));
+    expect(screen.getByTestId('side-right-a')).not.toBeVisible();
+    expect(screen.getByTestId('side-right-a-input')).toBe(input);
+    expect(input.value).toBe('hello');
+    act(() => ctx.shell.activate('a'));
+    expect(screen.getByTestId('side-right-a-input')).toBe(input);
+    expect(input.value).toBe('hello');
+    expect(screen.getByTestId('side-right-a')).toBeVisible();
+  });
+
+  it('dragging resize-side-right leftwards widens it, and the width survives a remount', async () => {
+    // Mirrors the left sidebar's own drag/remount test above.
+    localStorage.removeItem('e8.side-right-w');
+    const ctx = harness();
+    ctx.shell.open({ key: 'a', title: 'A', component: Dummy, closable: true, sideRight: 'props' });
+    ctx.slots.register({ name: 'shell.sideRight', key: 'props', title: 'Properties' }, () => (
+      <p>P</p>
+    ));
+    ctx.shell.setSideRight('props', true);
+    const first = render(<Shell ctx={ctx} />);
+    const root = () => screen.getByTestId('shell');
+    expect(root().style.getPropertyValue('--e8-side-right-w')).toBe('');
+    await userEvent.pointer([
+      {
+        keys: '[MouseLeft>]',
+        target: screen.getByTestId('resize-side-right'),
+        coords: { x: 300, y: 0 },
+      },
+      { coords: { x: 0, y: 0 } }, // dragged LEFT — widens, the opposite sign from the left sidebar's handle
+      { keys: '[/MouseLeft]' },
+    ]);
+    expect(root().style.getPropertyValue('--e8-side-right-w')).toBe('300px');
+    expect(localStorage.getItem('e8.side-right-w')).toBe('300');
+    first.unmount();
+    render(<Shell ctx={ctx} />);
+    expect(screen.getByTestId('shell').style.getPropertyValue('--e8-side-right-w')).toBe('300px');
   });
 });

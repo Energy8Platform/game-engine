@@ -88,8 +88,12 @@ function partition<T>(items: readonly T[], test: (item: T) => boolean): [T[], T[
 /** Narrower than this and a region is a sliver nobody can grab back. */
 const SIZE_MIN = 100;
 
-/** `localStorage` keys for the two draggable sizes (spec §3). */
-const SIZE_KEYS = { sidebar: 'e8.sidebar-w', panel: 'e8.panel-h' } as const;
+/** `localStorage` keys for the three draggable sizes (spec §3). */
+const SIZE_KEYS = {
+  sidebar: 'e8.sidebar-w',
+  panel: 'e8.panel-h',
+  sideRight: 'e8.side-right-w',
+} as const;
 
 /**
  * Failures are data: a private window or storage switched off throws on
@@ -296,6 +300,27 @@ export function Shell({ ctx }: { ctx: Context }) {
   const sidebarSize = useResize(SIZE_KEYS.sidebar, 'x', 1);
   // Dragging the panel's top edge UP makes it taller, hence the sign.
   const panelSize = useResize(SIZE_KEYS.panel, 'y', -1);
+  // Its handle sits on the right aside's LEFT edge, so dragging left (a
+  // shrinking clientX) is what widens it — the mirror image of the left
+  // sidebar's own handle and sign.
+  const sideRightSize = useResize(SIZE_KEYS.sideRight, 'x', -1);
+
+  // Every `shell.sidebar` / `shell.sideRight` key shown at least once stays
+  // in this set for the life of the component, so the entry below is kept
+  // mounted (hidden, not removed) after the pick moves on — the same rule
+  // `documents` and the panel's own entries already keep (Ruling 13, Task
+  // 4), now extended to the two sides. Updated while rendering rather than
+  // in an effect: a set that already has the key is left alone, so this
+  // never loops, and the entry appears in the very render that first shows
+  // it instead of one frame late.
+  const [shownSidebars, setShownSidebars] = useState<ReadonlySet<string>>(() => new Set());
+  if (sidebar !== undefined && !shownSidebars.has(sidebar)) {
+    setShownSidebars(new Set(shownSidebars).add(sidebar));
+  }
+  const [shownSideRight, setShownSideRight] = useState<ReadonlySet<string>>(() => new Set());
+  if (sideRight !== undefined && !shownSideRight.has(sideRight)) {
+    setShownSideRight(new Set(shownSideRight).add(sideRight));
+  }
 
   // The five slot lists below are read straight off `ctx.slots` on every
   // render. `useShell` subscribes to `ctx.slots` too, but for its own
@@ -364,6 +389,7 @@ export function Shell({ ctx }: { ctx: Context }) {
   });
   const activities = byOrder(validActivities);
   const sidebarEntries = ctx.slots.list<SlotMeta & SidebarMeta>(ctx.shell.slots.sidebar);
+  const sideRightEntries = ctx.slots.list<SlotMeta & SidebarMeta>(ctx.shell.slots.sideRight);
   const documentContribs = ctx.slots.list<SlotMeta & DocumentMeta>(ctx.shell.slots.document);
   const panelEntries = byOrder(ctx.slots.list<SlotMeta & PanelMeta>(ctx.shell.slots.panel));
   const statusEntries = byOrder(ctx.slots.list<SlotMeta & StatusMeta>(ctx.shell.slots.status));
@@ -386,12 +412,6 @@ export function Shell({ ctx }: { ctx: Context }) {
 
   const activeSidebarEntry =
     sidebar === undefined ? undefined : sidebarEntries.find((e) => e.key === sidebar);
-  const sideRightEntry =
-    sideRight === undefined
-      ? undefined
-      : ctx.slots
-          .list<SlotMeta & SidebarMeta>(ctx.shell.slots.sideRight)
-          .find((e) => e.key === sideRight);
   const pendingDoc =
     pendingClose === undefined ? undefined : documents.find((d) => d.key === pendingClose);
 
@@ -400,17 +420,22 @@ export function Shell({ ctx }: { ctx: Context }) {
   const sizes = {
     '--e8-sidebar-w': sidebarSize.size === undefined ? undefined : `${sidebarSize.size}px`,
     '--e8-panel-h': panelSize.size === undefined ? undefined : `${panelSize.size}px`,
+    '--e8-side-right-w': sideRightSize.size === undefined ? undefined : `${sideRightSize.size}px`,
   } as CSSProperties;
 
   return (
     <div
       // No sidebar chosen means its column is 0 wide (DESIGN.md §2), not
       // 260px of empty chrome. The right sidebar collapses the same way —
-      // nothing shown, or a shown key nobody (any longer) registers.
+      // keyed on the same effective key `useShell` already resolved, not on
+      // whether something is still registered for it (a plugin unloading
+      // out from under a still-flagged key leaves the column open but
+      // empty, same as an open document pane with a withdrawn component
+      // would).
       className={[
         'e8-shell',
         sidebar === undefined ? 'e8-sidebar-collapsed' : '',
-        sideRightEntry === undefined ? 'e8-side-right-collapsed' : '',
+        sideRight === undefined ? 'e8-side-right-collapsed' : '',
       ]
         .filter(Boolean)
         .join(' ')}
@@ -423,7 +448,12 @@ export function Shell({ ctx }: { ctx: Context }) {
             key={entry.key}
             ctx={ctx}
             entry={entry}
-            active={entry.opens === 'sidebar' && sidebar === entry.key}
+            // Highlighted only for the OVERRIDE, never for a tab's own
+            // sidebar showing on its own account: `sidebar` (the effective
+            // key) differs from `active?.sidebar` (what the tab itself
+            // declares) exactly when an override picked it — see
+            // `effectiveLeft` in `shell.tsx`, `override ?? active?.sidebar`.
+            active={entry.opens === 'sidebar' && sidebar === entry.key && sidebar !== active?.sidebar}
           />
         ))}
       </nav>
@@ -434,13 +464,20 @@ export function Shell({ ctx }: { ctx: Context }) {
           data-testid="resize-sidebar"
           {...sidebarSize.handlers}
         />
-        {sidebar === undefined ? null : activeSidebarEntry ? (
-          <div data-testid={`sidebar-${sidebar}`}>
-            <activeSidebarEntry.component ctx={ctx} />
-          </div>
-        ) : (
+        {/* Every entry shown at least once stays mounted, hidden rather
+            than unmounted, the same rule the document panes and the
+            panel's own entries already keep — so a half-typed field
+            survives the pick moving to a different sidebar and back. */}
+        {sidebarEntries
+          .filter((entry) => shownSidebars.has(entry.key))
+          .map((entry) => (
+            <div key={entry.key} data-testid={`sidebar-${entry.key}`} hidden={entry.key !== sidebar}>
+              <entry.component ctx={ctx} />
+            </div>
+          ))}
+        {sidebar !== undefined && activeSidebarEntry === undefined ? (
           <p className="e8-empty">{`nothing registered for the "${sidebar}" sidebar`}</p>
-        )}
+        ) : null}
       </aside>
 
       <div className="e8-editors">
@@ -512,11 +549,23 @@ export function Shell({ ctx }: { ctx: Context }) {
       </div>
 
       <aside className="e8-side-right" data-testid="side-right">
-        {sideRightEntry ? (
-          <div data-testid={`side-right-${sideRight}`}>
-            <sideRightEntry.component ctx={ctx} />
-          </div>
-        ) : null}
+        <div
+          className="e8-resize e8-resize-x"
+          data-testid="resize-side-right"
+          {...sideRightSize.handlers}
+        />
+        {/* Same mount-once-hide-after rule as the left sidebar above. */}
+        {sideRightEntries
+          .filter((entry) => shownSideRight.has(entry.key))
+          .map((entry) => (
+            <div
+              key={entry.key}
+              data-testid={`side-right-${entry.key}`}
+              hidden={entry.key !== sideRight}
+            >
+              <entry.component ctx={ctx} />
+            </div>
+          ))}
       </aside>
 
       <div
