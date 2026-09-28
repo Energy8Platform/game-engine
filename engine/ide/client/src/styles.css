@@ -1756,49 +1756,18 @@ input[type='radio'] {
   border-top: 1px solid var(--e8-border);
 }
 
-/* Reels document: the sections (one per reel-related row, `reels1`'s own
-   `grid`/`win`/`board` split three ways) scrolling on the left, the reel
-   lab canvas on the right — a toolbar of test actions over the stage,
-   same shape as the Symbols canvas' own toolbar-over-stage. Two columns
-   at 1000px and up; below that the sections stack above the canvas, both
-   scrolling the pane itself instead of a fixed-height column each. */
+/* Reels document: a toolbar of test actions over the reel lab canvas,
+   same shape as the Symbols canvas' own toolbar-over-stage — the sections
+   that used to sit beside it now live in `ReelsSettings`, the tab's right
+   sidebar (styled with `.e8-reels-settings` below). */
 .e8-doc-pane:has(> .e8-reels-doc) {
   padding: 0;
   overflow: hidden;
 }
 .e8-reels-doc {
-  display: grid;
-  grid-template-columns: minmax(280px, 380px) minmax(0, 1fr);
-  height: 100%;
-}
-.e8-reels-sections {
-  display: grid;
-  align-content: start;
-  gap: 12px;
-  min-height: 0;
-  padding: 12px;
-  overflow: auto;
-  border-right: 1px solid var(--e8-border);
-}
-.e8-reels-section {
-  background: var(--e8-surface);
-  border: 1px solid var(--e8-border);
-  border-radius: var(--e8-radius-sm);
-  padding: 12px;
-}
-.e8-reels-section-header {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  margin-bottom: 8px;
-}
-.e8-reels-section-header strong {
-  font-size: var(--e8-size);
-}
-.e8-reels-canvas {
   display: flex;
   flex-direction: column;
-  min-height: 0;
+  height: 100%;
 }
 .e8-reels-toolbar {
   display: flex;
@@ -1841,17 +1810,39 @@ input[type='radio'] {
   border: 0;
   background: var(--e8-editor-bg);
 }
-@media (max-width: 1000px) {
-  .e8-reels-doc {
-    grid-template-columns: none;
-    grid-template-rows: auto minmax(0, 1fr);
-    overflow: auto;
-  }
-  .e8-reels-sections {
-    overflow: visible;
-    border-right: 0;
-    border-bottom: 1px solid var(--e8-border);
-  }
+/* ReelsSettings (right sidebar): `reels1`'s own `grid`/`win`/`board`
+   plus the whole config of `motion1`/`anticipation1`/`cascade1`/
+   `features1`, one boxed section each. The schema form's three-column
+   field grid (`.e8-field`, built for the wide Composition rows) is too
+   wide for the `--e8-side-right-w` column it draws in here — same fix
+   `.e8-properties` applies to the node inspector: each field stacks label
+   over control instead. */
+.e8-reels-settings {
+  display: grid;
+  align-content: start;
+  gap: 12px;
+  padding: 12px;
+}
+.e8-reels-settings .e8-field {
+  grid-template-columns: minmax(0, 1fr);
+}
+.e8-reels-settings .e8-field > .e8-field-hint {
+  grid-column: 1 / -1;
+}
+.e8-reels-section {
+  background: var(--e8-surface);
+  border: 1px solid var(--e8-border);
+  border-radius: var(--e8-radius-sm);
+  padding: 12px;
+}
+.e8-reels-section-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+.e8-reels-section-header strong {
+  font-size: var(--e8-size);
 }
 
 /* Task 6: `SymbolChips` (a `fieldOverrides` entry for `triggerSymbols`/
