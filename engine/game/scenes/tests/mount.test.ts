@@ -1023,12 +1023,15 @@ describe('live props', () => {
     ]);
     await scenes.show('base_game');
     // A host is visible, so this flips the EMBEDDED copy — `big_win`'s own
-    // top-level mount stays off screen, and it is the one `view()` answers.
+    // top-level mount stays off screen. `view()` answers the copy actually
+    // ON SCREEN (the embedded one); the standalone mount is reached through
+    // `sceneView` directly.
     await scenes.show('big_win');
     expect(scenes.setProps({ scene: 'big_win', node: 'banner' }, { text: 'x99' })).toBe(true);
     const onScreen = scenes.sceneView('base_game')!.getChildByLabel('banner', true) as Text;
-    const standalone = byId(scenes, 'big_win', 'banner') as Text;
+    const standalone = scenes.sceneView('big_win')!.getChildByLabel('banner') as Text;
     expect(onScreen).not.toBe(standalone);
+    expect(byId(scenes, 'big_win', 'banner')).toBe(onScreen);
     expect(onScreen.text).toBe('x99');
     expect(standalone.text).toBe('x99');
   });

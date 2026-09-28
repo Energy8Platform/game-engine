@@ -344,7 +344,10 @@ describe('the portrait variant', () => {
     await scenes.show('a');
     await scenes.show('b');
     const copy = view('host').children.find((c) => c.label === 'title')!;
-    const own = scenes.view({ scene: 'b', node: 'title' })!;
+    // `b`'s own top-level mount is off screen (only the embedded copy under
+    // `a`'s `host` is shown) — `scenes.view()` now answers THAT one, so the
+    // standalone mount is reached through `sceneView` directly.
+    const own = scenes.sceneView('b')!.getChildByLabel('title') as Container;
     const copyKid = view('host').children.find((c) => c.label === 'wrap')!.children[0]!;
     expect([copy.visible, own.visible]).toEqual([true, true]);
     scenes.resize(...PORTRAIT);

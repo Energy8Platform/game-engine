@@ -173,8 +173,44 @@ export interface ScenesService {
    */
   mountCell(id: string, data?: Record<string, unknown>): CellMount | null;
   sceneView(id: string): Container | undefined;
-  /** A node's view by id, top-level or nested under a `container`/another node — the top-level map first (the common case, O(1)), `all` otherwise. */
+  /**
+   * THE copy of this node that is ON SCREEN, not just A copy of it.
+   * Nesting is by copy (the module doc): a document some visible `scene`
+   * node embeds is mounted TWICE, once as its own (usually hidden)
+   * top-level mount and once as the host's subtree, and only one of those
+   * is what the player sees. Among every mounted copy (`views`), this
+   * answers the one whose HOST — the document whose own top-level mount
+   * holds it — is currently shown (`visible()`), preferring the host
+   * shown LATEST when more than one qualifies (a document embedded in two
+   * shown hosts, or embedded in one and ALSO shown on its own). Nothing
+   * about the node is on screen at all → the first mounted copy, same as
+   * every version of this before nesting-awareness existed — there is
+   * nothing to prefer between two copies neither of which anyone can see.
+   * `undefined` when nothing mounted the node. A plugin animating a view
+   * (`@energy8engine/flow-fx`'s `tween`) wants exactly this, never a copy
+   * nobody can see: tweening the wrong one moves numbers, not pixels.
+   */
   view(ref: SceneRef): Container | undefined;
+  /**
+   * Every mounted copy of the node — the document's own top-level mount
+   * and any copy a `scene` node embedded it as — in mount order (`all`'s
+   * order across every `Mount`, own mount first since it always mounts
+   * before anything can embed it). `[]` when nothing mounted it. `view`
+   * picks the one of these that is actually on screen; this is every
+   * candidate it picked from.
+   */
+  views(ref: SceneRef): Container[];
+  /**
+   * Loads what `id` needs — its own `assetsOf`, and anything a row
+   * `require`d — skipping whatever is already loaded. `show(id)` calls
+   * this itself, so calling it ahead of time (a preload, or posing a view
+   * before the game ever shows the document) makes the `show` that
+   * follows ask the loader for nothing new. The refresh this ends with is
+   * NARROW: only the nodes fed by what THIS call loaded re-run their
+   * `update` (`refresh`'s own doc has the exact rule) — a pose on any
+   * other view, in any other document, is left alone.
+   */
+  load(id: string): Promise<void>;
   /**
    * Patches a mounted node's props for THE MOUNTS, not the document: the
    * merge (document props + earlier patches + `patch`) goes back through
@@ -793,15 +829,29 @@ export function createScenes(options: CreateScenesOptions): ScenesService {
 
   /**
    * Lets every mounted node re-read what it depends on (a texture after a
-   * load or an unload). A throwing `update` (a media type filling itself
+   * load or an unload). With `paths`, this is NARROW: an entry whose type
+   * DECLARES `assets` only re-runs when its current ones (`e.props`, the
+   * live-patched props — a `setProps` patch is not undone by this) meet
+   * `paths`; everything else is skipped rather than re-run for nothing —
+   * a pose on a view belonging to some other document must survive a load
+   * that has nothing to do with it (F16: `loadPaths` used to end in a
+   * blanket sweep, wiping any pose anywhere on every load). A type that
+   * never declares `assets` has no way to say "not me", so it stays in
+   * the sweep regardless of `paths` — the same every-entry pass this
+   * always was for `container`/`scene`/anything whose `update` does not
+   * depend on a loaded asset. No `paths` at all (every OTHER caller: a
+   * remount, `hide`'s post-unload sweep) is that same original blanket
+   * sweep, unfiltered. A throwing `update` (a media type filling itself
    * in once its asset lands) must not stop the loop: every sibling still
    * needs its own refresh, and the scene must still show. Reported once
    * per entry — `failed` is cleared only by a remount, which rebuilds the
    * entry from scratch.
    */
-  function refresh(): void {
+  function refresh(paths?: string[]): void {
     for (const m of mounted.values())
       for (const e of m.all) {
+        const need = e.type.assets?.(e.props);
+        if (paths && need && !need.some((p) => paths.includes(p))) continue;
         try {
           e.type.update?.(e.view, e.props, mountCtx([]));
         } catch (err) {
@@ -866,6 +916,34 @@ export function createScenes(options: CreateScenesOptions): ScenesService {
     return [...mounted.values()].flatMap((m) => m.all.filter((e) => e.where === where));
   };
 
+  /**
+   * The document whose OWN top-level mount holds `e` — its own id for its
+   * own mount, the embedding document's id for a copy a `scene` node made.
+   * `undefined` only for a `mountCell` copy, which belongs to no `Mount`
+   * at all (never reaches here through `entriesOf`, which only ever walks
+   * `mounted`). O(mounts×entries) — fine at these sizes.
+   * ponytail: a host id cached on the entry at mount time would be the
+   * upgrade if this scan ever shows up in a profile.
+   */
+  const hostOf = (e: Entry): string | undefined => {
+    for (const [id, m] of mounted) if (m.all.includes(e)) return id;
+    return undefined;
+  };
+
+  /**
+   * `ScenesService.view` — see its doc for the "one copy, on screen"
+   * contract. `visibleIds` is walked from the END: the LATEST shown host
+   * wins when more than one of `entriesOf(ref)`'s hosts is shown.
+   */
+  const viewOf = (ref: SceneRef): Container | undefined => {
+    const entries = entriesOf(ref);
+    for (let i = visibleIds.length - 1; i >= 0; i--) {
+      const shown = entries.find((e) => hostOf(e) === visibleIds[i]);
+      if (shown) return shown.view;
+    }
+    return entryOf(ref)?.view;
+  };
+
   /** A node's document props, its applied portrait override over them, its live `setProps` patch on top — what the common pass reads. */
   const rawOf = (e: Entry): Record<string, unknown> =>
     e.variant || e.live ? { ...e.node.props, ...e.variant, ...e.live } : e.node.props;
@@ -922,7 +1000,12 @@ export function createScenes(options: CreateScenesOptions): ScenesService {
     highlightBox.rect(tl.x, tl.y, br.x - tl.x, br.y - tl.y).stroke({ width: 2, color: 0x38bdf8 });
   }
 
-  /** One batch, blamed on `where`; a failure is reported per path, never thrown. */
+  /**
+   * One batch, blamed on `where`; a failure is reported per path, never
+   * thrown. The refresh at the end is scoped to `need` — only the nodes
+   * THIS batch fed re-run (`refresh`'s own doc has the exact rule); a
+   * pose on a view this batch had nothing to do with is left alone.
+   */
   async function loadPaths(where: string, need: string[]): Promise<void> {
     if (need.length === 0) return;
     try {
@@ -934,7 +1017,7 @@ export function createScenes(options: CreateScenesOptions): ScenesService {
       for (const p of need)
         error(where, `asset "${p}" failed to load: ${why}`, 'check the path under the project');
     }
-    refresh();
+    refresh(need);
     redraw();
   }
 
@@ -1135,6 +1218,7 @@ export function createScenes(options: CreateScenesOptions): ScenesService {
     },
     assetsOf: (id) => assetsOf(id),
     require: (paths) => requireAssets(paths),
+    load: (id) => enqueue(() => load(id)),
     onFrame: (fn) => onFrame(fn),
     mountDoc(id, chain) {
       const doc = docs.get(id);
@@ -1248,7 +1332,8 @@ export function createScenes(options: CreateScenesOptions): ScenesService {
       };
     },
     sceneView: (id) => mounted.get(id)?.view,
-    view: (ref) => entryOf(ref)?.view,
+    view: (ref) => viewOf(ref),
+    views: (ref) => entriesOf(ref).map((e) => e.view),
     setProps(ref, patch) {
       const entries = entriesOf(ref);
       if (entries.length === 0) {
