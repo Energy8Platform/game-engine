@@ -677,4 +677,23 @@ describe('ReelsDocument — canvas error/silence (Task 5)', () => {
     c2.ready();
     expect(screen.getByTestId('reels-action-status')).toHaveTextContent('');
   });
+
+  // An `error` counts as the canvas answering too — its own message must
+  // outlive the silence timer, not get overwritten by CANVAS_SILENT.
+  it('an error with no ready after it: the error text survives past 10s', async () => {
+    const { ctx } = await harness([row('reels1')]);
+    vi.useFakeTimers();
+    try {
+      renderDocument(ctx);
+      const c = canvas();
+      c.error({ message: 'boom' });
+      expect(screen.getByTestId('reels-action-status')).toHaveTextContent('boom');
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(10_000);
+      });
+      expect(screen.getByTestId('reels-action-status')).toHaveTextContent('boom');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });

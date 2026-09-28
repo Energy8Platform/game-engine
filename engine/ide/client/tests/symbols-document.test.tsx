@@ -493,8 +493,34 @@ describe('SymbolsDocument', () => {
           await vi.advanceTimersByTimeAsync(10_000);
         });
         expect(screen.getByTestId('symbols-status')).toHaveTextContent(CANVAS_SILENT);
-        frame(iframe, 'ready', {});
+        // `frame`'s own `act()` only flushes the synchronous `onReady`; the
+        // `ready` handler's `tell()`/`askSnapshot()` calls resolve on a
+        // later microtask (the canvas mock answers `snapshot`/`zoom`
+        // straight away) — awaited here so that settling is flushed too,
+        // same as every other `ready` assertion below.
+        await act(async () => {
+          frame(iframe, 'ready', {});
+        });
         expect(screen.queryByTestId('symbols-status')).toBeNull();
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    // An `error` counts as the canvas answering too — its own message must
+    // outlive the silence timer, not get overwritten by CANVAS_SILENT.
+    it('an error with no ready after it: the error text survives past 10s', async () => {
+      const { ctx } = await booted();
+      vi.useFakeTimers();
+      try {
+        renderDocument(ctx);
+        const { iframe } = canvas();
+        frame(iframe, 'error', { message: 'no "symbols" service' });
+        expect(screen.getByTestId('symbols-status')).toHaveTextContent('no "symbols" service');
+        await act(async () => {
+          await vi.advanceTimersByTimeAsync(10_000);
+        });
+        expect(screen.getByTestId('symbols-status')).toHaveTextContent('no "symbols" service');
       } finally {
         vi.useRealTimers();
       }
