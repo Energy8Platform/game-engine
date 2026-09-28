@@ -19,9 +19,10 @@
  *     back through `nodeCopies`, independently of the `scenes.view()`
  *     lookup the tween itself used.
  *  3. **Composed web font** (F19): `scenes1.fonts` loads a real `.woff2`
- *     before the first document mounts; `document.fonts.check(...)`
- *     proves the face is usable, and a `text` node naming that family
- *     renders in it.
+ *     before the first document mounts; a `FontFace` of that family is in
+ *     `document.fonts` with status `loaded`, and a `text` node naming the
+ *     family measures differently from a `serif` control (same string,
+ *     same size) — it was laid out in the font, not the fallback.
  *  4. **Hidden bar, fitted caption** (F20): `shell { visible: 'false' }`
  *     zeroes the bar's height and bottom inset; the scenes runtime re-fits
  *     on its own next tick (no resize event), so the design's fitted scale
@@ -230,7 +231,10 @@ test('scenes1.fonts loads a real web font before the first mount; a text node re
 nodes:
   - id: label
     type: text
-    props: { text: Hi, family: E8Test, size: 24, x: 0, y: 0 }
+    props: { text: 'Quick brown fox 0123', family: E8Test, size: 24, x: 0, y: 0 }
+  - id: control
+    type: text
+    props: { text: 'Quick brown fox 0123', family: serif, size: 24, x: 0, y: 60 }
 `,
   );
   writeFileSync(
@@ -246,8 +250,34 @@ edges:
   host = await startDevHost(dir);
   await readyPage(page);
 
+  // A face named E8Test that actually LOADED — not `document.fonts.check`,
+  // which answers true for a family with no face at all.
   await expect
-    .poll(() => page.evaluate(() => document.fonts.check('24px "E8Test"')), { timeout: 10_000 })
+    .poll(
+      () =>
+        page.evaluate(() =>
+          [...document.fonts].some(
+            (f) => f.family.replace(/"/g, '') === 'E8Test' && f.status === 'loaded',
+          ),
+        ),
+      { timeout: 10_000 },
+    )
+    .toBe(true);
+  // ...and the node was MEASURED in it: the same string at the same size in
+  // `serif` (what a family with no face falls back to) lays out to another
+  // width. pixi never re-measures a text when a font lands later, so this
+  // also proves the font was in before the mount.
+  await expect
+    .poll(
+      () =>
+        page.evaluate(() => {
+          const api = (window as any).__e8;
+          const label = api.nodeProps('fontdoc', 'label')?.width;
+          const control = api.nodeProps('fontdoc', 'control')?.width;
+          return label > 0 && control > 0 && label !== control;
+        }),
+      { timeout: 10_000 },
+    )
     .toBe(true);
   await expect
     .poll(() => page.evaluate(() => (window as any).__e8.nodeFontFamily('fontdoc', 'label')), {
