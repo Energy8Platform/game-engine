@@ -83,12 +83,14 @@ function symbolIds(
 /** `reels1.config.grid` merged over the schema's own defaults — the shape
  * `BoardPainter` measures the saved `board` against. `rowsPerReel` (an
  * array, one entry per reel — Megaways/variable-height reels) overrides
- * the uniform `rows` entirely when set, same rule `GridSchema` itself
- * documents; unset, every column gets the same `rows`. */
+ * the uniform `rows` entirely when its length is `cols` — reel-core's
+ * `normalizeGrid` drops one of any other length, so it does not count
+ * here either; otherwise every column gets the same `rows`. */
 function boardShape(config: Record<string, unknown>): BoardShape {
   const grid = (config.grid ?? {}) as { cols?: number; rows?: number; rowsPerReel?: number[] };
   const cols = grid.cols ?? 5;
-  const rows = grid.rowsPerReel ?? Array(cols).fill(grid.rows ?? 3);
+  const rows =
+    grid.rowsPerReel?.length === cols ? grid.rowsPerReel : Array(cols).fill(grid.rows ?? 3);
   return { cols, rows };
 }
 

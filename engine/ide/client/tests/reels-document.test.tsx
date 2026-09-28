@@ -403,6 +403,20 @@ describe('ReelsDocument — symbol editors (Task 6)', () => {
     expect(within(section).queryByTestId('board-cell-1-2')).toBeNull();
   });
 
+  // Final review M6: reel-core's `normalizeGrid` drops a `rowsPerReel`
+  // whose length isn't `cols` — the board then has `rows` everywhere, and
+  // the painter must measure against that same shape.
+  it('a rowsPerReel whose length is not cols is ignored, as the reel system does', async () => {
+    const { ctx } = await harness([
+      row('reels1', { grid: { cols: 2, rows: 2, rowsPerReel: [1] } }),
+    ]);
+    renderDocument(ctx);
+    const section = screen.getByTestId('reels-section-board');
+    expect(within(section).getByTestId('board-cell-0-1')).toBeInTheDocument();
+    expect(within(section).getByTestId('board-cell-1-1')).toBeInTheDocument();
+    expect(within(section).queryByTestId('board-cell-0-2')).toBeNull();
+  });
+
   it('painting a cell writes reels1 with { ...config, board }', async () => {
     const { ctx, updateCalls } = await harness([
       row('reels1', { grid: { cols: 2, rows: 1 }, win: { glow: false } }),
