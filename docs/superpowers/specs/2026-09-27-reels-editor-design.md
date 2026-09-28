@@ -152,3 +152,26 @@ Not now: presets, auto-replay, slow motion, a ways counter.
 - Running `features1` steps from the canvas.
 - Moving the Reels UI into the reels package's own client half.
 - `stacked`/`holdAndSpin`/… (slice 36's list).
+
+## 8. Amendments made while running the plan
+
+- **Tumble on the canvas is `board.tumble(step)` alone** — a `TumbleStep`
+  carries `winning`/`removed`; the controller highlights, removes and drops
+  them (a separate `revealWins` + `remove` would highlight twice).
+- **The lab board is measured once per view and screen size**, never per
+  frame — a spin's overshoot or glow would otherwise make the board pulse.
+- **The start board is normalised where it enters `reels1`**: plain ids,
+  numbers, `null` and `{ symbol }` records all seat (the runtime read only
+  records before, so a painted board rendered empty); the painter shows and
+  keeps records.
+- **`frameStyle`'s states have their built-in colours as schema defaults**
+  (pinned against `DEFAULT_CELL_FRAME_STYLE`), so the form shows the real
+  colours instead of black.
+- **The Reels forms carry their own id prefix** (`reels-<row>`) — the
+  Composition stays mounted beside them.
+- **A write re-applies only its row on the canvas**; the canvas' `ready`
+  re-applies all. Lab actions wait up to 60 s; a disabled Scatters says why
+  (`no anticipation1 row`, `turn on Anticipation › enabled`, `no trigger
+  symbols`); a row the canvas could not apply is named in the status.
+- **Win/Tumble act on what the last spin or tumble left on the same
+  board**; after a rebuild they answer `spin first`.
