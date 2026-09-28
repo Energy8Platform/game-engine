@@ -24,6 +24,7 @@ import { useWorkspace } from '../plugins/workspace';
 import { useGameComposition } from '../plugins/game-composition';
 import { activateOnKey } from './activate';
 import { createCanvasRpc, type CanvasRpc } from './canvas-rpc';
+import { CANVAS_SILENT, useCanvasSilence } from './useCanvasSilence';
 import { ExplorerMenu } from './ExplorerMenu';
 import {
   addState,
@@ -205,6 +206,16 @@ export function SymbolsDocument({ ctx }: { ctx: Context }) {
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [ctx, rpc]);
+
+  // A canvas that never boots (a broken editor.html, a throw before
+  // scene-edit's symbol mode is up) leaves this document silent — say so
+  // after 10s; a later `ready` (this canvas or a remount) clears it.
+  useCanvasSilence(
+    rpc,
+    canvasKey,
+    () => setStatus(CANVAS_SILENT),
+    () => setStatus(null),
+  );
 
   // Every later doc change is a `replaceSymbols`; every later selection
   // change (that isn't a deselect) is a `symbol` — the canvas keeps

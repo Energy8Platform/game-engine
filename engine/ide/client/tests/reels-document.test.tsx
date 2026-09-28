@@ -6,6 +6,7 @@ import type { GameCompositionRow, SymbolsDoc } from '@energy8engine/contracts';
 import * as slots from '../src/plugins/slots';
 import * as reels from '../src/plugins/reels';
 import { CompositionScreen } from '../src/screens/CompositionScreen';
+import { CANVAS_SILENT } from '../src/shell/useCanvasSilence';
 
 /**
  * Task 5's own harness — `symbols-harness.tsx`'s shape, trimmed to what
@@ -166,7 +167,16 @@ async function harness(
       for (const fn of listeners) fn();
     });
   };
-  return { ctx, updateCalls, setRows };
+  /** Same shape a host `reload: true` verdict leaves: `reloads` up one,
+   * remounting the canvas (`canvasKey` includes it) — the one way this
+   * fake drives an actual canvas remount. */
+  const bumpReloads = () => {
+    act(() => {
+      service.reloads += 1;
+      for (const fn of listeners) fn();
+    });
+  };
+  return { ctx, updateCalls, setRows, bumpReloads };
 }
 
 function renderDocument(ctx: Context) {
@@ -205,19 +215,27 @@ function canvas() {
     posted()
       .filter((m) => m.type === 'e8:ide:req' && m.method === method)
       .map((m) => m.params);
-  const ready = () =>
-    window.dispatchEvent(
-      new MessageEvent('message', {
-        data: { type: 'e8:ide:evt', event: 'ready', payload: { reels: true } },
-        origin: PREVIEW_URL,
-        source: iframe.contentWindow,
-      }),
-    );
+  // `act()`: both events can land a synchronous `setStatus` now
+  // (`useCanvasSilence`'s `ready` handler, the `error` handler) — outside
+  // any testing-library event helper, same reasoning as `harness`'s own `act()` use above.
+  const evt = (event: string, payload: unknown) =>
+    act(() => {
+      window.dispatchEvent(
+        new MessageEvent('message', {
+          data: { type: 'e8:ide:evt', event, payload },
+          origin: PREVIEW_URL,
+          source: iframe.contentWindow,
+        }),
+      );
+    });
+  const ready = () => evt('ready', { reels: true });
+  const error = (payload: unknown) => evt('error', payload);
   return {
     iframe,
     posted,
     reqs,
     ready,
+    error,
     setAnswer: (m: string, result: unknown) => answers.set(m, result),
   };
 }
@@ -599,5 +617,64 @@ describe('ReelsDocument — canvas actions', () => {
     await waitFor(() =>
       expect(screen.getByTestId('reels-action-status')).toHaveTextContent('no symbols'),
     );
+  });
+});
+
+describe('ReelsDocument — canvas error/silence (Task 5)', () => {
+  it("the canvas' own error event shows its message in reels-action-status", async () => {
+    const { ctx } = await harness([row('reels1')]);
+    renderDocument(ctx);
+    const c = canvas();
+    c.error({ message: 'boom' });
+    expect(await screen.findByTestId('reels-action-status')).toHaveTextContent('boom');
+  });
+
+  it('no ready within 10s of mount shows the silence text', async () => {
+    const { ctx } = await harness([row('reels1')]);
+    vi.useFakeTimers();
+    try {
+      renderDocument(ctx);
+      canvas();
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(10_000);
+      });
+      expect(screen.getByTestId('reels-action-status')).toHaveTextContent(CANVAS_SILENT);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('a ready before 10s means no silence text', async () => {
+    const { ctx } = await harness([row('reels1')]);
+    vi.useFakeTimers();
+    try {
+      renderDocument(ctx);
+      const c = canvas();
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(5000);
+      });
+      c.ready();
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(10_000);
+      });
+      expect(screen.getByTestId('reels-action-status')).toHaveTextContent('');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  // Review Focus 5: an error, then a remount (a new canvas key) that DOES
+  // answer ready — the old error must not survive over a working canvas.
+  it('an error, then a remount and ready, clears the status', async () => {
+    const { ctx, bumpReloads } = await harness([row('reels1')]);
+    renderDocument(ctx);
+    const c1 = canvas();
+    c1.error({ message: 'boom' });
+    expect(await screen.findByTestId('reels-action-status')).toHaveTextContent('boom');
+
+    bumpReloads(); // a new canvasKey: the iframe remounts
+    const c2 = canvas();
+    c2.ready();
+    expect(screen.getByTestId('reels-action-status')).toHaveTextContent('');
   });
 });

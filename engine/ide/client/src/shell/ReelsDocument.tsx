@@ -9,6 +9,7 @@ import type { FieldProps } from '../schema-form/fields';
 import { BoardPainter, type BoardShape } from './BoardPainter';
 import { SymbolChips } from './SymbolChips';
 import { createCanvasRpc, type CanvasRpc } from './canvas-rpc';
+import { CANVAS_SILENT, useCanvasSilence } from './useCanvasSilence';
 
 /**
  * The Reels document: `reels1`'s config split into sections (its own
@@ -198,12 +199,23 @@ export function ReelsDocument({ ctx }: { ctx: Context }) {
   useEffect(() => {
     rpcRef.current = rpc;
     rpc.on('ready', () => sendRows());
+    rpc.on('error', (payload) => setStatus((payload as { message: string }).message));
     return () => {
       rpc.dispose();
       rpcRef.current = null;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [ctx, rpc]);
+
+  // A canvas that never boots (a broken editor.html, a throw before
+  // scene-edit's reels mode is up) leaves this document silent — say so
+  // after 10s; a later `ready` (this canvas or a remount) clears it.
+  useCanvasSilence(
+    rpc,
+    canvasKey,
+    () => setStatus(CANVAS_SILENT),
+    () => setStatus(null),
+  );
 
   /** The iframe's own ref, not its `load` event — `contentWindow` exists as soon as it's inserted (`SymbolsDocument`'s own reasoning). */
   const attachIframe = useCallback(

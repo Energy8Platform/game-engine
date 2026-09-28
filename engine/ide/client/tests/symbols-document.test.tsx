@@ -2,6 +2,7 @@ import { act, fireEvent, screen, waitFor } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import type { Diagnostic, SymbolsDoc } from '@energy8engine/contracts';
 import { EMPTY } from '../src/shell/symbols-doc';
+import { CANVAS_SILENT } from '../src/shell/useCanvasSilence';
 import {
   accept,
   boot,
@@ -15,15 +16,22 @@ import {
   type Answer,
 } from './symbols-harness';
 
-/** A frame FROM the iframe: the message event the browser would deliver to the tab's window. */
+/**
+ * A frame FROM the iframe: the message event the browser would deliver to
+ * the tab's window. `act()`: `ready` can now land a synchronous `setStatus`
+ * too (`useCanvasSilence`'s own handler, beside `askSnapshot`'s existing
+ * async ones) — outside any testing-library event helper otherwise.
+ */
 function frame(iframe: HTMLIFrameElement, event: string, payload: unknown) {
-  window.dispatchEvent(
-    new MessageEvent('message', {
-      data: { type: 'e8:ide:evt', event, payload },
-      origin: PREVIEW_URL,
-      source: iframe.contentWindow,
-    }),
-  );
+  act(() => {
+    window.dispatchEvent(
+      new MessageEvent('message', {
+        data: { type: 'e8:ide:evt', event, payload },
+        origin: PREVIEW_URL,
+        source: iframe.contentWindow,
+      }),
+    );
+  });
 }
 
 /**
@@ -458,6 +466,38 @@ describe('SymbolsDocument', () => {
       const { iframe } = canvas();
       frame(iframe, 'error', { message: 'no "symbols" service' });
       expect(await screen.findByTestId('symbols-status')).toHaveTextContent('no "symbols" service');
+    });
+
+    it('no ready within 10s of mount shows the silence text', async () => {
+      const { ctx } = await booted();
+      vi.useFakeTimers();
+      try {
+        renderDocument(ctx);
+        canvas();
+        await act(async () => {
+          await vi.advanceTimersByTimeAsync(10_000);
+        });
+        expect(screen.getByTestId('symbols-status')).toHaveTextContent(CANVAS_SILENT);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it('a ready after the silence text clears it', async () => {
+      const { ctx } = await booted();
+      vi.useFakeTimers();
+      try {
+        renderDocument(ctx);
+        const { iframe } = canvas();
+        await act(async () => {
+          await vi.advanceTimersByTimeAsync(10_000);
+        });
+        expect(screen.getByTestId('symbols-status')).toHaveTextContent(CANVAS_SILENT);
+        frame(iframe, 'ready', {});
+        expect(screen.queryByTestId('symbols-status')).toBeNull();
+      } finally {
+        vi.useRealTimers();
+      }
     });
 
     it('shows "canvas unavailable" when there is no project open, and renders no iframe', async () => {
