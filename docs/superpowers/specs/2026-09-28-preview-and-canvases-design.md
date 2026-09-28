@@ -123,3 +123,22 @@ skipped: it is a plugin step, not a symbol state).
 - The paper-duel overlay (the user removes `#controls` from its page).
 - Symbol states that play over the static image (the glue).
 - Sidebars per tab (slice 44), undo/redo (slice 45).
+
+## 9. Amendments made while running the plan
+
+- **The shell shows the kept wallet.** session-host hands consumers an
+  `init` whose `balance` is the stored wallet (the key is still built from
+  the fetched seed), so a refresh or any reload shows the leftover at once
+  — `SessionInit.balance` is what the player can spend right now. Before,
+  the bar showed the seed until the first spin.
+- **A stored wallet number is a safe integer ≥ 0**, else 0.
+- **An `error` counts as the canvas answering**: the silence timer stands
+  down on `error` as on `ready`; a later `ready` clears only a message the
+  canvas itself set (the silence text or its last error), never the
+  document's own; no timer runs while there is no canvas.
+- **Reels mode says `ready` before its first fill can report**, and a
+  fill's failure (a throw or a rejection) is a canvas `error` while the
+  board is still current.
+- **A rebuilt board of the same shape keeps the symbols shown** when every
+  id is still known (editing a colour or a gap does not reshuffle); another
+  shape gets a random board.
