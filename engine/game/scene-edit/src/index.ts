@@ -551,10 +551,11 @@ export function apply(ctx: Context, config: SceneEditConfig): void {
      * back by `win`/`tumble` so they act on what is actually there, and
      * ignored once `currentBoard()` is a different one (a `reels1`
      * re-apply rebuilt it — its cells are the start board now, which the
-     * lab cannot read, so `'spin first'`). `busy` serialises the four
-     * actions one at a time (like a real spin) and is what `snapshot`
-     * reports below. `Math.random` here; `lab.test.ts` is where a seeded
-     * `Rand` proves the shapes without one.
+     * lab cannot read, so `'spin first'`; an EMPTY rebuilt board is filled
+     * instead, with this same grid when its shape allows — `fillIfEmpty`).
+     * `busy` serialises the four actions one at a time (like a real spin)
+     * and is what `snapshot` reports below. `Math.random` here;
+     * `lab.test.ts` is where a seeded `Rand` proves the shapes without one.
      */
     let last: { board: ReelsBoardLike; grid: string[][] } | null = null;
     const showing = (board: ReelsBoardLike) => (last?.board === board ? last.grid : board.symbols?.() ?? null);
@@ -582,19 +583,24 @@ export function apply(ctx: Context, config: SceneEditConfig): void {
     };
     /**
      * An empty board — no `reels1.board`, symbols a flow step would have
-     * seeded (the editor page runs no flow) — gets a random board at once:
-     * the lab's own spin, skipped to its end, so the canvas shows reels, not
+     * seeded (the editor page runs no flow) — gets a board at once: the
+     * lab's own spin, skipped to its end, so the canvas shows reels, not
      * frames. Runs from `layout` (every tick) until the board is judged once.
      *
-     * Fix round 1: the board step is wrapped in `try`/`catch`, same reason
-     * `runStep` below wraps its own `await run(...)` — a SYNCHRONOUS throw
-     * out of `spinTo`/`skip` (a board fake, or a real board that validates
-     * its input eagerly) must still clear `busy`, or every lab action is
-     * disabled from here on. Either door — a sync throw or the `spinTo`
-     * promise rejecting — reports through the same `fail`, which stays
-     * quiet for a board no longer current (a `reels1` re-apply swapped it
-     * mid-step, same "board replaced" idea `runStep` already has) and
-     * otherwise tells the IDE, instead of swallowing the reason.
+     * The board it lands is the grid the last one showed (`last.grid`) when
+     * the new board has that grid's shape and knows its symbols — a
+     * `reels1` re-apply for a colour or a gap rebuilds the board, and that
+     * must not reshuffle what is on it; any other board gets a random one.
+     *
+     * `busy` is held from `spinTo` until its promise settles. A SYNCHRONOUS
+     * throw out of `spinTo` (a board fake, or a real board that validates
+     * its input eagerly) clears it at once, or every lab action would stay
+     * disabled; `skip` is guarded on its own, after the promise already has
+     * its handlers, so a throwing `skip` neither frees `busy` while the
+     * spin still runs nor leaves the promise's rejection unhandled. Every
+     * failure reports through `fail`, which stays quiet for a board no
+     * longer current (a `reels1` re-apply swapped it mid-step, the same
+     * "board replaced" idea `runStep` has) and otherwise tells the IDE.
      */
     const fillIfEmpty = (board: ReelsBoardLike) => {
       if (busy || seen.has(board)) return;
@@ -606,21 +612,32 @@ export function apply(ctx: Context, config: SceneEditConfig): void {
         emit('error', { message: 'the board is empty and the project has no symbols to fill it with' });
         return;
       }
-      const built = randomBoard(shapeOf(board), symbols, rand);
+      const shape = shapeOf(board);
+      const prev = last?.grid;
+      const kept =
+        prev?.length === shape.cols &&
+        prev.every((col, c) => col.length === shape.rows[c] && col.every((s) => symbols.includes(s)));
+      const built = kept ? prev : randomBoard(shape, symbols, rand);
       const fail = (e: unknown) => {
         if (currentBoard() !== board) return; // a rebuild already moved on — nothing to tell
         emit('error', { message: `couldn't fill the board: ${e instanceof Error ? e.message : String(e)}` });
       };
       busy = true;
+      let done: Promise<void>;
       try {
-        const done = board.spinTo({ kind: 'spinTo', board: built });
-        board.skip?.();
-        void done
-          .then(() => { if (currentBoard() === board) last = { board, grid: built }; })
-          .catch(fail)
-          .finally(() => { busy = false; });
+        done = board.spinTo({ kind: 'spinTo', board: built });
       } catch (e) {
         busy = false;
+        fail(e);
+        return;
+      }
+      void done
+        .then(() => { if (currentBoard() === board) last = { board, grid: built }; })
+        .catch(fail)
+        .finally(() => { busy = false; });
+      try {
+        board.skip?.();
+      } catch (e) {
         fail(e);
       }
     };
@@ -659,7 +676,6 @@ export function apply(ctx: Context, config: SceneEditConfig): void {
       // board (no flow ran to seed it) is filled at once; see `fillIfEmpty`.
       if (board) fillIfEmpty(board);
     };
-    layout();
     app.ticker.add(layout);
     ctx.effect(() => () => {
       app.ticker.remove(layout);
@@ -783,6 +799,9 @@ export function apply(ctx: Context, config: SceneEditConfig): void {
     winHook.__e8edit = { emitted: () => [...emitted], snapshot };
     ctx.effect(() => () => { if (winHook.__e8edit?.snapshot === snapshot) delete winHook.__e8edit; }, 'scene-edit:reels-hook');
     emit('ready', { reels: true });
+    // The first layout only after `ready`: `ready` clears the IDE's canvas
+    // status, and the first fill may already have something to report.
+    layout();
   }
 
   function boot(): void {

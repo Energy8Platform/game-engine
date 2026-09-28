@@ -969,12 +969,14 @@ describe('reels mode: an empty board is filled at once', () => {
     expect(events().filter((e) => e.event === 'error')).toHaveLength(1);
   });
 
-  // Fix round 1, Important (ruled): `busy = true` then `board.spinTo(...)` with no guard — a
-  // SYNCHRONOUS throw out of `spinTo` used to escape to the ticker before `.finally` was ever
-  // attached, leaving `busy` stuck `true` forever and every lab action refused as busy from then
-  // on. `fillIfEmpty` now wraps the step in `try`/`catch`, same as `runStep` guards its own
-  // `await run(...)`. Also covers Fix round 1, Minor: the same failure door reports through
-  // `emit('error', ...)` instead of being swallowed.
+  it('that error comes after ready — a document clearing its status on ready does not wipe it', async () => {
+    const board = { ...fakeBoard(), config: { grid: { cols: 5, rows: 3 } }, grid: emptyGrid };
+    const { ready, edit } = bootReels(board, undefined, fakeSymbolsService([]));
+    await ready();
+    const order = edit().emitted().map((e) => e.event).filter((e) => e === 'ready' || e === 'error');
+    expect(order).toEqual(['ready', 'error']);
+  });
+
   it("a fill whose spinTo throws synchronously still clears busy (a following spin is not stuck answering busy) and tells the IDE why", async () => {
     const board = {
       ...fakeBoard(),
@@ -1007,6 +1009,74 @@ describe('reels mode: an empty board is filled at once', () => {
     expect(events().filter((e) => e.event === 'error')).toEqual([
       { event: 'error', payload: { message: "couldn't fill the board: reel jam" } },
     ]);
+  });
+
+  it("a fill whose skip throws keeps busy until its spinTo settles and tells the IDE once", async () => {
+    let releaseSpin!: () => void;
+    const spinTo = vi.fn((_step: unknown) => new Promise<void>((r) => { releaseSpin = r; }));
+    const skip = vi.fn(() => { throw new Error('skip jam'); });
+    const board = { ...fakeBoard(), config: { grid: { cols: 5, rows: 3 } }, grid: emptyGrid, spinTo, skip };
+    const { call, events, ready, frame } = bootReels(board, undefined, fakeSymbolsService(['a', 'b']));
+    await ready();
+    frame();
+    expect(skip).toHaveBeenCalledTimes(1);
+    expect((await call('spin')).result).toEqual({ ok: false, reason: 'busy' });
+    releaseSpin();
+    await vi.waitFor(async () => expect((await call('snapshot')).result).toMatchObject({ busy: false }));
+    expect(events().filter((e) => e.event === 'error')).toEqual([
+      { event: 'error', payload: { message: "couldn't fill the board: skip jam" } },
+    ]);
+  });
+
+  it("a fill whose skip throws and whose spinTo then rejects leaves no unhandled rejection", async () => {
+    const unhandled = vi.fn();
+    process.on('unhandledRejection', unhandled);
+    try {
+      let rejectSpin!: (e: Error) => void;
+      // A plain function, not `vi.fn`: a mock records how its returned promise settles, which
+      // attaches a handler of its own and would hide the rejection this test is looking for.
+      const spinTo = (_step: unknown) => new Promise<void>((_r, reject) => { rejectSpin = reject; });
+      const skip = vi.fn(() => { throw new Error('skip jam'); });
+      const board = { ...fakeBoard(), config: { grid: { cols: 5, rows: 3 } }, grid: emptyGrid, spinTo, skip };
+      const { call, events, ready, frame } = bootReels(board, undefined, fakeSymbolsService(['a', 'b']));
+      await ready();
+      frame();
+      rejectSpin(new Error('reel jam'));
+      await vi.waitFor(async () => expect((await call('snapshot')).result).toMatchObject({ busy: false }));
+      await new Promise((r) => setTimeout(r, 10));
+      expect(unhandled).not.toHaveBeenCalled();
+      expect(events().filter((e) => e.event === 'error')).toEqual([
+        { event: 'error', payload: { message: "couldn't fill the board: skip jam" } },
+        { event: 'error', payload: { message: "couldn't fill the board: reel jam" } },
+      ]);
+    } finally {
+      process.off('unhandledRejection', unhandled);
+    }
+  });
+
+  it('a rebuilt board of the same shape is filled with the grid the last one showed; another shape gets a random board', async () => {
+    const { ctx, call, ready, frame } = bootReels(undefined, undefined, fakeSymbolsService(SIX));
+    const spun = (board: { spinTo: { mock: { calls: unknown[][] } } }) => (board.spinTo.mock.calls[0][0] as { board: string[][] }).board;
+    const a = { ...fakeBoard(), config: { grid: { cols: 5, rows: 3 } }, grid: emptyGrid, ...skipSettledBoard() };
+    const disposeA = ctx.provide('board', a);
+    await ready();
+    frame();
+    await call('snapshot'); // flushes the fill's settle, which records what A shows
+    disposeA();
+    const b = { ...fakeBoard(), config: { grid: { cols: 5, rows: 3 } }, grid: emptyGrid, ...skipSettledBoard() };
+    const disposeB = ctx.provide('board', b);
+    frame();
+    expect(spun(b)).toEqual(spun(a));
+    await call('snapshot');
+    disposeB();
+    const c = { ...fakeBoard(), config: { grid: { cols: 3, rows: 2 } }, grid: emptyGrid, ...skipSettledBoard() };
+    ctx.provide('board', c);
+    frame();
+    expect(spun(c)).toHaveLength(3);
+    for (const col of spun(c)) {
+      expect(col).toHaveLength(2);
+      for (const cell of col) expect(SIX).toContain(cell);
+    }
   });
 
   it("a fill's spinTo rejection after its board was replaced stays silent — no error for a board no longer live", async () => {
@@ -1044,7 +1114,7 @@ describe('the mode comes from the page address', () => {
     expect(mode).toMatchObject({ scene: 's', symbol: undefined, reels: false });
   });
 
-  it('Review Focus 3: a config that explicitly carries scene: \'\' / symbol: undefined still reads reels off the address', () => {
+  it('a config that explicitly carries scene: \'\' / symbol: undefined still reads reels off the address', () => {
     expect(plugin.pageMode({ scene: '', symbol: undefined }, '?reels=', '').reels).toBe(true);
   });
 
