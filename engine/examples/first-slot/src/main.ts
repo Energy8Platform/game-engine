@@ -838,6 +838,48 @@ let nextViewId = 0;
     const family = v?.style?.fontFamily;
     return typeof family === 'string' ? family : null;
   },
+  /**
+   * EVERY mounted copy of a node (`scenes.views(ref)`), each with whether
+   * it is ACTUALLY on screen — walked by hand up the copy's own `.parent`
+   * chain to `scenes.container` (pixi v8 dropped `worldVisible`; this is
+   * the same two things pixi itself would check before drawing a node: no
+   * ancestor's `visible` is `false`, and the chain actually reaches the
+   * render root rather than dead-ending on a document that was mounted
+   * but never `show()`n — a node with no `scene` row parent, still
+   * `visible: true` by pixi's own default, is NOT on screen).
+   *
+   * Exists because `view()`/`nodeProps` already PICK the on-screen copy
+   * for you (Task 1's `view()`) — reading a tween's target back through
+   * that same lookup could never catch the tween having landed on the
+   * WRONG copy; this sees every copy independently of it. `[]` with no
+   * `scenes` row, or no such node.
+   */
+  nodeCopies(scene: string, node: string): { x: number; shown: boolean }[] {
+    const s = ctx.reflect.get('scenes', false) as
+      | {
+          views?(ref: {
+            scene: string;
+            node: string;
+          }): { x: number; visible: boolean; parent: unknown }[];
+          container?: unknown;
+        }
+      | undefined;
+    if (!s?.views) return [];
+    const root = s.container;
+    return s.views({ scene, node }).map((v) => {
+      let shown = false;
+      let n: { visible: boolean; parent: unknown } | null | undefined = v;
+      while (n) {
+        if (n === root) {
+          shown = true;
+          break;
+        }
+        if (n.visible === false) break;
+        n = n.parent as typeof n;
+      }
+      return { x: v.x, shown };
+    });
+  },
   /** A mounted top-level scene node's `x`/`y`/`alpha`/`width`/`height`/`tint`, off the same `scenes.view` `nodeVisible` reads `visible` from; `null` when there is no such node. */
   nodeProps(
     scene: string,

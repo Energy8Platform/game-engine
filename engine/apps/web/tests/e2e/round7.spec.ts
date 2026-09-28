@@ -4,14 +4,20 @@
  * real project the dev host serves, not a unit-level fake.
  *
  *  1. **Pose before show** (F16): a `load` flow node fetches a document's
- *     assets ahead of `show`; a `prop` node poses it in between; `show`
- *     finds nothing left to load, so the pose survives — the FIRST frame
- *     the document is visible already reads the posed value, not a
- *     default one a stray refresh put back.
+ *     assets ahead of `show`; a (near-instant) `tween` poses it in
+ *     between, landing the pose on the VIEW ITSELF, not on the node's
+ *     tracked props; `show` finds nothing left to load, so nothing
+ *     remounts/re-applies it away — the FIRST frame the document is
+ *     visible already reads the posed value. (A `prop` node would also
+ *     "survive" here, but for the wrong reason: `setProps` records the
+ *     patch in the entry's own live props, so it would come back on ANY
+ *     re-derivation, correct or not — see the test's own comment.)
  *  2. **Nested tween** (F15): `outer` statically embeds `inner` (a `scene`
- *     node); once `outer` is shown, a `tween` targeting `inner/dot`
- *     resolves through `scenes.view()` to the copy embedded IN `outer` —
- *     the one actually on screen — and animates that one.
+ *     node); once `outer` is shown, a `tween` targeting `inner/dot` must
+ *     land on the copy embedded IN `outer` — the one actually on screen —
+ *     and leave `inner`'s own (never shown) standalone copy alone. Read
+ *     back through `nodeCopies`, independently of the `scenes.view()`
+ *     lookup the tween itself used.
  *  3. **Composed web font** (F19): `scenes1.fonts` loads a real `.woff2`
  *     before the first document mounts; `document.fonts.check(...)`
  *     proves the face is usable, and a `text` node naming that family
@@ -20,7 +26,9 @@
  *     zeroes the bar's height and bottom inset; the scenes runtime re-fits
  *     on its own next tick (no resize event), so the design's fitted scale
  *     grows — and `visible: 'true'` puts it back to exactly what it was.
- *  5. **fitWidth**: a text node's laid-out width never exceeds `fitWidth`.
+ *  5. **fitWidth**: a text node's laid-out width never exceeds `fitWidth`
+ *     — proven against a sibling control (same string, no `fitWidth`) that
+ *     DOES overflow, so the shrink is shown to have done something.
  *
  * Each scenario gets its OWN project copy and dev host (per the SDD
  * controller's ruling 3) and its own minimal `flow.yml` — same idiom as
@@ -28,9 +36,10 @@
  * `startDevHost`, read on `host.gameUrl` directly (no IDE chrome needed
  * for any of these five — `features.spec.ts`'s pattern, not
  * `flow.spec.ts`'s Preview iframe one). `window.__e8` hooks do the
- * reading; `nodeFontFamily` is the one hook this file adds (in BOTH
- * `main.ts` copies, byte-identical) — nothing existing reads a text
- * node's `style.fontFamily`.
+ * reading; `nodeFontFamily` and `nodeCopies` are the two hooks this file
+ * adds (in BOTH `main.ts` copies, byte-identical, `cmp`-verified) —
+ * nothing existing reads a text node's `style.fontFamily`, or every copy
+ * of a node independently of which one `view()` would pick.
  */
 import { cpSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -96,23 +105,38 @@ nodes:
     join(dir, 'flow.yml'),
     `version: 1
 nodes:
-  - { id: start,     kind: boot, ui: { x: 40,  y: 80 } }
-  - { id: loadPosed, kind: load, props: { scene: posed }, ui: { x: 220, y: 80 } }
-  - { id: setX,      kind: prop, props: { target: posed/img, prop: x, value: '7' }, ui: { x: 400, y: 80 } }
-  - { id: showPosed, kind: show, props: { scene: posed }, ui: { x: 580, y: 80 } }
+  - { id: start,     kind: boot,  ui: { x: 40,  y: 80 } }
+  - { id: loadPosed, kind: load,  props: { scene: posed }, ui: { x: 220, y: 80 } }
+  - { id: poseX,     kind: tween, props: { target: 'posed/img', x: 7, ms: 0 }, ui: { x: 400, y: 80 } }
+  - { id: showPosed, kind: show,  props: { scene: posed }, ui: { x: 580, y: 80 } }
 edges:
   - { from: start,     to: loadPosed }
-  - { from: loadPosed, to: setX }
-  - { from: setX,      to: showPosed }
+  - { from: loadPosed, to: poseX }
+  - { from: poseX,     to: showPosed }
 `,
   );
   host = await startDevHost(dir);
   await readyPage(page);
 
-  // Ruling 2: poll INSIDE the page (a rAF loop) until `posed` is visible,
-  // and read `img.x` at that SAME tick — not a later frame a separate
-  // `page.evaluate` round trip could land on, after some other code had a
-  // chance to touch it.
+  // A `tween` poses the view directly (`Tween.setProperty`, straight onto
+  // the live pixi `Container`) — NOT through `scenes.setProps`, which would
+  // instead record the patch as the entry's own live prop and make it
+  // survive ANY re-derivation, correct or not (that is what a `prop` node
+  // does, and why it was the wrong tool here: it can't tell "show() left
+  // the pose alone" apart from "show() rebuilt the node and re-applied the
+  // very patch that was recorded"). A tween's pose exists ONLY on the view,
+  // so it is real proof that `show()`'s internal reload — finding nothing
+  // left to fetch — never remounted or re-applied common props over it.
+  // The narrow-refresh SCOPING itself (only nodes fed by a load's own
+  // paths re-run `update`) is pinned at the unit level by
+  // `engine/game/scenes/tests/view.test.ts`; position is a COMMON prop,
+  // which `refresh()`'s `update()` call never touches in the first place —
+  // this e2e's job is the end-to-end one: prove the real load→show
+  // sequence, in a real browser, never needlessly discards view-only state
+  // between them (Ruling 2: poll INSIDE the page (a rAF loop) until
+  // `posed` is visible, and read `img.x` at that SAME tick — not a later
+  // frame a separate `page.evaluate` round trip could land on, after some
+  // other code had a chance to touch it).
   const firstX = await page.evaluate(
     () =>
       new Promise<number>((resolve, reject) => {
@@ -171,11 +195,27 @@ edges:
   host = await startDevHost(dir);
   await readyPage(page);
 
+  // `inner` is a declared document of its own, so it ALSO gets its own
+  // standalone (never `show()`n) mount, alongside the copy `outer`'s
+  // `scene` node embedded — `nodeCopies` reads BOTH independently of
+  // `scenes.view()`/`nodeProps`, the very lookup the tween used to find
+  // its target, so a tween that landed on the wrong copy would still be
+  // visible here (nodeProps alone could never catch that).
   await expect
-    .poll(() => page.evaluate(() => (window as any).__e8.nodeProps('inner', 'dot')?.x), {
+    .poll(() => page.evaluate(() => (window as any).__e8.nodeCopies('inner', 'dot')), {
       timeout: 10_000,
     })
-    .toBe(200);
+    .toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ x: 200, shown: true }),
+        expect.objectContaining({ x: 0, shown: false }),
+      ]),
+    );
+  const copies = (await page.evaluate(() => (window as any).__e8.nodeCopies('inner', 'dot'))) as {
+    x: number;
+    shown: boolean;
+  }[];
+  expect(copies).toHaveLength(2);
 });
 
 test('scenes1.fonts loads a real web font before the first mount; a text node renders in it', async ({
@@ -271,14 +311,21 @@ edges:
   await expect.poll(fit, { timeout: 10_000 }).toEqual(shown);
 });
 
-test('fitWidth shrinks a long text node until its measured width fits', async ({ page }) => {
+test('fitWidth shrinks a long text node until its measured width fits, against an unshrunk control', async ({
+  page,
+}) => {
+  const LONG_TEXT =
+    'this caption is far too long to fit in a two hundred pixel wide box as written';
   writeFileSync(
     join(dir, 'scenes', 'fitdoc.scene.yml'),
     `id: fitdoc
 nodes:
   - id: long
     type: text
-    props: { text: 'this caption is far too long to fit in a two hundred pixel wide box as written', size: 32, fitWidth: 200, x: 0, y: 0 }
+    props: { text: '${LONG_TEXT}', size: 32, fitWidth: 200, x: 0, y: 0 }
+  - id: control
+    type: text
+    props: { text: '${LONG_TEXT}', size: 32, x: 0, y: 140 }
 `,
   );
   writeFileSync(
@@ -294,6 +341,16 @@ edges:
   host = await startDevHost(dir);
   await readyPage(page);
 
+  // The SAME string, same size, at `control` (no `fitWidth`, so it is 0 —
+  // off) proves the string genuinely overflows 200 design px at this size
+  // — without it, `long`'s width alone reading ≤ 200 would say nothing
+  // (a short-enough string never needs to shrink, and this scenario would
+  // pass whether or not `fitWidth` did anything at all).
+  await expect
+    .poll(() => page.evaluate(() => (window as any).__e8.nodeProps('fitdoc', 'control')?.width), {
+      timeout: 10_000,
+    })
+    .toBeGreaterThan(200);
   await expect
     .poll(() => page.evaluate(() => (window as any).__e8.nodeProps('fitdoc', 'long')?.width), {
       timeout: 10_000,
