@@ -1,5 +1,5 @@
 /**
- * The flow node-kind registry (`ctx.flowNodes`) and the fifteen built-in
+ * The flow node-kind registry (`ctx.flowNodes`) and the sixteen built-in
  * kinds. Last-wins like the scene node-type registry, so a project plugin
  * (or a hot re-apply) can replace a built-in; subscribers hear every change.
  *
@@ -392,6 +392,32 @@ const hide: FlowNodeKind<{ scene: string }> = {
   },
 };
 
+/**
+ * F16 — poses a document (its `assetsOf`, any row `require`d) ahead of a
+ * `show`, so the `show` that follows has nothing left to fetch: a bonus
+ * scene loaded while the base game still plays, say. Unlike `show`/`hide`,
+ * a missing `scenes` service is NOT a throw — a preload is a nicety, not
+ * something the flow can't run without — so this reaches the service
+ * LENIENTLY (`ctx.reflect.get`, not `service()`) and reports a warning
+ * instead. A rejected `load` is the loader's own diagnostic; this only
+ * waits `ready` (the same boot-race guard as `show`/`hide`) and moves on.
+ */
+const load: FlowNodeKind<{ scene: string }> = {
+  kind: 'load',
+  schema: Schema.object({ scene: Schema.string().required().extra('pick', 'scene').description('scene id') }),
+  outs: ['next'],
+  async run(p, { ctx, report }) {
+    const scenes = ctx.reflect.get('scenes', false) as ScenesService | undefined;
+    if (!scenes) {
+      report(`no 'scenes' service in this composition`, 'warning');
+      return { out: 'next' };
+    }
+    await scenes.ready?.catch(() => {});
+    await scenes.load(p.scene).catch(() => {});
+    return { out: 'next' };
+  },
+};
+
 const wait: FlowNodeKind<{ ms?: number; event?: string }> = {
   kind: 'wait',
   schema: Schema.object({
@@ -456,13 +482,21 @@ const set: FlowNodeKind<{ name: string; value?: unknown }> = {
  * Inside one flow, a fire to a default `on { busy: ignore }` while that `on`'s run is live is
  * DROPPED — nothing holds it; only `busy: parallel` (or an idle flow) gives a `wait { event }`
  * something to wait for.
+ *
+ * F17 — `wait` also covers a PLUGIN's `events.on` handler: `createEvents().emit`'s promise
+ * already settles only once every listener's returned promise has (a rejection included), flow
+ * run or plain handler alike, so `wait: true` here needs no extra code to hold for one.
  */
 const emit: FlowNodeKind<{ event: string; payload?: unknown; wait: boolean }> = {
   kind: 'emit',
   schema: Schema.object({
     event: Schema.string().required().description('event name'),
     payload: Schema.any().description('literal, `$expr`, or a `{…}` template'),
-    wait: Schema.boolean().default(false).description('hold this branch until every run the event started has ended'),
+    wait: Schema.boolean()
+      .default(false)
+      .description(
+        "hold this branch until every run the event started has ended and every plugin handler's returned promise has settled",
+      ),
   }),
   outs: ['next'],
   timeout: false,
@@ -844,6 +878,7 @@ export const BUILTIN_KINDS: FlowNodeKind<any>[] = [
   present,
   show,
   hide,
+  load,
   wait,
   ifKind,
   set,

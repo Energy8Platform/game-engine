@@ -27,6 +27,7 @@ describe('flow row', () => {
       'emit',
       'hide',
       'if',
+      'load',
       'merge',
       'on',
       'present',

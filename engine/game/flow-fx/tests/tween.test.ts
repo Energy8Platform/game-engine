@@ -1,7 +1,9 @@
-import { describe, expect, it, vi } from 'vitest';
+import { describe, expect, it, vi, beforeAll, afterAll, afterEach } from 'vitest';
+import { Container, Texture, Ticker } from 'pixi.js';
 import { Context } from 'cordis';
 import { Tween } from '@energy8engine/tween';
 import type { RunCtx } from '@energy8engine/flow';
+import { createNodeTypes, createScenes, container, scene, type AssetLoader } from '@energy8engine/scenes';
 import { createTween } from '../src/tween';
 
 function runCtx(provide: Record<string, unknown> = {}) {
@@ -150,5 +152,76 @@ describe('createTween', () => {
       toSpy.mockRestore();
       killSpy.mockRestore();
     }
+  });
+});
+
+/**
+ * F15/F16's `scenes.view()` answers the copy on screen, not a document's
+ * own hidden mount, once something else nests it (`view.test.ts` in
+ * `@energy8engine/scenes` is the harness this borrows). `tween` needs NO
+ * code change for that — it already asks `scenes.view(ref)` for the
+ * target — this only proves the visible copy is what actually moves.
+ */
+describe('createTween: a real scenes with a nested document', () => {
+  /** Same ticker-pinning trick as `@energy8engine/tween`'s own Tween.test.ts. */
+  const keepTickerAlive = (): void => {};
+  const clock = { t: 0 };
+  beforeAll(() => {
+    Ticker.shared.add(keepTickerAlive);
+    Ticker.shared.update(clock.t);
+  });
+  afterAll(() => {
+    Ticker.shared.remove(keepTickerAlive);
+  });
+  afterEach(() => {
+    Tween.reset();
+  });
+
+  /** Advances the shared ticker by `ms`, yielding after each frame so queued awaits run. */
+  async function tick(ms: number, stepMs = 16): Promise<void> {
+    let elapsed = 0;
+    while (elapsed < ms) {
+      const d = Math.min(stepMs, ms - elapsed);
+      clock.t += d;
+      elapsed += d;
+      Ticker.shared.update(clock.t);
+      await new Promise<void>((r) => setTimeout(r, 0));
+    }
+  }
+
+  const loader: AssetLoader = {
+    load: vi.fn(async () => {}),
+    unload: vi.fn(async () => {}),
+    get: () => Texture.EMPTY,
+  };
+
+  it('tweens the copy embedded in the shown host, not inner’s own top-level mount', async () => {
+    const nodeTypes = createNodeTypes();
+    for (const t of [container, scene]) nodeTypes.register(t);
+    const scenes = createScenes({
+      root: new Container(),
+      design: { width: 100, height: 50 },
+      nodeTypes,
+      loader,
+      ctx: new Context(),
+    });
+    scenes.replace([
+      { id: 'inner', nodes: [{ id: 'x', type: 'container', props: {} }] },
+      { id: 'outer', nodes: [{ id: 'embed', type: 'scene', props: { scene: 'inner' } }] },
+    ]);
+    const ref = { scene: 'inner', node: 'x' };
+    const [own, embedded] = scenes.views(ref);
+    await scenes.show('outer');
+    expect(scenes.view(ref)).toBe(embedded);
+    expect(scenes.view(ref)).not.toBe(own);
+
+    const kind = createTween();
+    const { rc } = runCtx({ scenes });
+    const run = kind.run!({ target: 'inner/x', ms: 50, easing: 'linear', wait: true, x: 42 }, rc);
+    await tick(60);
+    expect(await run).toEqual({ out: 'next' });
+
+    expect(embedded.x).toBe(42);
+    expect(own.x).toBe(0);
   });
 });

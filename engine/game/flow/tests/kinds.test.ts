@@ -52,9 +52,9 @@ describe('createFlowNodes', () => {
     expect(heard).toHaveBeenCalledTimes(4);
   });
 
-  it('ships the fifteen built-ins with their ports, `shell` and `ack` between `prop` and `merge`', () => {
+  it('ships the sixteen built-ins with their ports, `shell` and `ack` between `prop` and `merge`', () => {
     expect(BUILTIN_KINDS.map((k) => k.kind)).toEqual([
-      'boot', 'on', 'spin', 'step', 'present', 'show', 'hide', 'wait', 'if', 'set', 'emit', 'prop', 'shell', 'ack', 'merge',
+      'boot', 'on', 'spin', 'step', 'present', 'show', 'hide', 'load', 'wait', 'if', 'set', 'emit', 'prop', 'shell', 'ack', 'merge',
     ]);
     expect(Object.fromEntries(BUILTIN_KINDS.map((k) => [k.kind, [...k.outs]]))).toEqual({
       boot: ['next'],
@@ -64,6 +64,7 @@ describe('createFlowNodes', () => {
       present: ['next', 'failed'],
       show: ['next'],
       hide: ['next'],
+      load: ['next'],
       wait: ['next'],
       if: ['true', 'false'],
       set: ['next'],
@@ -114,6 +115,35 @@ describe('built-in kinds', () => {
   it('show without a scenes service throws (the interpreter reports it)', async () => {
     const { rc } = runCtx();
     await expect(kind('show').run!({ scene: 'a' }, rc)).rejects.toThrow(/scenes/);
+  });
+
+  it('load: F16 — waits scenes.ready then calls scenes.load(scene) once, leaves by next', async () => {
+    let resolveReady!: () => void;
+    const ready = new Promise<void>((resolve) => {
+      resolveReady = resolve;
+    });
+    const scenes = { ready, load: vi.fn(async () => {}) };
+    const { rc } = runCtx({ scenes });
+    const loaded = kind('load').run!({ scene: 'bonus' }, rc);
+    await new Promise((r) => setTimeout(r, 0));
+    expect(scenes.load).not.toHaveBeenCalled();
+    resolveReady();
+    expect(await loaded).toEqual({ out: 'next' });
+    expect(scenes.load).toHaveBeenCalledTimes(1);
+    expect(scenes.load).toHaveBeenCalledWith('bonus');
+  });
+
+  it('load without a scenes service reports a warning and leaves by next, without throwing', async () => {
+    const { rc } = runCtx();
+    expect(await kind('load').run!({ scene: 'bonus' }, rc)).toEqual({ out: 'next' });
+    expect(rc.report).toHaveBeenCalledWith("no 'scenes' service in this composition", 'warning');
+  });
+
+  it('load: a rejected scenes.load is the loader\'s own diagnostic — load still leaves by next', async () => {
+    const scenes = { load: vi.fn(async () => Promise.reject(new Error('nope'))) };
+    const { rc } = runCtx({ scenes });
+    expect(await kind('load').run!({ scene: 'bonus' }, rc)).toEqual({ out: 'next' });
+    expect(rc.report).not.toHaveBeenCalled();
   });
 
   /**
@@ -988,6 +1018,30 @@ describe('built-in kinds', () => {
       const { rc } = runCtx({ events }, { n: 48 });
       await kind('emit').run!({ event: 'hello', payload: 'x{$n}', wait: false }, rc);
       expect(heard).toHaveBeenCalledWith('x48');
+    });
+
+    it("emit: F17 — wait: true holds the branch for a plugin handler's returned promise, not just a flow run", async () => {
+      const events = createEvents();
+      let release!: () => void;
+      events.on('pd.x', () => new Promise<void>((r) => (release = r)));
+      const { rc } = runCtx({ events });
+      let settled = false;
+      const run = kind('emit').run!({ event: 'pd.x', wait: true }, rc).then((out) => {
+        settled = true;
+        return out;
+      });
+      await new Promise((r) => setTimeout(r, 0));
+      expect(settled).toBe(false);
+      release();
+      expect(await run).toEqual({ out: 'next' });
+      expect(settled).toBe(true);
+    });
+
+    it('emit: wait: false leaves at once, without waiting for the plugin handler', async () => {
+      const events = createEvents();
+      events.on('pd.x', () => new Promise<void>(() => {})); // never resolves
+      const { rc } = runCtx({ events });
+      expect(await kind('emit').run!({ event: 'pd.x', wait: false }, rc)).toEqual({ out: 'next' });
     });
   });
 
