@@ -412,6 +412,16 @@ export function Shell({ ctx }: { ctx: Context }) {
 
   const activeSidebarEntry =
     sidebar === undefined ? undefined : sidebarEntries.find((e) => e.key === sidebar);
+  // Unlike the left sidebar (a person's own click, so a broken key gets the
+  // "nothing registered" note below), the right one is picked passively —
+  // nobody chose "props" on purpose, a tab or an activity view just
+  // declared it. A withdrawn plugin (its `shell.sideRight` entry gone,
+  // dev-mode project switch being the real-world case) leaves nothing to
+  // mount here even though the flag is still on, and an open, empty column
+  // is exactly the chrome this shell exists to avoid — so the collapse
+  // below checks the live registration, not just whether a key is picked.
+  const activeSideRightEntry =
+    sideRight === undefined ? undefined : sideRightEntries.find((e) => e.key === sideRight);
   const pendingDoc =
     pendingClose === undefined ? undefined : documents.find((d) => d.key === pendingClose);
 
@@ -427,15 +437,11 @@ export function Shell({ ctx }: { ctx: Context }) {
     <div
       // No sidebar chosen means its column is 0 wide (DESIGN.md §2), not
       // 260px of empty chrome. The right sidebar collapses the same way —
-      // keyed on the same effective key `useShell` already resolved, not on
-      // whether something is still registered for it (a plugin unloading
-      // out from under a still-flagged key leaves the column open but
-      // empty, same as an open document pane with a withdrawn component
-      // would).
+      // nothing shown, or a shown key nobody (any longer) registers.
       className={[
         'e8-shell',
         sidebar === undefined ? 'e8-sidebar-collapsed' : '',
-        sideRight === undefined ? 'e8-side-right-collapsed' : '',
+        activeSideRightEntry === undefined ? 'e8-side-right-collapsed' : '',
       ]
         .filter(Boolean)
         .join(' ')}

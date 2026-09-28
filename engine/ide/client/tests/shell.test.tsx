@@ -1530,14 +1530,15 @@ describe('right sidebar', () => {
     expect(screen.getByTestId('shell').className).toContain('e8-side-right-collapsed');
   });
 
-  it('a retracted contribution stops rendering, though its key stays flagged on', () => {
-    // The collapsed class is keyed on the effective key alone (`sideRight
-    // === undefined`), not on whether a component still backs it — the
-    // same simplification the left sidebar's own collapse already made.
-    // A plugin unloaded out from under a still-flagged key leaves the
-    // column open (nothing tells the shell to give it up) but empty:
-    // `sideRightEntries` no longer has a component for that key, so
-    // there is nothing left to keep mounted.
+  it('a retracted contribution collapses the region even while its key is shown', () => {
+    // Unlike the left sidebar's own collapse (keyed on the effective key
+    // alone — a click either shows one or collapses it), the right side is
+    // never clicked into: nobody chose "props" on purpose, so a plugin
+    // unloaded out from under a still-flagged key must not leave an open,
+    // empty column behind. The mount-once-hide-after rule above only ever
+    // keeps a CURRENTLY REGISTERED entry around; with `off()` withdrawing
+    // it, `sideRightEntries` no longer has a component for "props" at all,
+    // so there is nothing left to render and the region collapses.
     const ctx = harness();
     ctx.shell.open({ key: 'a', title: 'A', component: Dummy, closable: true, sideRight: 'props' });
     render(<Shell ctx={ctx} />);
@@ -1547,7 +1548,7 @@ describe('right sidebar', () => {
     );
     act(() => ctx.shell.setSideRight('props', true));
     act(() => off());
-    expect(screen.getByTestId('shell').className).not.toContain('e8-side-right-collapsed');
+    expect(screen.getByTestId('shell').className).toContain('e8-side-right-collapsed');
     expect(screen.queryByTestId('side-right-props')).toBeNull();
   });
 
