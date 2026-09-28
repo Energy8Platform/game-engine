@@ -180,15 +180,17 @@ describe('fitWidth', () => {
    * `BitmapText` (both extend it) — patching it there covers both classes
    * with one stub.
    *
-   * Modelled as the one-line width (`text.length * fontSize`) — proportional
-   * to the font size, the property `fitText`'s math leans on — CLAMPED to
-   * `wordWrapWidth` once wrapping is on, so a wrapped text's widest line
-   * reads as "pinned near the wrap boundary" rather than the whole string
-   * on one line. That clamp is what makes the wrap+fit test below able to
-   * tell a `fitText` that only shrinks `fontSize` apart from one that also
-   * shrinks `wordWrapWidth`: with the OLD (fontSize-only) shrink, the
-   * boundary stays put and the clamp keeps reporting it — the fix has to
-   * move the boundary too before a re-measure can read anything smaller.
+   * Modelled as the one-line width (`text.length * (fontSize +
+   * letterSpacing)`) — proportional to the font size, the property
+   * `fitText`'s math leans on — CLAMPED to `wordWrapWidth` once wrapping is
+   * on, so a wrapped text's widest line reads as "pinned near the wrap
+   * boundary" rather than the whole string on one line. That clamp is what
+   * makes the wrap+fit test below able to tell a `fitText` that only
+   * shrinks `fontSize` apart from one that also shrinks `wordWrapWidth`:
+   * with the OLD (fontSize-only) shrink, the boundary stays put and the
+   * clamp keeps reporting it — the fix has to move the boundary too before
+   * a re-measure can read anything smaller. Times `|scale.x|`, as pixi's
+   * own getter is: `width` is the SCALED width.
    */
   const abstractTextProto = Object.getPrototypeOf(Text.prototype) as object;
   let originalWidth!: PropertyDescriptor;
@@ -196,9 +198,14 @@ describe('fitWidth', () => {
     originalWidth = Object.getOwnPropertyDescriptor(abstractTextProto, 'width')!;
     Object.defineProperty(abstractTextProto, 'width', {
       configurable: true,
-      get(this: { text: string; style: { fontSize: number; wordWrap?: boolean; wordWrapWidth?: number } }) {
-        const oneLine = this.text.length * this.style.fontSize;
-        return this.style.wordWrap ? Math.min(oneLine, this.style.wordWrapWidth ?? oneLine) : oneLine;
+      get(this: {
+        text: string;
+        scale: { x: number };
+        style: { fontSize: number; letterSpacing: number; wordWrap?: boolean; wordWrapWidth?: number };
+      }) {
+        const oneLine = this.text.length * (this.style.fontSize + this.style.letterSpacing);
+        const laid = this.style.wordWrap ? Math.min(oneLine, this.style.wordWrapWidth ?? oneLine) : oneLine;
+        return Math.abs(this.scale.x) * laid;
       },
     });
   });
@@ -245,6 +252,52 @@ describe('fitWidth', () => {
     expect(view.style.wordWrapWidth).toBe(60);
     expect(view.style.wordWrapWidth / 80).toBeCloseTo(view.style.fontSize / 24, 10);
     expect(view.width).toBeLessThanOrEqual(60);
+    view.destroy();
+  });
+
+  it('`lineHeight` and `letterSpacing` shrink by the same factor as the font — a multi-line block shrinks uniformly', () => {
+    // Pre-fit: 50 × (24 + 2) = 1300, clamped to the 80 boundary → factor
+    // 60/80 = 0.75: 24 → 18, wrap 80 → 60, lineHeight 30 → 22.5, spacing 2 → 1.5.
+    const view = text.mount(
+      props({ text: 'a'.repeat(50), size: 24, wrap: 80, fitWidth: 60, lineHeight: 30, letterSpacing: 2 }),
+      null as never,
+    ) as Text;
+    expect(view.style.fontSize).toBe(18);
+    expect(view.style.lineHeight).toBe(22.5);
+    expect(view.style.letterSpacing).toBe(1.5);
+    view.destroy();
+  });
+
+  it('a big `letterSpacing` shrinks with the font, so the fit converges', () => {
+    // 50 × (24 + 10) = 1700 against 100: a font-only shrink bottoms out at
+    // 1px with the 10px spacing still there — 50 × 11 = 550, never ≤ 100.
+    const view = text.mount(
+      props({ text: 'a'.repeat(50), size: 24, fitWidth: 100, letterSpacing: 10 }),
+      null as never,
+    ) as Text;
+    expect(view.width).toBeLessThanOrEqual(100);
+    view.destroy();
+  });
+
+  it('`fitWidth` is the node’s own px, before its scale: a `scale: 0.5` text fits to the same size at mount and after an `update`', () => {
+    const p = props({ text: 'a'.repeat(7), size: 24, fitWidth: 100 });
+    const view = text.mount(p, null as never) as Text;
+    const fitted = view.style.fontSize;
+    expect(fitted).toBeLessThan(24);
+    // The common pass sets the author's scale AFTER mount; a refresh or a
+    // `setProps` then re-runs `update` against the scaled view.
+    view.scale.set(0.5);
+    text.update!(view, p, null as never);
+    expect(view.style.fontSize).toBe(fitted);
+    view.destroy();
+  });
+
+  it('the fitted size is quantized DOWN to a 0.5 px step — never a new font string per frame for a `count`', () => {
+    // 7 × 24 = 168 against 100 → 24 × 100/168 = 14.28… → 14.
+    const view = text.mount(props({ text: 'a'.repeat(7), size: 24, fitWidth: 100 }), null as never) as Text;
+    expect(view.style.fontSize).toBe(14);
+    expect(Number.isInteger(view.style.fontSize * 2)).toBe(true);
+    expect(view.width).toBeLessThanOrEqual(100);
     view.destroy();
   });
 

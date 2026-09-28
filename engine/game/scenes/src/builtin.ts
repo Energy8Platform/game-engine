@@ -188,7 +188,7 @@ export interface TextProps {
   letterSpacing: number;
   /** Px per line; 0 = the renderer's own (its font metrics). */
   lineHeight: number;
-  /** Shrinks the font so the laid-out text fits this width, design px; 0 = off. */
+  /** Shrinks the font so the laid-out text fits this width — the node's own px, before its scale; 0 = off. */
   fitWidth: number;
 }
 
@@ -241,20 +241,34 @@ const styleOf = (props: TextProps, fontFamily: string) => ({
  * shrinking the font alone lets it re-wrap MORE words onto each line at
  * the old boundary and the width climbs back toward `wrap` instead of
  * settling at `fitWidth`. Scaling both keeps the authored line breaks and
- * shrinks the whole block uniformly. Re-measured for up to 3 passes total
- * — a single proportional guess can under- or overshoot (rounding, a
- * bitmap font's discrete glyph widths), so one more pass corrects it
- * instead of leaving the text slightly over.
+ * shrinks the whole block uniformly. `lineHeight` (when set) and
+ * `letterSpacing` go by the same factor: a multi-line caption keeps its
+ * proportions, and a big spacing cannot outlast the font it pads.
+ * Re-measured for up to 3 passes total — a single proportional guess can
+ * under- or overshoot (rounding, a bitmap font's discrete glyph widths),
+ * so one more pass corrects it instead of leaving the text slightly over.
+ *
+ * `fitWidth` is the node's OWN px, before its scale: pixi's `width`
+ * includes `|scale.x|` (1 at mount, the author's on every later `update`),
+ * so it is divided back out — a scaled caption fits to the same size
+ * however it got here. The size is quantized DOWN to a 0.5 px step, never
+ * below 1: pixi caches text metrics per font string, and a `count` into a
+ * fitted text would otherwise add a cache entry every frame.
  */
 function fitText(t: Text, props: TextProps): void {
   if (!(props.fitWidth > 0)) return;
+  const s = t.style;
   for (let pass = 0; pass < 3; pass++) {
-    const width = t.width; // measured with the current size first
+    const width = t.width / Math.abs(t.scale.x || 1); // measured with the current size first
     if (width <= props.fitWidth) return;
-    const factor = props.fitWidth / width;
-    t.style.fontSize = Math.max(1, t.style.fontSize * factor);
+    const size = Math.max(1, Math.floor(s.fontSize * (props.fitWidth / width) * 2) / 2);
+    // The factor actually applied, after the quantizing — everything else follows the font by it.
+    const factor = size / s.fontSize;
+    s.fontSize = size;
     // The wrap boundary shrinks WITH the font — see this function's doc.
-    if (t.style.wordWrap) t.style.wordWrapWidth = Math.max(1, t.style.wordWrapWidth * factor);
+    if (s.wordWrap) s.wordWrapWidth = Math.max(1, s.wordWrapWidth * factor);
+    if (s.lineHeight > 0) s.lineHeight *= factor;
+    s.letterSpacing *= factor;
   }
 }
 
@@ -282,7 +296,7 @@ export const text: NodeType<TextProps> = {
     lineHeight: Schema.number().default(0).description("px per line; 0 = the renderer's own"),
     fitWidth: Schema.number()
       .default(0)
-      .description('shrink the font so the text fits this width, design px; 0 = off'),
+      .description("shrink the font so the text fits this width — the node's own px, before its scale; 0 = off"),
   }) as Schema<TextProps>,
   assetProps: ['font'],
   mount(props, ctx) {
