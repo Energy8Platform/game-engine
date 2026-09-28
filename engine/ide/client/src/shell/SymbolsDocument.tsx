@@ -146,6 +146,12 @@ export function SymbolsDocument({ ctx }: { ctx: Context }) {
   const { doc, known, diagnostics, selected } = useSymbols(ctx);
   const symbols = doc?.symbols ?? [];
   const [status, setStatus] = useState<string | null>(null);
+  /** The last text the canvas itself put in the status line — the one text its `ready` clears. */
+  const canvasText = useRef<string | null>(null);
+  const canvasSays = (text: string) => {
+    canvasText.current = text;
+    setStatus(text);
+  };
   const [draft, setDraft] = useState('');
   const [menu, setMenu] = useState<{ x: number; y: number; def: SymbolDef } | null>(null);
   const [dropTarget, setDropTarget] = useState<string | null>(null);
@@ -199,7 +205,7 @@ export function SymbolsDocument({ ctx }: { ctx: Context }) {
       if (sel !== null) tell('symbol', sel);
       askSnapshot();
     });
-    rpc.on('error', (payload) => setStatus((payload as { message: string }).message));
+    rpc.on('error', (payload) => canvasSays((payload as { message: string }).message));
     return () => {
       rpc.dispose();
       rpcRef.current = null;
@@ -209,12 +215,15 @@ export function SymbolsDocument({ ctx }: { ctx: Context }) {
 
   // A canvas that never boots (a broken editor.html, a throw before
   // scene-edit's symbol mode is up) leaves this document silent — say so
-  // after 10s; a later `ready` (this canvas or a remount) clears it.
+  // after 10s; a later `ready` (this canvas or a remount) clears it. No
+  // iframe (no preview address), no canvas to wait for. `ready` clears
+  // only what the canvas itself said — its silence or its last `error` —
+  // never a status this document set.
   useCanvasSilence(
     rpc,
-    canvasKey,
-    () => setStatus(CANVAS_SILENT),
-    () => setStatus(null),
+    previewUrl ? canvasKey : null,
+    () => canvasSays(CANVAS_SILENT),
+    () => setStatus((current) => (current === canvasText.current ? null : current)),
   );
 
   // Every later doc change is a `replaceSymbols`; every later selection

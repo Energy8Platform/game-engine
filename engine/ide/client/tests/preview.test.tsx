@@ -453,6 +453,9 @@ describe('Preview', () => {
     render(<Preview ctx={ctx} />);
     const select = screen.getByTestId('preview-balance') as HTMLSelectElement;
     expect(select.value).toBe('1000');
+    // …and the wallet that pick started, so the remounted game finds its key.
+    const iframe = screen.getByTitle('game preview') as HTMLIFrameElement;
+    expect(new URL(iframe.src).searchParams.get('wallet')).toBe('1');
   });
 
   it('the preset, language, currency and balance controls each have an accessible name', async () => {

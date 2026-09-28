@@ -526,6 +526,38 @@ describe('SymbolsDocument', () => {
       }
     });
 
+    it('a status the canvas did not set survives a later ready', async () => {
+      const { ctx } = await booted();
+      renderDocument(ctx);
+      const { iframe } = canvas();
+      const input = (await screen.findByTestId('symbol-add-input')) as HTMLInputElement;
+      fireEvent.change(input, { target: { value: '1' } });
+      fireEvent.keyDown(input, { key: 'Enter' });
+      expect(screen.getByTestId('symbols-status')).toHaveTextContent('"1" is already a symbol');
+      await act(async () => {
+        frame(iframe, 'ready', {});
+      });
+      expect(screen.getByTestId('symbols-status')).toHaveTextContent('"1" is already a symbol');
+    });
+
+    it('no preview address: no canvas, so no silence text after 10s', async () => {
+      const { ctx } = await harness(
+        { 'GET /api/symbols': boot(), 'PUT /api/symbols': accept },
+        { previewUrl: null },
+      );
+      await waitFor(() => expect(ctx.symbols.known()).toEqual(KNOWN));
+      vi.useFakeTimers();
+      try {
+        renderDocument(ctx);
+        await act(async () => {
+          await vi.advanceTimersByTimeAsync(10_000);
+        });
+        expect(screen.queryByTestId('symbols-status')).toBeNull();
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
     it('shows "canvas unavailable" when there is no project open, and renders no iframe', async () => {
       const { ctx } = await harness(
         { 'GET /api/symbols': boot(), 'PUT /api/symbols': accept },

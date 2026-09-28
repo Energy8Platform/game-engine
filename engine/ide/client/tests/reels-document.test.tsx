@@ -96,21 +96,26 @@ async function harness(
     ) => Promise<{ reload: boolean; diagnostics: unknown[] }>;
     known?: { id: string; name: string }[];
     symbolsDoc?: SymbolsDoc | null;
+    previewUrl?: string | null;
   } = {},
 ) {
   const ctx = new Context();
   built.push(ctx);
   await ctx.plugin(slots);
-  const workspace = {
+  let workspace = {
     projects: [],
     templates: [],
     active: 'first',
-    previewUrl: PREVIEW_URL,
+    previewUrl: opts.previewUrl === undefined ? PREVIEW_URL : opts.previewUrl,
     diagnostics: [],
   };
+  const workspaceListeners = new Set<() => void>();
   ctx.provide('workspace', {
     state: () => workspace,
-    subscribe: () => () => {},
+    subscribe: (fn: () => void) => {
+      workspaceListeners.add(fn);
+      return () => workspaceListeners.delete(fn);
+    },
     open: async () => [],
     create: async () => [],
   });
@@ -176,7 +181,14 @@ async function harness(
       for (const fn of listeners) fn();
     });
   };
-  return { ctx, updateCalls, setRows, bumpReloads };
+  /** A new preview address (a project opening, say) — a new `workspace` snapshot, as the real service answers. */
+  const setPreviewUrl = (previewUrl: string | null) => {
+    act(() => {
+      workspace = { ...workspace, previewUrl };
+      for (const fn of workspaceListeners) fn();
+    });
+  };
+  return { ctx, updateCalls, setRows, bumpReloads, setPreviewUrl };
 }
 
 function renderDocument(ctx: Context) {
@@ -620,7 +632,7 @@ describe('ReelsDocument — canvas actions', () => {
   });
 });
 
-describe('ReelsDocument — canvas error/silence (Task 5)', () => {
+describe('ReelsDocument — canvas error/silence', () => {
   it("the canvas' own error event shows its message in reels-action-status", async () => {
     const { ctx } = await harness([row('reels1')]);
     renderDocument(ctx);
@@ -663,8 +675,8 @@ describe('ReelsDocument — canvas error/silence (Task 5)', () => {
     }
   });
 
-  // Review Focus 5: an error, then a remount (a new canvas key) that DOES
-  // answer ready — the old error must not survive over a working canvas.
+  // An error, then a remount (a new canvas key) that DOES answer ready —
+  // the old error must not survive over a working canvas.
   it('an error, then a remount and ready, clears the status', async () => {
     const { ctx, bumpReloads } = await harness([row('reels1')]);
     renderDocument(ctx);
@@ -695,5 +707,40 @@ describe('ReelsDocument — canvas error/silence (Task 5)', () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  it('no preview address: no canvas, so no silence text — none left over once a canvas appears', async () => {
+    const { ctx, setPreviewUrl } = await harness([row('reels1')], { previewUrl: null });
+    vi.useFakeTimers();
+    try {
+      renderDocument(ctx);
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(10_000);
+      });
+      setPreviewUrl(PREVIEW_URL);
+      canvas();
+      expect(screen.getByTestId('reels-action-status')).toHaveTextContent('');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("a status the canvas did not set (a row it couldn't apply) survives a later ready", async () => {
+    const { ctx } = await harness([row('reels1')]);
+    renderDocument(ctx);
+    const c = canvas();
+    c.setAnswer('rows', { results: [{ id: 'reels1', result: 'failed' }] });
+    c.ready();
+    await waitFor(() =>
+      expect(screen.getByTestId('reels-action-status')).toHaveTextContent(
+        "couldn't apply reels1 on the canvas",
+      ),
+    );
+    c.setAnswer('rows', { results: [{ id: 'reels1', result: 'updated' }] });
+    c.ready();
+    await act(async () => {});
+    expect(screen.getByTestId('reels-action-status')).toHaveTextContent(
+      "couldn't apply reels1 on the canvas",
+    );
   });
 });

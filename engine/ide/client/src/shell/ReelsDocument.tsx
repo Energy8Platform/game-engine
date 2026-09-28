@@ -174,6 +174,12 @@ export function ReelsDocument({ ctx }: { ctx: Context }) {
   const rpcRef = useRef<CanvasRpc | null>(rpc);
   const [busy, setBusy] = useState(false);
   const [status, setStatus] = useState<string | null>(null);
+  /** The last text the canvas itself put in the status line — the one text its `ready` clears. */
+  const canvasText = useRef<string | null>(null);
+  const canvasSays = (text: string) => {
+    canvasText.current = text;
+    setStatus(text);
+  };
 
   /** The CURRENT config of the reel rows in `ids` — every one by default —
    * off the service directly (never the `list` this render closed over —
@@ -199,7 +205,7 @@ export function ReelsDocument({ ctx }: { ctx: Context }) {
   useEffect(() => {
     rpcRef.current = rpc;
     rpc.on('ready', () => sendRows());
-    rpc.on('error', (payload) => setStatus((payload as { message: string }).message));
+    rpc.on('error', (payload) => canvasSays((payload as { message: string }).message));
     return () => {
       rpc.dispose();
       rpcRef.current = null;
@@ -209,12 +215,15 @@ export function ReelsDocument({ ctx }: { ctx: Context }) {
 
   // A canvas that never boots (a broken editor.html, a throw before
   // scene-edit's reels mode is up) leaves this document silent — say so
-  // after 10s; a later `ready` (this canvas or a remount) clears it.
+  // after 10s; a later `ready` (this canvas or a remount) clears it. No
+  // iframe (no preview address), no canvas to wait for. `ready` clears
+  // only what the canvas itself said — its silence or its last `error` —
+  // never a status this document set.
   useCanvasSilence(
     rpc,
-    canvasKey,
-    () => setStatus(CANVAS_SILENT),
-    () => setStatus(null),
+    previewUrl ? canvasKey : null,
+    () => canvasSays(CANVAS_SILENT),
+    () => setStatus((current) => (current === canvasText.current ? null : current)),
   );
 
   /** The iframe's own ref, not its `load` event — `contentWindow` exists as soon as it's inserted (`SymbolsDocument`'s own reasoning). */
