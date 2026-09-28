@@ -80,7 +80,7 @@ export interface PreviewState {
   currency: string;
   /** A harness balance level (major units) — see `balanceLevels.ts`. */
   balance: number;
-  /** Bumped on every balance pick and on `↺`, so each is a fresh wallet (Task 1's `?wallet=<n>` contract). */
+  /** Bumped on every balance pick and on `↺`, so each is a fresh wallet (`session-host`'s `?wallet=<n>` contract). */
   wallet: number;
   social: boolean;
 }
@@ -186,7 +186,7 @@ function writePreviewState(s: PreviewState): void {
  * `↻` (`refreshes`) is a relaunch at the SAME address: `previewAddress`
  * already sends `balance`/`currency`/`wallet` on every request, and
  * `session-host` folds them into its `sessionStorage` wallet key
- * (`e8:wallet:<gameId>:<balance>:<currency>:<wallet>`, Task 1) — so an
+ * (`e8:wallet:<gameId>:<balance>:<currency>:<wallet>`) — so an
  * unchanged address means an unchanged key, and the wallet survives the
  * refresh even though the iframe element itself is new. A balance pick or
  * `↺` bumps `wallet`, which DOES change the address (and so the key) —

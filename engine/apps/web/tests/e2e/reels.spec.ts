@@ -42,10 +42,10 @@ import { projectCopy, startDevHost, type DevHost } from './project-fixture';
 const IDE_URL = `http://127.0.0.1:${IDE_WEB_PORT}/`;
 const REELS_CANVAS = 'iframe[title="reels canvas"]';
 
-// `| undefined`, RESET after each test's own cleanup (Task 6 fix round 1):
-// a test that throws before ever calling `boot()` (a bad `writeFileSync`,
-// say) must not leave a stale reference to the PREVIOUS test's already-
-// stopped `host`/removed `dir` for ITS OWN `afterEach` to act on.
+// `| undefined`, RESET after each test's own cleanup: a test that throws
+// before ever calling `boot()` (a bad `writeFileSync`, say) must not leave
+// a stale reference to the PREVIOUS test's already-stopped `host`/removed
+// `dir` for ITS OWN `afterEach` to act on.
 let dir: string | undefined;
 let host: DevHost | undefined;
 
@@ -61,7 +61,7 @@ test.afterEach(async () => {
 });
 
 /**
- * Starts the host over `dir` — split out of `beforeEach` (Task 6) so a test
+ * Starts the host over `dir` — split out of `beforeEach` so a test
  * may edit the project's files first, the way `declared.spec.ts`'s inline
  * edits do. Needed here because `startDevHost` boots vite over `dir`
  * straight away and hands it every row to pre-bundle in the background
@@ -242,8 +242,8 @@ test('the Reels document edits the reel rows, rebuilds the lab board, spins it, 
 });
 
 /**
- * `first-slot`'s OWN `src/editor.ts`, before slice 43 (Task 5) stopped
- * parsing the address at all — the exact shape paper-duel's own
+ * `first-slot`'s OWN `src/editor.ts`, before slice 43 stopped it parsing
+ * the address at all — the exact shape paper-duel's own
  * `editor.ts` never got past: it still reads `?scene=`/`?symbol=` off
  * `location.search` and passes them (plus `parentOrigin`) to `sceneEdit`
  * explicitly, but it never knew `reels` was a thing, so it never reads or
@@ -268,22 +268,22 @@ await game.ctx.plugin(sceneEdit, {
 `;
 
 /**
- * Task 6: a project whose `editor.ts` never names `reels` at all still
- * opens the Reels document's canvas in reels mode, because the Reels
- * document's own iframe addresses it with `editor.html?reels=` regardless
- * of what the project's `editor.ts` does with that query string
- * (`ReelsDocument.tsx`), and `scene-edit`'s `pageMode` reads `reels` off
- * the URL itself whenever the plugin's own config leaves it out
- * (`config.reels !== undefined ? config.reels : p.has('reels')` — Task 5).
- * Without that fallback this project's canvas would fall through to plain
- * scene mode instead (no `reels`/`symbol` in the plugin config, and no
- * `scene` param on the address either), whose `snapshot()` carries no
- * `mode` field at all — so the first assertion below is exactly the one a
- * regression in Task 5's fallback would turn red.
+ * A project whose `editor.ts` never names `reels` at all still opens the
+ * Reels document's canvas in reels mode, because the Reels document's own
+ * iframe addresses it with `editor.html?reels=` regardless of what the
+ * project's `editor.ts` does with that query string (`ReelsDocument.tsx`),
+ * and `scene-edit` reads the mode from the page itself whenever the
+ * plugin's own config leaves it out (`pageMode`: `config.reels !==
+ * undefined ? config.reels : p.has('reels')`). Without that fallback this
+ * project's canvas would fall through to plain scene mode instead (no
+ * `reels`/`symbol` in the plugin config, and no `scene` param on the
+ * address either), whose `snapshot()` carries no `mode` field at all — so
+ * the first assertion below is exactly the one a regression in that
+ * fallback would turn red.
  *
  * `first-slot` composes no `reels1.board`, so the board is EMPTY until
  * something fills it — this project runs no flow on the editor page
- * (`editorPage: true`), so the only thing that ever will is Task 4's
+ * (`editorPage: true`), so the only thing that ever will is `scene-edit`'s
  * `fillIfEmpty`, and it does so at once, before any lab action.
  */
 test('a project whose editor page passes no reels mode still shows a filled board, no Spin needed', async ({
@@ -296,7 +296,7 @@ test('a project whose editor page passes no reels mode still shows a filled boar
   const canvas = await readyCanvas(page, REELS_CANVAS);
   const snapshot = () => canvas.evaluate(() => (window as any).__e8edit.snapshot() as ReelsSnapshot);
   await expect.poll(snapshot).toMatchObject({ mode: 'reels', cols: 5 });
-  // Every cell, not merely some — `randomBoard` (Task 4's fill) never
+  // Every cell, not merely some — `randomBoard` (the fill's board) never
   // leaves a gap, and this is the fill, not a lab `spin()` this test never
   // presses.
   await expect
