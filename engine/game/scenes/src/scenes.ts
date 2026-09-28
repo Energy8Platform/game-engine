@@ -1175,8 +1175,9 @@ export function createScenes(options: CreateScenesOptions): ScenesService {
       container.removeChild(view);
       view.alpha = 1;
     }
-    // What a row still requires is needed too — its holder outlives any one scene.
-    const needed = new Set([...visibleIds.flatMap((v) => assetsOf(v)), ...requiredPaths()]);
+    // What a row still requires is needed too — its holder outlives any one
+    // scene — and so is what a pending `load` readied for the show to come.
+    const needed = new Set([...[...visibleIds, ...pendingIds].flatMap((v) => assetsOf(v)), ...requiredPaths()]);
     const orphans = [...loaded].filter((p) => !needed.has(p));
     if (orphans.length === 0) return;
     for (const p of orphans) loaded.delete(p);

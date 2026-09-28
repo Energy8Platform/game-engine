@@ -241,6 +241,20 @@ describe('a load re-runs only the nodes it fed', () => {
     expect(viewA.x).toBe(50);
   });
 
+  it('a hide keeps what a pending load readied: the art stays for the show to come', async () => {
+    const seen: Container[] = [];
+    const { scenes } = boot([], { extraTypes: [probeType(seen)] });
+    scenes.replace([
+      { id: 'a', nodes: [{ id: 'i', type: 'probe', props: { src: 'a.png' } }] },
+      { id: 'b', nodes: [{ id: 'i', type: 'probe', props: { src: 'b.png' } }] },
+    ]);
+    await scenes.show('a');
+    await scenes.load('b');
+    vi.mocked(loader.unload).mockClear();
+    await scenes.hide('a');
+    expect(loader.unload).toHaveBeenLastCalledWith(['a.png']); // not b.png
+  });
+
   it('a type with no declared assets is always refreshed — the conservative default', async () => {
     // A type that never says which paths it needs has no way to say "not
     // me": it keeps the old blanket-sweep behaviour, scoped load or not.
