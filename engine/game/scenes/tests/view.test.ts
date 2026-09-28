@@ -45,32 +45,78 @@ describe('view() answers the copy on screen', () => {
     { id: 'inner', nodes: [{ id: 'x', type: 'container', props: {} }] },
     { id: 'outer', nodes: [{ id: 'embed', type: 'scene', props: { scene: 'inner' } }] },
   ];
+  const ref = { scene: 'inner', node: 'x' };
+  /** Each copy picked by WHERE it sits, never by its index in `views()` — that order follows how the mounts were (re)built. */
+  const copiesOf = (scenes: ReturnType<typeof boot>['scenes']) => ({
+    own: scenes.sceneView('inner')!.getChildByLabel('x')!,
+    embedded: scenes.sceneView('outer')!.getChildByLabel('x', true)!,
+  });
 
-  it('nothing shown: view answers the entry own mount — today’s answer', () => {
+  it('nothing loaded or shown: view answers the entry own mount — today’s answer', () => {
     const { scenes } = boot(docs());
-    const ref = { scene: 'inner', node: 'x' };
-    const copies = scenes.views(ref);
-    expect(copies).toHaveLength(2); // inner's own mount + the copy embedded in outer
-    expect(scenes.view(ref)).toBe(copies[0]);
+    const { own } = copiesOf(scenes);
+    expect(scenes.views(ref)).toHaveLength(2); // inner's own mount + the copy embedded in outer
+    expect(scenes.view(ref)).toBe(own);
   });
 
   it('show(outer): view answers the copy inside outer’s mount, not inner’s own', async () => {
     const { scenes } = boot(docs());
-    const ref = { scene: 'inner', node: 'x' };
-    const [own, embedded] = scenes.views(ref);
+    const { own, embedded } = copiesOf(scenes);
     await scenes.show('outer');
     expect(scenes.view(ref)).toBe(embedded);
     expect(scenes.view(ref)).not.toBe(own);
-    expect(scenes.sceneView('outer')!.getChildByLabel('x', true)).toBe(embedded);
   });
 
   it('hide(outer): view falls back to inner’s own mount again', async () => {
     const { scenes } = boot(docs());
-    const ref = { scene: 'inner', node: 'x' };
-    const [own] = scenes.views(ref);
+    const { own } = copiesOf(scenes);
     await scenes.show('outer');
     await scenes.hide('outer');
     expect(scenes.view(ref)).toBe(own);
+  });
+
+  it('load(outer) → pose via view() → show(outer): the on-screen copy carries the pose as show resolves; the own mount is untouched', async () => {
+    const { scenes } = boot(docs());
+    const { own, embedded } = copiesOf(scenes);
+    await scenes.load('outer');
+    scenes.view(ref)!.x = 7;
+    await scenes.show('outer');
+    expect(scenes.view(ref)).toBe(embedded);
+    expect(embedded.x).toBe(7);
+    expect(own.x).toBe(0);
+  });
+
+  it('a hidden host no longer wins — loaded and hidden, or loaded, shown and hidden', async () => {
+    const { scenes } = boot(docs());
+    const { own, embedded } = copiesOf(scenes);
+    await scenes.load('outer');
+    expect(scenes.view(ref)).toBe(embedded);
+    await scenes.hide('outer'); // never shown: still drops it
+    expect(scenes.view(ref)).toBe(own);
+    await scenes.load('outer');
+    await scenes.show('outer');
+    await scenes.hide('outer');
+    expect(scenes.view(ref)).toBe(own);
+  });
+
+  it('pending hosts: the latest load wins, a repeat load moves a host to the end, and a replace drops one no longer declared', async () => {
+    const { scenes } = boot([
+      ...docs(),
+      { id: 'other', nodes: [{ id: 'embed', type: 'scene', props: { scene: 'inner' } }] },
+    ]);
+    const inOther = () => scenes.sceneView('other')!.getChildByLabel('x', true);
+    await scenes.load('outer');
+    await scenes.load('other');
+    expect(scenes.view(ref)).toBe(inOther());
+    await scenes.load('outer');
+    expect(scenes.view(ref)).toBe(copiesOf(scenes).embedded);
+    // `outer` leaves the set, then comes back: the load before it was for a document that is gone.
+    scenes.replace([docs()[0]!, { id: 'other', nodes: [{ id: 'embed', type: 'scene', props: { scene: 'inner' } }] }]);
+    scenes.replace([
+      ...docs(),
+      { id: 'other', nodes: [{ id: 'embed', type: 'scene', props: { scene: 'inner' } }] },
+    ]);
+    expect(scenes.view(ref)).toBe(inOther());
   });
 });
 
@@ -121,6 +167,14 @@ describe('load()', () => {
     expect(spy.load).not.toHaveBeenCalled();
   });
 
+  it('an undeclared id is `show`’s own diagnostic, and still resolves', async () => {
+    const { scenes, report } = boot([]);
+    await expect(scenes.load('typo')).resolves.toBeUndefined();
+    expect(report).toHaveBeenCalledWith(
+      expect.objectContaining({ severity: 'error', where: 'typo', message: 'scene "typo" is not declared' }),
+    );
+  });
+
   it('a pose set after load survives a show that finds nothing left to load', async () => {
     const { scenes } = boot([{ id: 'a', nodes: [{ id: 'i', type: 'image', props: { src: 'p.png' } }] }]);
     await scenes.load('a');
@@ -132,12 +186,16 @@ describe('load()', () => {
 });
 
 describe('a load re-runs only the nodes it fed', () => {
+  /** Its `update` re-lays the view out (`x` back to 0) — a stray re-run shows up as a lost pose, not only in `seen`. */
   function probeType(seen: Container[]): NodeType {
     return {
       type: 'probe',
       schema: Schema.object({ src: Schema.string().default('') }),
       mount: () => new Container(),
-      update: (view) => void seen.push(view),
+      update: (view) => {
+        seen.push(view);
+        view.x = 0;
+      },
       assets: (props) => [(props as { src: string }).src],
     };
   }
@@ -161,6 +219,26 @@ describe('a load re-runs only the nodes it fed', () => {
     await scenes.load('b');
     expect(seen).toEqual([viewB]); // a's update did NOT re-run
     expect(viewA.x).toBe(50); // a's pose survives
+  });
+
+  it('hide(b) unloading b’s art re-runs only the nodes that drew with it: a’s pose stands', async () => {
+    const seen: Container[] = [];
+    const { scenes } = boot([], { extraTypes: [probeType(seen)] });
+    scenes.replace([
+      { id: 'a', nodes: [{ id: 'i', type: 'probe', props: { src: 'a.png' } }] },
+      { id: 'b', nodes: [{ id: 'i', type: 'probe', props: { src: 'b.png' } }] },
+    ]);
+    await scenes.show('a');
+    await scenes.show('b');
+    const viewA = scenes.view({ scene: 'a', node: 'i' })!;
+    const viewB = scenes.view({ scene: 'b', node: 'i' })!;
+
+    viewA.x = 50;
+    seen.length = 0;
+    await scenes.hide('b'); // b.png is an orphan now, and unloaded
+    expect(loader.unload).toHaveBeenLastCalledWith(['b.png']);
+    expect(seen).toEqual([viewB]);
+    expect(viewA.x).toBe(50);
   });
 
   it('a type with no declared assets is always refreshed — the conservative default', async () => {
@@ -201,23 +279,28 @@ describe('a load re-runs only the nodes it fed', () => {
   });
 
   it('Review Focus 2: a live patch on a not-yet-loaded node survives its own document’s load', async () => {
+    // Patched through `srcKey`, an own prop `update` CONSUMES (it picks the
+    // texture) — a common prop like `alpha` is one `refresh` never touches,
+    // so it could not tell a refresh re-reading the entry's live props from
+    // one re-deriving them from the document.
+    const alt = new Texture();
+    const textures: Record<string, Texture> = { 'p.png': Texture.WHITE, 'q.png': alt };
     const have = new Set<string>();
     const lazy: AssetLoader = {
       load: vi.fn(async (urls: string[]) => urls.forEach((u) => have.add(u))),
       unload: vi.fn(async (urls: string[]) => urls.forEach((u) => have.delete(u))),
-      get: (u) => (have.has(u) ? Texture.WHITE : undefined),
+      get: (u) => (have.has(u) ? textures[u] : undefined),
     };
-    const { scenes } = boot([{ id: 'a', nodes: [{ id: 'i', type: 'image', props: { src: 'p.png' } }] }], {
-      loader: lazy,
-    });
+    const { scenes } = boot(
+      [{ id: 'a', nodes: [{ id: 'i', type: 'image', props: { src: 'p.png', srcOf: { alt: 'q.png' } } }] }],
+      { loader: lazy },
+    );
     const view = scenes.view({ scene: 'a', node: 'i' }) as Sprite;
-    expect(view.texture).not.toBe(Texture.WHITE); // not loaded yet
 
-    expect(scenes.setProps({ scene: 'a', node: 'i' }, { alpha: 0.5 })).toBe(true);
-    expect(view.alpha).toBe(0.5);
+    expect(scenes.setProps({ scene: 'a', node: 'i' }, { srcKey: 'alt' })).toBe(true);
+    expect(view.texture).toBe(Texture.EMPTY); // nothing loaded yet
 
     await scenes.load('a');
-    expect(view.texture).toBe(Texture.WHITE); // the refresh still reached it — same document
-    expect(view.alpha).toBe(0.5); // the live patch was not undone by the refresh
+    expect(view.texture).toBe(alt); // the refresh reached it, with the PATCHED key — not the document's `src`
   });
 });
