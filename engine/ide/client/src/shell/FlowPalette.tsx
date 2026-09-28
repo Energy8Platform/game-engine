@@ -13,35 +13,39 @@ import { KIND_MIME } from './flow-graph';
  * instead — the mounted canvas (`FlowDocument`) is the one that registered
  * a handler for it and does the actual add.
  *
- * Nothing to show without a flow.yml — there is no canvas to add into
- * either, the same gate `FlowDocument` applied before the palette moved
- * out of it.
+ * Without a flow.yml (none, or one that does not parse) there is no
+ * canvas to add into either: the header stays, with one line saying so
+ * rather than a blank column.
  */
 export function FlowPalette({ ctx }: { ctx: Context }) {
   const { doc, kinds } = useFlow(ctx);
-  if (doc === null) return null;
   return (
     <div className="e8-explorer e8-flow-palette" data-testid="flow-palette">
       <div className="e8-explorer-header">
         <span className="e8-explorer-title">nodes</span>
       </div>
-      {kinds.length === 0 && <p className="e8-empty">no kinds yet — run the game</p>}
-      {kinds.map((info) => (
-        <button
-          key={info.kind}
-          type="button"
-          className="e8-explorer-entry e8-flow-add"
-          data-testid={`flow-add-${info.kind}`}
-          draggable
-          onDragStart={(e) => {
-            e.dataTransfer.setData(KIND_MIME, info.kind);
-            e.dataTransfer.effectAllowed = 'move';
-          }}
-          onClick={() => ctx.flow.requestAdd(info.kind)}
-        >
-          {info.kind}
-        </button>
-      ))}
+      {doc === null ? (
+        <p className="e8-empty">no flow.yml — create one to add nodes</p>
+      ) : kinds.length === 0 ? (
+        <p className="e8-empty">no kinds yet — run the game</p>
+      ) : (
+        kinds.map((info) => (
+          <button
+            key={info.kind}
+            type="button"
+            className="e8-explorer-entry e8-flow-add"
+            data-testid={`flow-add-${info.kind}`}
+            draggable
+            onDragStart={(e) => {
+              e.dataTransfer.setData(KIND_MIME, info.kind);
+              e.dataTransfer.effectAllowed = 'move';
+            }}
+            onClick={() => ctx.flow.requestAdd(info.kind)}
+          >
+            {info.kind}
+          </button>
+        ))
+      )}
     </div>
   );
 }

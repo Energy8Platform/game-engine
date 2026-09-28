@@ -3,7 +3,7 @@ import { describe, expect, it, vi } from 'vitest';
 import type { DocumentMeta } from '../src/plugins/shell';
 import type { SlotMeta } from '../src/plugins/slots';
 import { CANVAS_SILENT } from '../src/shell/useCanvasSilence';
-import { canvas, harness, renderDocument, row } from './reels-harness';
+import { canvas, harness, renderDocument, renderSettings, row } from './reels-harness';
 
 /**
  * The Reels document standalone: the toolbar and the reel lab canvas —
@@ -94,10 +94,9 @@ describe('ReelsDocument — canvas sync', () => {
     });
   });
 
-  // Review Focus: an edit reaching the composition from anywhere — the
-  // Composition screen, a remote frame — not through this document's own
-  // (removed) form, still re-applies on the canvas: only the row whose
-  // config actually changed, and only once.
+  // An edit reaching the composition from anywhere — the Composition
+  // screen, a remote frame, the settings sidebar — re-applies on the
+  // canvas: only the row whose config actually changed, and only once.
   it('a reels1 config change pushed as a composition frame re-applies just that row', async () => {
     const { ctx, setRows } = await harness([
       row('reels1', { grid: { cols: 5 } }),
@@ -135,6 +134,26 @@ describe('ReelsDocument — canvas sync', () => {
     await waitFor(() => expect(c.reqs('rows')).toHaveLength(1));
 
     setRows([row('reels1'), row('other1', { x: 1 })]);
+    await act(async () => {});
+    expect(c.reqs('rows')).toHaveLength(1);
+  });
+
+  // A settings write the host answers with diagnostics leaves the row's
+  // config as it was, so the canvas has nothing new to apply.
+  it('a write that comes back with diagnostics does not re-send the canvas', async () => {
+    const { ctx, updateCalls } = await harness([row('reels1', { grid: { cols: 5 } })], {
+      update: async () => ({ reload: false, diagnostics: [{ severity: 'error' }] }),
+    });
+    renderDocument(ctx);
+    renderSettings(ctx);
+    const c = canvas();
+    c.ready();
+    await waitFor(() => expect(c.reqs('rows')).toHaveLength(1));
+
+    const cols = screen.getByLabelText('cols');
+    fireEvent.change(cols, { target: { value: '6' } });
+    fireEvent.blur(cols);
+    await waitFor(() => expect(updateCalls).toHaveLength(1));
     await act(async () => {});
     expect(c.reqs('rows')).toHaveLength(1);
   });

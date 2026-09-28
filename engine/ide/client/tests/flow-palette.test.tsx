@@ -37,11 +37,16 @@ describe('FlowPalette', () => {
     expect(data.get(KIND_MIME)).toBe('wait');
   });
 
-  it('no flow.yml yet: nothing renders (no canvas to add into either)', async () => {
+  it('no flow.yml yet: the header and one line saying so, no kinds (no canvas to add into)', async () => {
     const { ctx } = await harness({ 'GET /api/flow': ready(null) });
     renderSidebar(ctx);
     await waitFor(() => expect(ctx.flow.kinds()).toEqual(FIVE_KINDS));
-    expect(screen.queryByTestId('flow-palette')).toBeNull();
+    const palette = screen.getByTestId('flow-palette');
+    expect(palette).toHaveTextContent('nodes');
+    expect(palette.querySelector('.e8-empty')).toHaveTextContent(
+      'no flow.yml — create one to add nodes',
+    );
+    expect(palette.querySelectorAll('button')).toHaveLength(0);
   });
 
   it('clicking a button PUTs the doc with a new <kind>-<n> node, centred on the pane and stepped per click', async () => {
