@@ -210,7 +210,10 @@ describe('createTween: a real scenes with a nested document', () => {
       { id: 'outer', nodes: [{ id: 'embed', type: 'scene', props: { scene: 'inner' } }] },
     ]);
     const ref = { scene: 'inner', node: 'x' };
-    const [own, embedded] = scenes.views(ref);
+    // Picked by where each copy sits, not by index: `views()` order follows how the mounts were (re)built.
+    const own = scenes.sceneView('inner')!.getChildByLabel('x')!;
+    const embedded = scenes.sceneView('outer')!.getChildByLabel('x', true)!;
+    expect(scenes.views(ref)).toHaveLength(2);
     await scenes.show('outer');
     expect(scenes.view(ref)).toBe(embedded);
     expect(scenes.view(ref)).not.toBe(own);

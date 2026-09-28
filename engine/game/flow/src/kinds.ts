@@ -393,9 +393,13 @@ const hide: FlowNodeKind<{ scene: string }> = {
 };
 
 /**
- * F16 — poses a document (its `assetsOf`, any row `require`d) ahead of a
+ * F16 — loads a document (its `assetsOf`, any row `require`d) ahead of a
  * `show`, so the `show` that follows has nothing left to fetch: a bonus
- * scene loaded while the base game still plays, say. Unlike `show`/`hide`,
+ * scene loaded while the base game still plays, say. It also makes the
+ * document a pending host for `scenes.view()` until it is hidden, so a
+ * pose between this and the `show` (a `tween`) lands on the copy the show
+ * puts on screen. An undeclared scene is the scenes service's own
+ * diagnostic, and this still leaves by `next`. Unlike `show`/`hide`,
  * a missing `scenes` service is NOT a throw — a preload is a nicety, not
  * something the flow can't run without — so this reaches the service
  * LENIENTLY (`ctx.reflect.get`, not `service()`) and reports a warning
@@ -646,7 +650,7 @@ interface ShellLike {
   setFreeSpins(fs: { current?: number | null; total: number; totalWin: number }): void;
   setBonus(b: { label: string; value: string; totalWin: number }): void;
   setAutoplay(a: { active: boolean; remaining: number }): void;
-  /** F20 — hides/shows the bar; the `shell-pixi` handle also zeroes `barHeight`/`safeArea.bottom` while hidden. */
+  /** F20 — hides/shows the whole shell (bar, popovers, modals); the `shell-pixi` handle also zeroes `barHeight`/`safeArea.bottom` while hidden. */
   setVisible(v: boolean): void;
 }
 
@@ -727,7 +731,7 @@ const shell: FlowNodeKind<ShellProps> = {
       .description("'tick' (one autoplay spin done), 'stop', or a count (a number: a literal, `$expr`, or a `{…}` template)"),
     visible: Schema.union(['', 'true', 'false'])
       .default('')
-      .description('F20 — whether the bar shows; hidden, the scenes get its height back'),
+      .description("whether the whole shell shows — bar, popovers, modals; hidden, the scenes get the bar's height back"),
   }),
   outs: ['next'],
   async run(p, { ctx, vars, report }) {

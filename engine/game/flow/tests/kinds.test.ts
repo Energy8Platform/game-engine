@@ -1,5 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import { Context } from 'cordis';
+import { Container } from 'pixi.js';
+import { createNodeTypes, createScenes } from '@energy8engine/scenes';
 import { createEvents } from '../src/events';
 import {
   BUILTIN_KINDS,
@@ -137,6 +139,24 @@ describe('built-in kinds', () => {
     const { rc } = runCtx();
     expect(await kind('load').run!({ scene: 'bonus' }, rc)).toEqual({ out: 'next' });
     expect(rc.report).toHaveBeenCalledWith("no 'scenes' service in this composition", 'warning');
+  });
+
+  it('load: an undeclared scene is the scenes service’s own `not declared` diagnostic — load still leaves by next', async () => {
+    const report = vi.fn();
+    const scenes = createScenes({
+      root: new Container(),
+      design: { width: 100, height: 50 },
+      nodeTypes: createNodeTypes(),
+      loader: { load: async () => {}, unload: async () => {}, get: () => undefined },
+      ctx: new Context(),
+      report,
+    });
+    const { rc } = runCtx({ scenes });
+    expect(await kind('load').run!({ scene: 'typo' }, rc)).toEqual({ out: 'next' });
+    expect(report).toHaveBeenCalledWith(
+      expect.objectContaining({ severity: 'error', where: 'typo', message: 'scene "typo" is not declared' }),
+    );
+    expect(rc.report).not.toHaveBeenCalled();
   });
 
   it('load: a rejected scenes.load is the loader\'s own diagnostic — load still leaves by next', async () => {

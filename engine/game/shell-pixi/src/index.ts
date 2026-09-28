@@ -125,7 +125,9 @@ declare module 'cordis' {
  */
 function wrapShell(shell: Shell): Shell {
   let hidden = false;
-  // Reused, not reallocated: `scenes1` reads `safeArea` every ticker frame while hidden.
+  // Reused, not reallocated: `scenes1` reads `safeArea` every ticker frame
+  // while hidden, and the wrapper adds no allocation per read. (The real
+  // `shell.safeArea` getter it copies from may allocate one of its own.)
   const hiddenSafeArea: SafeArea = { top: 0, right: 0, bottom: 0, left: 0 };
   const setVisible = (v: boolean) => {
     hidden = !v;
