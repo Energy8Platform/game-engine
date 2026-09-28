@@ -38,13 +38,18 @@ Full Playwright alone (`E8_E2E_HOST_PORT=5779`): 166/166 (11.3 min).
 
 ## Debts
 
-1. **First follow-up — a frame colour edit breaks that frame's alpha.**
-   reel-core's `SymbolCell` merges `frameStyle` shallowly (`{ ...DEFAULT,
-   ...config.frameStyle }`), and so does scene-edit's symbol mode: a
-   colour-only state edit (`{ idle: { color } }`, exactly what the Reels
-   colour picker writes) leaves `alpha` undefined → NaN in Pixi. Fix: a
-   per-state merge `{ ...DEFAULT[k], ...frameStyle?.[k] }` in both, with a
-   test. Older than this slice; its new UI makes it one click away.
+1. **Fixed after the slice (`674b8e0f`) — a frame state's alpha is always
+   the one set.** reel-core exports `resolveFrameStyle(partial)`: a
+   per-state merge of the defined keys (a set `alpha`, `0` included, is
+   used exactly; an unset one falls back to that state's default; a
+   colour-only edit keeps the default alpha). `SymbolCell` and scene-edit's
+   symbol mode use it; `CellFrameStyle`'s states are partial now, the
+   resolved shape is `ResolvedCellFrameStyle`. `alpha` is a `0–1` slider
+   (`.role('slider')` with `min`/`max`/`step` → SchemaForm draws a range +
+   a value box, one write per drag). The reels-mode `snapshot()` reports
+   `frame.idleAlpha` (read off the first cell's fill instruction — Pixi
+   internals, dev hook only; a public getter on `SymbolCell` would be
+   steadier). Full Playwright 166/166 after it.
 2. **Small**: a board record with no symbol becomes `symbol: 'undefined'`
    through `cellData`; a `null` board column throws a TypeError diagnostic
    rather than a named one; a "couldn't apply … on the canvas" status
