@@ -184,6 +184,12 @@ export interface TextProps {
   wrap: number;
   /** A bitmap font, project-relative; empty means a web font from `family`. */
   font: string;
+  /** Px added between letters; 0 = the renderer's own. */
+  letterSpacing: number;
+  /** Px per line; 0 = the renderer's own (its font metrics). */
+  lineHeight: number;
+  /** Shrinks the font so the laid-out text fits this width, design px; 0 = off. */
+  fitWidth: number;
 }
 
 const FONT_EXTENSIONS = ['fnt', 'xml'];
@@ -208,6 +214,7 @@ const styleOf = (props: TextProps, fontFamily: string) => ({
   fontSize: props.size,
   fontWeight: props.weight,
   align: props.align,
+  letterSpacing: props.letterSpacing,
   // `COLOUR` in the schema refused a typo already; `Color` here is the
   // same judgment run for the VALUE. An empty fill is a cleared IDE field,
   // not an error — white, pixi's own default for text.
@@ -215,9 +222,26 @@ const styleOf = (props: TextProps, fontFamily: string) => ({
   ...(props.stroke && props.strokeWidth > 0
     ? { stroke: { color: new Color(props.stroke).toNumber(), width: props.strokeWidth } }
     : {}),
+  // Same "0 means unset" idiom as `stroke` above: an explicit 0 here would
+  // still read back as pixi's own default (also 0), but leaving the key out
+  // says so rather than relying on the coincidence.
+  ...(props.lineHeight > 0 ? { lineHeight: props.lineHeight } : {}),
   wordWrap: props.wrap > 0,
   wordWrapWidth: props.wrap,
 });
+
+/**
+ * Shrinks the font until the laid-out text fits `fitWidth` (never grows
+ * it). Called AFTER the style (including `wrap`) is on the view, so a
+ * wrapped text is measured by its widest LINE, not the whole string on one
+ * line — `t.width` is whatever pixi already laid out.
+ */
+function fitText(t: Text, props: TextProps): void {
+  if (!(props.fitWidth > 0)) return;
+  const width = t.width; // measured with the full size first
+  if (width <= props.fitWidth) return;
+  t.style.fontSize = Math.max(1, props.size * (props.fitWidth / width));
+}
 
 /** A pixi `Text` — or a `BitmapText` when `font` names a bitmap font. Both have an `anchor`, so the common anchor props apply to either. */
 export const text: NodeType<TextProps> = {
@@ -239,6 +263,11 @@ export const text: NodeType<TextProps> = {
       .default('')
       .extra('asset', FONT_EXTENSIONS)
       .description('bitmap font, project-relative; empty for a web font'),
+    letterSpacing: Schema.number().default(0).description('px between letters'),
+    lineHeight: Schema.number().default(0).description("px per line; 0 = the renderer's own"),
+    fitWidth: Schema.number()
+      .default(0)
+      .description('shrink the font so the text fits this width, design px; 0 = off'),
   }) as Schema<TextProps>,
   assetProps: ['font'],
   mount(props, ctx) {
@@ -247,7 +276,9 @@ export const text: NodeType<TextProps> = {
     // loader's: it must hold before the font has landed, and a swap of
     // class mid-life would need a remount, which an edited `font` gets
     // anyway.
-    return props.font ? new BitmapText(options) : new Text(options);
+    const view = props.font ? new BitmapText(options) : new Text(options);
+    fitText(view as Text, props);
+    return view;
   },
   update(view, props, ctx) {
     // The style is built BEFORE the first assignment: `styleOf` parses
@@ -259,6 +290,10 @@ export const text: NodeType<TextProps> = {
     const t = view as Text;
     t.text = props.text;
     t.style = style;
+    // After the style, not before: `styleOf` just set `fontSize` back to
+    // `props.size` — a shorter `text` on the same node re-fits from the
+    // full size, not from whatever a previous fit shrunk it to.
+    fitText(t, props);
   },
   assets: (props) => (props.font ? [props.font] : []),
 };

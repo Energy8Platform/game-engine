@@ -7,8 +7,13 @@
  * `CanvasTextMetrics`, which calls `document.createElement`). So this file
  * asserts the class, the text and the whole style, never the bounds; the
  * browser e2e is where a text's box is proved.
+ *
+ * `fitWidth` is the one prop whose EFFECT is a measurement (`fitText`
+ * reads `t.width`), so the `describe('fitWidth', …)` block below stubs the
+ * `width` getter — see its own comment for why that is one getter shared
+ * by both classes, and what it stands in for.
  */
-import { describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import type { Context } from 'cordis';
 import { BitmapText, Text } from 'pixi.js';
 import { text } from '../src/builtin';
@@ -42,6 +47,9 @@ describe('text', () => {
       strokeWidth: 0,
       wrap: 0,
       font: '',
+      letterSpacing: 0,
+      lineHeight: 0,
+      fitWidth: 0,
     });
     // Nothing to load until a bitmap font is named.
     expect(text.assets!(props())).toEqual([]);
@@ -77,6 +85,20 @@ describe('text', () => {
     const view = text.mount(props({ text: 'a b c' }), null as never) as Text;
     expect(view.style.wordWrap).toBe(false);
     view.destroy();
+  });
+
+  it('letterSpacing and lineHeight reach the style; 0 stays at the renderer default', () => {
+    const view = text.mount(props({ letterSpacing: 2, lineHeight: 30 }), null as never) as Text;
+    expect(view.style.letterSpacing).toBe(2);
+    expect(view.style.lineHeight).toBe(30);
+    view.destroy();
+
+    // Pixi's own default IS 0 too — the point is `styleOf` never sets an
+    // explicit 0, the same "unset" idiom `stroke`'s width-0 case uses above.
+    const zero = text.mount(props(), null as never) as Text;
+    expect(zero.style.letterSpacing).toBe(0);
+    expect(zero.style.lineHeight).toBe(0);
+    zero.destroy();
   });
 
   it('an outline only once it has a width', () => {
@@ -147,5 +169,84 @@ describe('text', () => {
     assets['fonts/hb.fnt'] = { fontFamily: 'Hellbuddha' };
     text.update!(view, p, ctx);
     expect(view.style.fontFamily).toBe('Hellbuddha');
+  });
+});
+
+describe('fitWidth', () => {
+  /**
+   * `fitText` reads `t.width`, which this environment cannot measure for
+   * real (this file's own header doc comment). `width` is ONE accessor,
+   * defined once on `AbstractText.prototype` and shared by `Text` AND
+   * `BitmapText` (both extend it) — patching it there covers both classes
+   * with one stub. Modelled proportionally to the font size
+   * (`text.length * fontSize`) because that is the one property `fitText`'s
+   * math leans on: shrink the size by a ratio, and a later read reflects
+   * that same ratio — not a claim about real glyph metrics.
+   */
+  const abstractTextProto = Object.getPrototypeOf(Text.prototype) as object;
+  let originalWidth!: PropertyDescriptor;
+  beforeAll(() => {
+    originalWidth = Object.getOwnPropertyDescriptor(abstractTextProto, 'width')!;
+    Object.defineProperty(abstractTextProto, 'width', {
+      configurable: true,
+      get(this: { text: string; style: { fontSize: number } }) {
+        return this.text.length * this.style.fontSize;
+      },
+    });
+  });
+  afterAll(() => {
+    Object.defineProperty(abstractTextProto, 'width', originalWidth);
+  });
+
+  it('0 never shrinks, however long the text', () => {
+    const view = text.mount(props({ text: 'a'.repeat(80), size: 24, fitWidth: 0 }), null as never) as Text;
+    expect(view.style.fontSize).toBe(24);
+    view.destroy();
+  });
+
+  it('a string already under fitWidth is left at the full size', () => {
+    // width = 2 × 24 = 48, ≤ 100.
+    const view = text.mount(props({ text: 'hi', size: 24, fitWidth: 100 }), null as never) as Text;
+    expect(view.style.fontSize).toBe(24);
+    view.destroy();
+  });
+
+  it('a string over fitWidth shrinks the font, and re-measuring fits it', () => {
+    // width = 50 × 24 = 1200 > 100 → fontSize = 24 × (100/1200) = 2.
+    const view = text.mount(props({ text: 'a'.repeat(50), size: 24, fitWidth: 100 }), null as never) as Text;
+    expect(view.style.fontSize).toBeLessThan(24);
+    expect(view.width).toBeLessThanOrEqual(100);
+    view.destroy();
+  });
+
+  it('wraps at `wrap` first, then fits the widest line to `fitWidth`', () => {
+    const view = text.mount(
+      props({ text: 'a'.repeat(5), size: 24, wrap: 80, fitWidth: 60 }),
+      null as never,
+    ) as Text;
+    expect(view.style.wordWrap).toBe(true);
+    expect(view.style.wordWrapWidth).toBe(80);
+    expect(view.style.fontSize).toBeLessThan(24);
+    expect(view.width).toBeLessThanOrEqual(60);
+    view.destroy();
+  });
+
+  it('`update` from a long text back to a short one restores the full size', () => {
+    const view = text.mount(props({ text: 'a'.repeat(50), size: 24, fitWidth: 100 }), null as never) as Text;
+    expect(view.style.fontSize).toBeLessThan(24);
+    text.update!(view, props({ text: 'hi', size: 24, fitWidth: 100 }), null as never);
+    expect(view.style.fontSize).toBe(24);
+    view.destroy();
+  });
+
+  it('a BitmapText (a `font` named) gets the same fit', () => {
+    const ctx = ctxWith({ 'fonts/hb.fnt': { fontFamily: 'Hellbuddha' } });
+    const view = text.mount(
+      props({ text: 'a'.repeat(50), font: 'fonts/hb.fnt', size: 24, fitWidth: 100 }),
+      ctx,
+    ) as BitmapText;
+    expect(view).toBeInstanceOf(BitmapText);
+    expect(view.style.fontSize).toBeLessThan(24);
+    expect(view.width).toBeLessThanOrEqual(100);
   });
 });

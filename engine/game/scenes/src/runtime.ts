@@ -49,8 +49,69 @@ export interface ScenesConfig {
   mode?: 'contain' | 'cover';
   transition?: string;
   transitionMs?: number;
+  /** Web fonts loaded before the boot GET's `replace` mounts the first document — `scenes1.fonts` in the schema. */
+  fonts?: { family: string; src: string; weight?: string; style?: string }[];
+  /** Tests only; wraps `new FontFace(family, url, descriptors)` otherwise. */
+  fontFace?: (
+    family: string,
+    url: string,
+    descriptors: { weight: string; style: string },
+  ) => { load(): Promise<unknown> };
+  /** Tests only; `document.fonts` otherwise. */
+  fontSet?: { add(face: unknown): void };
   /** Tests only; the page's `fetch` otherwise. */
   fetchFn?: typeof fetch;
+}
+
+/**
+ * `scenes1.fonts` → real `@font-face`s, loaded and awaited before the boot
+ * GET's `replace` mounts the first document — F19's fix: nothing in a
+ * composition could load a web font before this, so a game drew in the
+ * system sans until it shipped its own `@font-face` + `document.fonts.load`
+ * by hand.
+ *
+ * `FontFace`/`document.fonts` do not exist in THIS module's own test
+ * environment (node) — nor in any non-browser host — so both are optional
+ * seams (`config.fontFace`, `config.fontSet`), `globalThis.FontFace`/
+ * `document.fonts` by default. Neither present (or nothing to load): skip
+ * silently, never throw.
+ *
+ * `Promise.allSettled`, not `Promise.all` — one bad font file must not cost
+ * every OTHER font its load, or the boot its mount. A rejection is one
+ * diagnostic naming the `src` and keeps going.
+ */
+async function loadFonts(
+  entries: NonNullable<ScenesConfig['fonts']>,
+  config: ScenesConfig,
+  report: (d: Diagnostic) => void,
+): Promise<void> {
+  if (entries.length === 0) return;
+  const GlobalFontFace = (globalThis as { FontFace?: typeof FontFace }).FontFace;
+  const makeFace: NonNullable<ScenesConfig['fontFace']> =
+    config.fontFace ?? ((family, url, descriptors) => new GlobalFontFace!(family, url, descriptors));
+  const fontSet =
+    config.fontSet ??
+    (globalThis as { document?: { fonts?: { add(face: unknown): void } } }).document?.fonts;
+  if ((!config.fontFace && !GlobalFontFace) || !fontSet) return;
+  const faces = entries.map((f) => ({
+    entry: f,
+    face: makeFace(f.family, `url(/${f.src})`, { weight: f.weight ?? 'normal', style: f.style ?? 'normal' }),
+  }));
+  for (const { face } of faces) fontSet.add(face);
+  const results = await Promise.allSettled(faces.map(({ face }) => face.load()));
+  results.forEach((result, i) => {
+    if (result.status !== 'rejected') return;
+    const { entry } = faces[i]!;
+    report(
+      diagnostic(
+        'warning',
+        'scenes',
+        entry.src,
+        `font "${entry.family}" did not load: ${result.reason instanceof Error ? result.reason.message : String(result.reason)}`,
+        'check the file under the project',
+      ),
+    );
+  });
 }
 
 export const name = 'scenes';
@@ -302,6 +363,10 @@ export function apply(ctx: Context, config: ScenesConfig): void {
   // as ready even when the GET then fails; nobody else awaiting it is fine
   // too (the `catch` below keeps a rejection from surfacing as unhandled).
   scenes.ready = (async () => {
+    // `scenes1.fonts` before the GET: a `text` node in the FIRST document
+    // may already name one of these families, so the fonts must have
+    // landed (or failed, one diagnostic each) before `replace` mounts it.
+    await loadFonts(config.fonts ?? [], config, report);
     try {
       const res = await fetchFn('/api/scenes');
       if (!res.ok) throw new Error(`the host answered ${res.status}`);

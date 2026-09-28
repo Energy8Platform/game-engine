@@ -23,4 +23,19 @@ export const Config = Schema.object({
   mode: Schema.union(['contain', 'cover']).default('contain').description('how the design fits the viewport'),
   transition: Schema.string().default('cut').description('default transition id for show()'),
   transitionMs: Schema.natural().default(300).description('transition length, ms'),
+  fonts: Schema.array(
+    Schema.object({
+      family: Schema.string()
+        .required()
+        .description("font-family name — what a text node's `family` (or a bitmap font's fallback) names"),
+      src: Schema.string()
+        .required()
+        .extra('asset', ['woff2', 'woff', 'ttf', 'otf'])
+        .description('font file, project-relative'),
+      weight: Schema.string().default('normal').description('CSS font-weight, e.g. "normal", "bold", "700"'),
+      style: Schema.string().default('normal').description('CSS font-style, e.g. "normal", "italic"'),
+    }),
+  )
+    .default([])
+    .description('web fonts loaded before the first document mounts'),
 });

@@ -363,6 +363,75 @@ describe('scenes row', () => {
   });
 });
 
+describe('scenes1.fonts', () => {
+  const bootFonts = (config: Record<string, unknown>) => {
+    const ctx = new Context();
+    const app = { stage: new Container(), ticker: null };
+    ctx.provide('renderer', { app });
+    const fiber = ctx.plugin(runtime, { design: { width: 100, height: 50 }, ...config });
+    return { ctx, app, fiber };
+  };
+
+  it('creates each face, adds it, and awaits load() BEFORE the GET replaces the documents', async () => {
+    let resolveLoad!: () => void;
+    const face = {
+      load: vi.fn(() => new Promise<void>((resolve) => { resolveLoad = resolve; })),
+    };
+    const fontFace = vi.fn(() => face);
+    const add = vi.fn();
+    const fetchFn = fetchOk({ scenes: [{ id: 'a', nodes: [] }], diagnostics: [], nodeTypes: [] });
+    const { ctx, fiber } = bootFonts({
+      fetchFn,
+      fonts: [{ family: 'E8Test', src: 'assets/f.woff2' }],
+      fontFace,
+      fontSet: { add },
+    });
+    await fiber;
+
+    expect(fontFace).toHaveBeenCalledWith('E8Test', 'url(/assets/f.woff2)', {
+      weight: 'normal',
+      style: 'normal',
+    });
+    expect(add).toHaveBeenCalledWith(face);
+    // Still loading: the GET has not fired, so nothing is mounted yet.
+    expect(fetchFn).not.toHaveBeenCalled();
+    expect(ctx.get('scenes')!.docs().has('a')).toBe(false);
+
+    resolveLoad();
+    await vi.waitFor(() => expect(ctx.get('scenes')!.docs().has('a')).toBe(true));
+    expect(fetchFn).toHaveBeenCalled();
+  });
+
+  it('a rejected load is one diagnostic naming the src; scenes.ready still settles with the documents mounted', async () => {
+    const report = vi.fn();
+    const face = { load: () => Promise.reject(new Error('404')) };
+    const fetchFn = fetchOk({ scenes: [{ id: 'a', nodes: [] }], diagnostics: [], nodeTypes: [] });
+    const { ctx, fiber } = bootFonts({
+      fetchFn,
+      fonts: [{ family: 'E8Test', src: 'assets/f.woff2' }],
+      fontFace: () => face,
+      fontSet: { add: vi.fn() },
+    });
+    ctx.provide('diagnostics', { report });
+    await fiber;
+    await ctx.get('scenes')!.ready;
+
+    expect(report).toHaveBeenCalledWith(
+      expect.objectContaining({ severity: 'warning', plugin: 'scenes', where: 'assets/f.woff2' }),
+    );
+    expect(ctx.get('scenes')!.docs().has('a')).toBe(true);
+  });
+
+  it('`fonts: []` calls no FontFace and does not delay the GET', async () => {
+    const fontFace = vi.fn();
+    const fetchFn = fetchOk({ scenes: [{ id: 'a', nodes: [] }], diagnostics: [], nodeTypes: [] });
+    const { ctx, fiber } = bootFonts({ fetchFn, fonts: [], fontFace, fontSet: { add: vi.fn() } });
+    await fiber;
+    expect(fontFace).not.toHaveBeenCalled();
+    await vi.waitFor(() => expect(ctx.get('scenes')!.docs().has('a')).toBe(true));
+  });
+});
+
 describe('ui.tap', () => {
   /** The stage a real `Application` hands the row: a `Container` IS an emitter, so the test fires `pointerdown` by hand. */
   const withStage = (screen: { width: number; height: number }) => {
