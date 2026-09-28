@@ -258,6 +258,24 @@ describe('SchemaForm', () => {
     expect(screen.getByText('Square cell size.')).toHaveClass('e8-field-hint');
   });
 
+  // Final review M8: a long key truncates (label ellipsis) beside the reset
+  // button — the title keeps it readable.
+  it('every field label and group legend carries its key as a title', () => {
+    render(
+      <SchemaForm
+        rowId="row"
+        schema={nestedSchema}
+        value={{ wave: { amplitude: 1 } }}
+        onChange={vi.fn()}
+      />,
+    );
+    expect(screen.getByText('amplitude', { selector: 'label' })).toHaveAttribute(
+      'title',
+      'amplitude',
+    );
+    expect(screen.getByText('wave', { selector: 'legend' })).toHaveAttribute('title', 'wave');
+  });
+
   it('a field with no description has no hint and no aria-describedby', () => {
     const gapSchema = JSON.parse(
       JSON.stringify(Schema.object({ gap: Schema.number().default(6) }).toJSON()),
@@ -1070,19 +1088,69 @@ describe('SchemaForm — colour, one-or-list, literal-or-value', () => {
       { color: 0x112233 },
     );
     expect(screen.getByLabelText('color')).toHaveValue('#112233');
-    const hex = screen.getByRole('textbox', { name: 'hex' });
+    const hex = screen.getByRole('textbox', { name: 'color hex' });
     fireEvent.change(hex, { target: { value: '#ff0000' } });
     fireEvent.blur(hex);
     expect(onChange).toHaveBeenLastCalledWith({ color: 0xff0000 });
     fireEvent.input(screen.getByLabelText('color'), { target: { value: '#00ff00' } });
+    fireEvent.change(screen.getByLabelText('color'), { target: { value: '#00ff00' } });
     expect(onChange).toHaveBeenLastCalledWith({ color: 0x00ff00 });
+  });
+
+  // Final review I5: `onInput` and React's `onChange` both fired per `input`
+  // event, and dragging in the picker fires one per step — a PUT each.
+  it('the picker previews while it moves and writes once, on its native change', () => {
+    const onChange = renderStaticForm(
+      Schema.object({ color: Schema.number().role('color') }),
+      {
+        color: 1,
+      },
+      { commit: 'blur' },
+    );
+    const swatch = screen.getByLabelText('color');
+    fireEvent.input(swatch, { target: { value: '#00ff00' } });
+    fireEvent.input(swatch, { target: { value: '#0000ff' } });
+    expect(onChange).not.toHaveBeenCalled();
+    expect(swatch).toHaveValue('#0000ff'); // the preview follows the picker
+    fireEvent.change(swatch, { target: { value: '#0000ff' } });
+    expect(onChange).toHaveBeenCalledTimes(1);
+    expect(onChange).toHaveBeenLastCalledWith({ color: 0x0000ff });
+    fireEvent.blur(swatch);
+    expect(onChange).toHaveBeenCalledTimes(1); // already settled
+  });
+
+  // Final review I6: an unset colour with no default read as `#000000` —
+  // a concrete colour the row does not have.
+  it('an unset colour with no default shows an empty hex (placeholder built-in) and an unset swatch', () => {
+    const onChange = renderStaticForm(Schema.object({ color: Schema.number().role('color') }), {});
+    const hex = screen.getByRole('textbox', { name: 'color hex' });
+    expect(hex).toHaveValue('');
+    expect(hex).toHaveAttribute('placeholder', 'built-in');
+    expect(hex).not.toHaveAttribute('aria-invalid');
+    expect(screen.getByLabelText('color')).toHaveAttribute('data-unset');
+    fireEvent.focus(hex);
+    fireEvent.blur(hex);
+    expect(onChange).not.toHaveBeenCalled();
+  });
+
+  // Final review M7: four frame states each drew a textbox named just "hex".
+  it("each colour's hex textbox is named by its own field", () => {
+    renderStaticForm(
+      Schema.object({
+        idle: Schema.number().role('color'),
+        winning: Schema.number().role('color'),
+      }),
+      { idle: 1, winning: 2 },
+    );
+    expect(screen.getByRole('textbox', { name: 'idle hex' })).toHaveValue('#000001');
+    expect(screen.getByRole('textbox', { name: 'winning hex' })).toHaveValue('#000002');
   });
 
   it('an invalid hex is refused in the field, not written', () => {
     const onChange = renderStaticForm(Schema.object({ color: Schema.number().role('color') }), {
       color: 1,
     });
-    const hex = screen.getByRole('textbox', { name: 'hex' });
+    const hex = screen.getByRole('textbox', { name: 'color hex' });
     fireEvent.change(hex, { target: { value: 'nope' } });
     fireEvent.blur(hex);
     expect(onChange).not.toHaveBeenCalled();
@@ -1107,8 +1175,10 @@ describe('SchemaForm — colour, one-or-list, literal-or-value', () => {
     expect(screen.getByRole('radio', { name: 'per reel' })).toBeChecked();
     fireEvent.click(screen.getByRole('button', { name: '+' }));
     expect(onChange).toHaveBeenLastCalledWith({ colGap: [4, 8, 8] });
+    // The prop never moves here (a PUT still in flight): `−` builds on what
+    // `+` just sent, not the stale `[4, 8]` (final review I3).
     fireEvent.click(screen.getByRole('button', { name: '−' }));
-    expect(onChange).toHaveBeenLastCalledWith({ colGap: [4] });
+    expect(onChange).toHaveBeenLastCalledWith({ colGap: [4, 8] });
   });
 
   // Fix round 1: a controlled form (the value feeds back), chaining + then
@@ -1165,6 +1235,45 @@ describe('SchemaForm — colour, one-or-list, literal-or-value', () => {
     fireEvent.blur(input);
     expect(onChange).toHaveBeenCalledTimes(1);
     expect(onChange).toHaveBeenLastCalledWith({ colGap: 48 });
+  });
+
+  // Final review I3: the structural writes were built from the `value`
+  // prop, which only moves once the PUT lands — a click right after typing
+  // dropped the typed entry (ArrayField's own `latest` rule).
+  it('a structural click right after typing keeps the flushed entry, even before the value catches up', () => {
+    const onChange = renderStaticForm(
+      Schema.object({ colGap: Schema.union([Schema.number(), Schema.array(Schema.number())]) }),
+      { colGap: [4, 8] },
+      { commit: 'blur' },
+    );
+    const entry = screen.getByLabelText('reel 2');
+    fireEvent.focus(entry);
+    fireEvent.change(entry, { target: { value: '9' } });
+    fireEvent.blur(entry);
+    fireEvent.click(screen.getByRole('button', { name: '+' }));
+    expect(onChange.mock.calls).toEqual([[{ colGap: [4, 9] }], [{ colGap: [4, 9, 9] }]]);
+  });
+
+  // Final review I6: unset used to show — and switch as — a concrete `0`.
+  it('an unset value shows an empty input; per reel writes [] with no default, [default] with one', () => {
+    const onChange = renderStaticForm(
+      Schema.object({ colGap: Schema.union([Schema.number(), Schema.array(Schema.number())]) }),
+      {},
+    );
+    expect(screen.getByLabelText('colGap')).toHaveValue(null);
+    fireEvent.click(screen.getByRole('radio', { name: 'per reel' }));
+    expect(onChange).toHaveBeenLastCalledWith({ colGap: [] });
+  });
+
+  it('an unset value with a numeric default switches to per reel as [default]', () => {
+    const onChange = renderStaticForm(
+      Schema.object({
+        colGap: Schema.union([Schema.number(), Schema.array(Schema.number())]).default(4),
+      }),
+      {},
+    );
+    fireEvent.click(screen.getByRole('radio', { name: 'per reel' }));
+    expect(onChange).toHaveBeenLastCalledWith({ colGap: [4] });
   });
 
   // Fix round 1: in list mode nothing carries the bare `id={id}` the

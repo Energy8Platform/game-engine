@@ -31,17 +31,22 @@ import { createCanvasRpc, type CanvasRpc } from './canvas-rpc';
  * server — and reports whichever answered `{ ok: false, reason }` in
  * `reels-action-status`.
  *
+ * Every form's `rowId` is `reels-<row id>`, never the bare row id:
+ * Composition stays mounted (hidden) while this document shows and draws
+ * the same rows with the bare id — sharing it would collide every field id
+ * and radio `name`, and a label here would toggle Composition's copy.
+ *
  * Every section write goes through `ctx.gameComposition.update`, same as
  * Composition's own game rows; a successful one (`diagnostics: []`) also
- * re-sends the canvas the CURRENT config of every reel row via the `rows`
- * rpc (Tasks 3–4) — read straight off `ctx.gameComposition.rows` at send
- * time, not the `rows` this render closed over, so a write that lands
- * between commit and this callback still ships the latest. The canvas
- * asks for the same thing itself on `ready` (a fresh load, or a reload the
- * host drove) — whatever board it showed before that is stale.
+ * re-sends the canvas that row's CURRENT config via the `rows` rpc (Tasks
+ * 3–4) — read straight off `ctx.gameComposition.rows` at send time, not
+ * the `rows` this render closed over, so a write that lands between commit
+ * and this callback still ships the latest. On `ready` (a fresh load, or a
+ * reload the host drove) the canvas gets every reel row instead — whatever
+ * board it showed before that is stale.
  *
- * Task 6: two of `reels1`'s own fields aren't drawn by `fields.tsx`'s
- * stock editors. `anticipation1.triggerSymbols` and `win.frameShake.
+ * Task 6: two fields aren't drawn by `fields.tsx`'s stock editors —
+ * `anticipation1`'s own `triggerSymbols` and `reels1`'s `win.frameShake.
  * onlyOnSymbols` are both `string[]` of symbol ids — `SchemaForm.
  * fieldOverrides` swaps in `SymbolChips` for them (the Win one keyed
  * `win.frameShake.onlyOnSymbols`, the value-root path — see `SchemaForm`'s
@@ -167,19 +172,30 @@ export function ReelsDocument({ ctx }: { ctx: Context }) {
   const [busy, setBusy] = useState(false);
   const [status, setStatus] = useState<string | null>(null);
 
-  /** Every reel row's CURRENT config, off the service directly (never the
-   * `list` this render closed over — see the class doc above). */
-  const sendRows = () => {
+  /** The CURRENT config of the reel rows in `ids` — every one by default —
+   * off the service directly (never the `list` this render closed over —
+   * see the class doc above). A row the canvas answers `failed` for (its
+   * `gameRows.update` threw) is named in the status line. */
+  const sendRows = (ids: readonly string[] = REEL_ROW_IDS) => {
     const current = ctx.gameComposition.rows ?? [];
-    const reelRows = REEL_ROW_IDS.map((id) => byId(current, id))
+    const reelRows = ids
+      .map((id) => byId(current, id))
       .filter((row): row is GameCompositionRow => row !== null)
       .map((row) => ({ id: row.id, config: row.config }));
-    void rpcRef.current?.call('rows', { rows: reelRows }).catch(() => {});
+    void rpcRef.current
+      ?.call<{ results?: { id: string; result: string }[] }>('rows', { rows: reelRows })
+      .then((answer) => {
+        const failed = (answer?.results ?? []).filter((r) => r.result === 'failed');
+        if (failed.length > 0) {
+          setStatus(`couldn't apply ${failed.map((r) => r.id).join(', ')} on the canvas`);
+        }
+      })
+      .catch(() => {});
   };
 
   useEffect(() => {
     rpcRef.current = rpc;
-    rpc.on('ready', sendRows);
+    rpc.on('ready', () => sendRows());
     return () => {
       rpc.dispose();
       rpcRef.current = null;
@@ -195,16 +211,22 @@ export function ReelsDocument({ ctx }: { ctx: Context }) {
     [rpc, previewUrl],
   );
 
+  // Only the written row: every row `rows` re-applies rebuilds on the
+  // canvas, and the others did not change.
   const write = (id: string, config: Record<string, unknown>) =>
     void ctx.gameComposition.update(id, config).then((answer) => {
-      if (answer.diagnostics.length === 0) sendRows();
+      if (answer.diagnostics.length === 0) sendRows([id]);
     });
 
   const runAction = async (method: string, params?: unknown) => {
     setBusy(true);
     setStatus(null);
     try {
-      const result = await rpcRef.current!.call<{ ok: boolean; reason?: string }>(method, params);
+      // A lab action lasts as long as the motion row's spin does — well past
+      // the rpc's 5 s default on a slow style.
+      const result = await rpcRef.current!.call<{ ok: boolean; reason?: string }>(method, params, {
+        timeout: 60_000,
+      });
       if (result && result.ok === false) setStatus(result.reason ?? null);
     } catch (error) {
       setStatus(error instanceof Error ? error.message : String(error));
@@ -224,7 +246,17 @@ export function ReelsDocument({ ctx }: { ctx: Context }) {
   // honest mirror of the schema's own default: off unless a patch (or
   // this document) actually sets it.
   const anticipationOn = anticipation1?.config.enabled === true;
-  const scattersDisabled = busy || !anticipationOn;
+  // The row's own schema default when unset (`reels-anticipation`).
+  const triggers = (anticipation1?.config.triggerSymbols as string[] | undefined) ?? ['scatter'];
+  // Why Scatters is off, as its `title` — `undefined` when it isn't (busy aside).
+  const scattersBlocked = !anticipation1
+    ? 'no anticipation1 row'
+    : !anticipationOn
+      ? 'turn on Anticipation › enabled'
+      : triggers.length === 0
+        ? 'no trigger symbols'
+        : undefined;
+  const scattersDisabled = busy || scattersBlocked !== undefined;
 
   return (
     <div className="e8-reels-doc" data-testid="reels-doc">
@@ -233,7 +265,7 @@ export function ReelsDocument({ ctx }: { ctx: Context }) {
           <>
             <Section name="grid" title="Grid" row={reels1} root="grid" write={write}>
               <SchemaForm
-                rowId={reels1.id}
+                rowId={`reels-${reels1.id}`}
                 schema={reels1.schema}
                 value={reels1.config}
                 onChange={(next) => write(reels1.id, next)}
@@ -244,7 +276,7 @@ export function ReelsDocument({ ctx }: { ctx: Context }) {
             </Section>
             <Section name="win" title="Win" row={reels1} root="win" write={write}>
               <SchemaForm
-                rowId={reels1.id}
+                rowId={`reels-${reels1.id}`}
                 schema={reels1.schema}
                 value={reels1.config}
                 onChange={(next) => write(reels1.id, next)}
@@ -275,7 +307,7 @@ export function ReelsDocument({ ctx }: { ctx: Context }) {
         {motion1 ? (
           <Section name="motion" title="Motion" row={motion1} write={write}>
             <SchemaForm
-              rowId={motion1.id}
+              rowId={`reels-${motion1.id}`}
               schema={motion1.schema}
               value={motion1.config}
               onChange={(next) => write(motion1.id, next)}
@@ -287,7 +319,7 @@ export function ReelsDocument({ ctx }: { ctx: Context }) {
         {anticipation1 ? (
           <Section name="anticipation" title="Anticipation" row={anticipation1} write={write}>
             <SchemaForm
-              rowId={anticipation1.id}
+              rowId={`reels-${anticipation1.id}`}
               schema={anticipation1.schema}
               value={anticipation1.config}
               onChange={(next) => write(anticipation1.id, next)}
@@ -300,7 +332,7 @@ export function ReelsDocument({ ctx }: { ctx: Context }) {
         {cascade1 ? (
           <Section name="cascade" title="Cascade" row={cascade1} write={write}>
             <SchemaForm
-              rowId={cascade1.id}
+              rowId={`reels-${cascade1.id}`}
               schema={cascade1.schema}
               value={cascade1.config}
               onChange={(next) => write(cascade1.id, next)}
@@ -312,7 +344,7 @@ export function ReelsDocument({ ctx }: { ctx: Context }) {
         {features1 ? (
           <Section name="features" title="Features" row={features1} write={write}>
             <SchemaForm
-              rowId={features1.id}
+              rowId={`reels-${features1.id}`}
               schema={features1.schema}
               value={features1.config}
               onChange={(next) => write(features1.id, next)}
@@ -344,11 +376,10 @@ export function ReelsDocument({ ctx }: { ctx: Context }) {
                 type="button"
                 data-testid="reels-action-scatters"
                 disabled={scattersDisabled}
+                title={scattersBlocked}
                 onClick={() =>
                   void runAction('scatters', {
-                    triggers: (anticipation1?.config.triggerSymbols as string[] | undefined) ?? [
-                      'scatter',
-                    ],
+                    triggers,
                     threshold: (anticipation1?.config.threshold as number | undefined) ?? 2,
                   })
                 }

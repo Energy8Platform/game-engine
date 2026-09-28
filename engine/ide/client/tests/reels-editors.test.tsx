@@ -61,6 +61,27 @@ describe('SymbolChips', () => {
     expect(onChange).toHaveBeenCalledWith(['x']);
   });
 
+  // Final review I2: an override receives the RAW value, so an unset field
+  // with a schema default showed no chips at all while the row actually
+  // runs with that default.
+  it('an unset value shows the schema default as chips; adding writes default + the new id', () => {
+    const onChange = vi.fn();
+    render(
+      <SymbolChips
+        id="f"
+        node={{ type: 'array', meta: { default: ['scatter'] } }}
+        value={undefined}
+        onChange={onChange}
+        commit="blur"
+        path="triggerSymbols"
+        known={KNOWN_1_6}
+      />,
+    );
+    expect(screen.getByTestId('symbol-chip-scatter')).toHaveClass('e8-chip-unknown');
+    fireEvent.change(screen.getByTestId('symbol-chips-add'), { target: { value: '1' } });
+    expect(onChange).toHaveBeenCalledWith(['scatter', '1']);
+  });
+
   it('an empty list shows the add select only', () => {
     chips([]);
     expect(screen.queryByTestId(/^symbol-chip-/)).toBeNull();
@@ -131,9 +152,52 @@ describe('BoardPainter', () => {
   });
 
   it('board-clear writes undefined — the section removes the key', () => {
-    const onChange = painter(undefined, SHAPE_3x3);
+    const onChange = painter([['4'], ['7'], ['4']], { cols: 3, rows: [1, 1, 1] });
     fireEvent.click(screen.getByTestId('board-clear'));
     expect(onChange).toHaveBeenCalledWith(undefined);
+  });
+
+  // Final review M6: both buttons used to be live with nothing to act on.
+  it('board-clear is disabled with no saved board; board-fit only while board-mismatch shows', () => {
+    const { unmount } = render(
+      <BoardPainter board={undefined} shape={SHAPE_3x3} known={KNOWN} onChange={vi.fn()} />,
+    );
+    expect(screen.getByTestId('board-clear')).toBeDisabled();
+    expect(screen.getByTestId('board-fit')).toBeDisabled();
+    unmount();
+
+    const { unmount: unmountFitting } = render(
+      <BoardPainter
+        board={[['4'], ['7']]}
+        shape={{ cols: 2, rows: [1, 1] }}
+        known={KNOWN}
+        onChange={vi.fn()}
+      />,
+    );
+    expect(screen.getByTestId('board-clear')).toBeEnabled();
+    expect(screen.getByTestId('board-fit')).toBeDisabled();
+    unmountFitting();
+
+    painter([['4']], SHAPE_3x3);
+    expect(screen.getByTestId('board-mismatch')).toBeInTheDocument();
+    expect(screen.getByTestId('board-fit')).toBeEnabled();
+  });
+
+  // Final review C1: the runtime's own `Board` vocabulary allows a
+  // `{ symbol, …extras }` record (and a number) per cell — a hand-authored
+  // board, or one a mechanic seeded. Rendering the record itself as a
+  // React child threw.
+  it('a saved board of { symbol } records (and numbers) draws their ids; painting one keeps its other fields', () => {
+    const saved = [[{ symbol: 'a', multiplier: 2 }, 7, { note: 'x' }]];
+    const onChange = painter(saved, { cols: 1, rows: [3] });
+    expect(screen.getByTestId('board-cell-0-0')).toHaveTextContent('a');
+    expect(screen.getByTestId('board-cell-0-1')).toHaveTextContent('7');
+    expect(screen.getByTestId('board-cell-0-2')).toHaveTextContent('·'); // no string/number symbol: empty
+    expect(screen.getByTestId('board-cell-0-0')).toHaveAccessibleName('column 0, row 0: a');
+
+    fireEvent.click(screen.getByTestId('board-cell-0-0'));
+    fireEvent.click(screen.getByRole('button', { name: '4' }));
+    expect(onChange).toHaveBeenCalledWith([[{ symbol: '4', multiplier: 2 }, 7, { note: 'x' }]]);
   });
 
   it('a saved board whose shape differs from the grid shows board-mismatch and draws the SAVED cells, without writing', () => {

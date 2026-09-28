@@ -112,7 +112,8 @@ function defaultNote(node: SchemaNode, current: unknown): string | undefined {
   return `default ${shown}`;
 }
 
-/** Union of constants — the only union shape Slice 0 renders. */
+/** A union of string constants, drawn as a `<select>` — `oneOrList`/
+ * `literalOrValue` below are the other union shapes this form draws. */
 function constants(node: SchemaNode): string[] | null {
   if (node.type !== 'union' || !node.list) return null;
   const values = node.list.map((member) => member.value);
@@ -239,7 +240,7 @@ export function ObjectFields({
           <div className="e8-field" key={key}>
             {isGroup ? (
               <fieldset className="e8-field-group" id={id} aria-describedby={described}>
-                <legend>
+                <legend title={key}>
                   {label(child, key)}
                   {marker}
                   {resetButton}
@@ -253,12 +254,14 @@ export function ObjectFields({
                     id: `OneOrListField`'s list mode and `LiteralOrValueField`'s
                     string-literal switch have no single control the plain
                     `htmlFor` above can name, so they point their own
-                    `role="group"` wrapper at this instead. The marker and
+                    `role="group"` wrapper at this instead. `title`: a long
+                    key truncates (the label's ellipsis) beside the reset
+                    button, and this keeps it readable. The marker and
                     reset button share this label-row span (not `.e8-field`
                     directly) so they stay on the label's grid column
                     instead of auto-flowing into the control's. */}
                 <span className="e8-field-label-row">
-                  <label htmlFor={id} id={`${id}-label`}>
+                  <label htmlFor={id} id={`${id}-label`} title={key}>
                     {label(child, key)}
                   </label>
                   {marker}
@@ -300,7 +303,8 @@ export function Field({
   // their switch; the switch's own recursive `Field` call for the value
   // member carries the SAME `path` (see `LiteralOrValueField`), so the
   // override reaches it on the next pass instead of being shut out by
-  // the union that wraps it.
+  // the union that wraps it. It gets the RAW `value`, not `current`:
+  // applying `node.meta.default` to an unset value is the override's job.
   const { fieldOverrides } = useContext(FormOptions);
   if (node.type !== 'union') {
     const Override = fieldOverrides[path];
@@ -421,7 +425,14 @@ export function Field({
 
   if (node.type === 'number' && node.meta?.role === 'color') {
     return (
-      <ColorField id={id} node={node} value={value} onChange={onChange} describedBy={describedBy} />
+      <ColorField
+        id={id}
+        node={node}
+        value={value}
+        onChange={onChange}
+        describedBy={describedBy}
+        path={path}
+      />
     );
   }
 
@@ -467,10 +478,11 @@ export function Field({
     );
   }
 
-  // Any field kind this form has no editor for (`any`, a non-string union,
-  // …). Rendering it editable would let a keystroke silently replace
-  // a structured value with a plain string — read-only-and-labelled is the
-  // honest gap; a later task can upgrade it to a real editor.
+  // Any field kind this form has no editor for (`any`, a union none of the
+  // shapes above covers, …). Rendering it editable would let a keystroke
+  // silently replace a structured value with a plain string —
+  // read-only-and-labelled is the honest gap; a later task can upgrade it
+  // to a real editor.
   return <UnsupportedField id={id} node={node} value={current} describedBy={describedBy} />;
 }
 
@@ -596,12 +608,24 @@ const hexOf = (n: number) => '#' + (n >>> 0).toString(16).padStart(6, '0').slice
 const HEX_RE = /^#?[0-9a-f]{6}$/i;
 
 /**
- * A `.role('color')` number: a native colour picker (one click is one
- * commit, same as a `<select>`) plus a hex text field that buffers a draft
- * and commits on blur/Enter — typing `#ff0000` one keystroke at a time
- * must not write five half-finished numbers. An unparsable draft is left
- * showing (never silently reverted) and flagged `aria-invalid`, matching
- * `useDraft`'s "refuse, don't corrupt" contract for every other field.
+ * A `.role('color')` number: a native colour picker plus a hex text field
+ * that buffers a draft and commits on blur/Enter — typing `#ff0000` one
+ * keystroke at a time must not write five half-finished numbers. An
+ * unparsable draft is left showing (never silently reverted) and flagged
+ * `aria-invalid`, matching `useDraft`'s "refuse, don't corrupt" contract
+ * for every other field.
+ *
+ * The picker is the same rule at a different pace: React's `onChange` on
+ * `type=color` is the `input` event, one per step while the user drags, so
+ * it only moves a local `preview`; the NATIVE `change` event (the picker
+ * settled on a colour — attached through the ref, React has no prop for
+ * it) or a blur commits it once.
+ *
+ * With no value and no default there is no colour to show: the hex reads
+ * empty (placeholder `built-in` — the row falls back to its own), and the
+ * swatch — a colour input always holds SOME colour — is marked
+ * `data-unset` rather than passed off as black. The hex is named by the
+ * field's own key (`idle hex`), not a bare "hex" repeated per colour.
  */
 function ColorField({
   id,
@@ -609,33 +633,73 @@ function ColorField({
   value,
   onChange,
   describedBy,
-}: Omit<FieldProps, 'commit' | 'ariaLabel' | 'path'>) {
-  const current = (Number(value ?? node.meta?.default ?? 0) >>> 0) as number;
-  const draft = useDraft<number>({
+  path,
+}: Omit<FieldProps, 'commit' | 'ariaLabel'>) {
+  const shown = value ?? node.meta?.default;
+  const current = shown === undefined ? undefined : ((Number(shown) >>> 0) as number);
+  const draft = useDraft<number | undefined>({
     dep: value,
     current,
-    show: hexOf,
+    show: (v) => (v === undefined ? '' : hexOf(v)),
     parse: (raw) => (HEX_RE.test(raw) ? parseInt(raw.replace('#', ''), 16) : null),
     onChange,
     commit: 'blur',
   });
-  const write = (e: ChangeEvent<HTMLInputElement>) =>
-    onChange(parseInt(e.target.value.slice(1), 16));
+
+  const swatch = useRef<HTMLInputElement>(null);
+  const [preview, setPreview] = useState<string | null>(null);
+  /** The picker moved since the last commit — a focus-and-blur alone writes nothing. */
+  const moved = useRef(false);
+  /** What was last handed up (or the latest prop): a blur right after `change` must not send it twice. */
+  const sent = useRef(current);
+  useEffect(() => {
+    sent.current = current;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [value]);
+  const settle = useRef(() => {});
+  settle.current = () => {
+    const el = swatch.current;
+    if (!moved.current || !el) return;
+    moved.current = false;
+    setPreview(null);
+    const next = parseInt(el.value.slice(1), 16);
+    if (next === sent.current) return;
+    sent.current = next;
+    onChange(next);
+  };
+  useEffect(() => {
+    const el = swatch.current;
+    if (!el) return;
+    const onNativeChange = () => {
+      moved.current = true;
+      settle.current();
+    };
+    el.addEventListener('change', onNativeChange);
+    return () => el.removeEventListener('change', onNativeChange);
+  }, []);
+
+  const key = path.split('.').pop();
   return (
     <span className="e8-color">
       <input
+        ref={swatch}
         id={id}
         aria-describedby={describedBy}
         type="color"
-        value={hexOf(current)}
-        onInput={write}
-        onChange={write}
+        data-unset={current === undefined && preview === null ? '' : undefined}
+        value={preview ?? (current === undefined ? '#000000' : hexOf(current))}
+        onChange={(e: ChangeEvent<HTMLInputElement>) => {
+          moved.current = true;
+          setPreview(e.target.value);
+        }}
+        onBlur={() => settle.current()}
       />
       <input
         type="text"
-        aria-label="hex"
+        aria-label={`${key} hex`}
         aria-describedby={describedBy}
-        aria-invalid={HEX_RE.test(draft.raw) ? undefined : 'true'}
+        aria-invalid={draft.raw === '' || HEX_RE.test(draft.raw) ? undefined : 'true'}
+        placeholder={current === undefined ? 'built-in' : undefined}
         value={draft.raw}
         onFocus={draft.onFocus}
         onChange={draft.onChange}
@@ -1000,7 +1064,22 @@ function OneOrListField({ id, node, value, onChange, commit, describedBy, path }
   const [numMember, listMember] = a.type === 'number' ? [a, b] : [b, a];
   const current = value ?? node.meta?.default;
   const list = Array.isArray(current) ? (current as number[]) : null;
-  const single = typeof current === 'number' ? current : 0;
+  // Unset (no value, no numeric default): the scalar editor shows empty,
+  // not a `0` the row does not have, and `per reel` starts from `[]`.
+  const single = typeof current === 'number' ? current : undefined;
+  // Every write builds on `latest` — what this field last handed up, or the
+  // latest prop — never the `value` prop alone: `ArrayField`'s own rule (a
+  // click right after typing is a second commit before the PUT lands).
+  const latest = useRef(current);
+  useEffect(() => {
+    latest.current = current;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [value]);
+  const send = (next: unknown) => {
+    latest.current = next;
+    onChange(next);
+  };
+  const latestList = () => (Array.isArray(latest.current) ? (latest.current as number[]) : []);
 
   if (!list) {
     return (
@@ -1010,7 +1089,11 @@ function OneOrListField({ id, node, value, onChange, commit, describedBy, path }
           describedBy={describedBy}
           options={[
             { name: 'one', checked: true, onSelect: () => {} },
-            { name: 'per reel', checked: false, onSelect: () => onChange([single]) },
+            {
+              name: 'per reel',
+              checked: false,
+              onSelect: () => send(typeof latest.current === 'number' ? [latest.current] : []),
+            },
           ]}
         />
         {/* The scalar IS this field's whole value — same dotted `path` as
@@ -1020,7 +1103,7 @@ function OneOrListField({ id, node, value, onChange, commit, describedBy, path }
           id={id}
           node={numMember}
           value={single}
-          onChange={onChange}
+          onChange={send}
           commit={commit}
           describedBy={describedBy}
           path={path}
@@ -1044,7 +1127,7 @@ function OneOrListField({ id, node, value, onChange, commit, describedBy, path }
         id={id}
         describedBy={describedBy}
         options={[
-          { name: 'one', checked: false, onSelect: () => onChange(list[0] ?? 0) },
+          { name: 'one', checked: false, onSelect: () => send(latestList()[0] ?? 0) },
           { name: 'per reel', checked: true, onSelect: () => {} },
         ]}
       />
@@ -1055,7 +1138,7 @@ function OneOrListField({ id, node, value, onChange, commit, describedBy, path }
             id={`${id}-${i}`}
             node={listMember.inner!}
             value={n}
-            onChange={(next) => onChange(list.map((v, j) => (j === i ? next : v)))}
+            onChange={(next) => send(latestList().map((v, j) => (j === i ? next : v)))}
             commit={commit}
             ariaLabel={`reel ${i + 1}`}
             describedBy={describedBy}
@@ -1065,7 +1148,10 @@ function OneOrListField({ id, node, value, onChange, commit, describedBy, path }
         <button
           type="button"
           aria-label="+"
-          onClick={() => onChange([...list, list[list.length - 1] ?? 0])}
+          onClick={() => {
+            const items = latestList();
+            send([...items, items[items.length - 1] ?? 0]);
+          }}
         >
           +
         </button>
@@ -1073,7 +1159,7 @@ function OneOrListField({ id, node, value, onChange, commit, describedBy, path }
           type="button"
           aria-label="−"
           disabled={list.length === 0}
-          onClick={() => onChange(list.slice(0, -1))}
+          onClick={() => send(latestList().slice(0, -1))}
         >
           −
         </button>

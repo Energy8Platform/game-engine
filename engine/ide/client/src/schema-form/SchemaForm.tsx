@@ -68,7 +68,10 @@ export interface SchemaFormProps {
    * renders, so `win.frameShake.onlyOnSymbols` still names that field
    * even when `root: 'win'`. A union at that path (a literal-or-value
    * switch, say) still draws its own switch; the override only replaces
-   * the value member's editor. See `Field`.
+   * the value member's editor. See `Field`. The override is handed the RAW
+   * `value` (`undefined` when unset) and the `node`: applying
+   * `node.meta.default` to an unset value is its own job, same as every
+   * stock editor does for itself.
    */
   fieldOverrides?: Record<string, (props: FieldProps) => JSX.Element>;
 }

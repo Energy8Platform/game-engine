@@ -46,7 +46,8 @@ export interface CanvasRpc {
    * the stable handle either way.
    */
   attach(target: { contentWindow: Postable | null }, origin: string): void;
-  call<T = unknown>(method: string, params?: unknown): Promise<T>;
+  /** Rejects when the canvas has not answered within `opts.timeout` ms (5 s by default) — a reel lab spin can take longer. */
+  call<T = unknown>(method: string, params?: unknown, opts?: { timeout?: number }): Promise<T>;
   on(event: string, handler: (payload: unknown) => void): () => void;
   dispose(): void;
 }
@@ -95,7 +96,7 @@ export function createCanvasRpc(win: RpcWindow = window): CanvasRpc {
       origin = attachOrigin;
     },
 
-    call<T = unknown>(method: string, params?: unknown): Promise<T> {
+    call<T = unknown>(method: string, params?: unknown, opts?: { timeout?: number }): Promise<T> {
       const win = target?.contentWindow;
       if (!win) return Promise.reject(new Error('canvas not attached'));
       const id = ++seq;
@@ -105,7 +106,7 @@ export function createCanvasRpc(win: RpcWindow = window): CanvasRpc {
             pending.delete(id);
             reject(new Error(`canvas did not answer "${method}"`));
           }
-        }, TIMEOUT_MS);
+        }, opts?.timeout ?? TIMEOUT_MS);
         pending.set(id, {
           resolve: (v) => {
             clearTimeout(timer);

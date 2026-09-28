@@ -131,6 +131,33 @@ describe('canvas-rpc', () => {
     }
   });
 
+  // Final review M2: a lab spin can outlast 5 s; the caller picks a longer wait per call.
+  it('a per-call timeout replaces the 5s one for that call only', async () => {
+    vi.useFakeTimers();
+    try {
+      const win = fakeWindow();
+      const target = fakeTarget();
+      const rpc = createCanvasRpc(win);
+      rpc.attach(target, '*');
+
+      const long = rpc.call('spin', undefined, { timeout: 60_000 });
+      let settled = false;
+      long.catch(() => {}).finally(() => (settled = true));
+      const assertion = expect(long).rejects.toThrow('canvas did not answer "spin"');
+      await vi.advanceTimersByTimeAsync(5000);
+      expect(settled).toBe(false);
+      await vi.advanceTimersByTimeAsync(55_000);
+      await assertion;
+
+      const short = rpc.call('snapshot');
+      const shortAssertion = expect(short).rejects.toThrow('canvas did not answer "snapshot"');
+      await vi.advanceTimersByTimeAsync(5000);
+      await shortAssertion;
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('a frame delivered before attach is ignored (no target to spoof yet)', () => {
     const win = fakeWindow();
     const target = fakeTarget();

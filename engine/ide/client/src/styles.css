@@ -1313,6 +1313,10 @@ input[type='radio'] {
 .e8-color input[type='text'] {
   width: 90px;
 }
+/* No value, no default: the swatch still holds some colour (an input must) — dimmed so it doesn't read as one the row has. */
+.e8-color input[type='color'][data-unset] {
+  opacity: 0.35;
+}
 /* A compact two-segment switch — `one | per reel`, `<literal> | these`. */
 .e8-segmented {
   display: inline-flex;

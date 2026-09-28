@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { GameCompositionRow, SymbolsDoc } from '@energy8engine/contracts';
 import * as slots from '../src/plugins/slots';
 import * as reels from '../src/plugins/reels';
+import { CompositionScreen } from '../src/screens/CompositionScreen';
 
 /**
  * Task 5's own harness — `symbols-harness.tsx`'s shape, trimmed to what
@@ -316,6 +317,43 @@ describe('ReelsDocument — sections', () => {
   });
 });
 
+// Final review I1: Composition stays mounted (hidden) while the Reels
+// document shows, drawing the SAME rows with the same `rowId` — every field
+// id and radio `name` collided, so a Reels label pointed at Composition's
+// hidden copy and its write skipped the canvas `rows` sync.
+describe('ReelsDocument — beside a mounted Composition', () => {
+  it('the Reels enabled checkbox is reached by its own label and writes through the Reels handler once', async () => {
+    const { ctx, updateCalls } = await harness([row('reels1'), row('anticipation1')]);
+    // `EditorComposition` reads the IDE's own graph off `ctx.connection`;
+    // an empty one is all this needs.
+    ctx.provide('connection', {
+      snapshot: null,
+      diagnostics: [],
+      subscribe: () => () => {},
+      update: () => {},
+      report: () => {},
+    } as never);
+    const composition = render(
+      <div hidden>
+        <CompositionScreen ctx={ctx} rows={ctx.gameComposition.rows!} />
+      </div>,
+    );
+    renderDocument(ctx);
+    const c = canvas();
+
+    const section = screen.getByTestId('reels-section-anticipation');
+    const enabled = within(section).getByLabelText('enabled');
+    expect(section).toContainElement(enabled);
+    fireEvent.click(within(section).getByText('enabled'));
+    await waitFor(() => expect(updateCalls).toHaveLength(1));
+    expect(updateCalls[0]).toEqual({ id: 'anticipation1', config: { enabled: true } });
+    // Only the Reels handler re-sends the canvas — Composition's own write does not.
+    await waitFor(() => expect(c.reqs('rows')).toHaveLength(1));
+    // Before `afterEach` disposes `ctx` — Composition reads `ctx.connection` on every render.
+    composition.unmount();
+  });
+});
+
 describe('ReelsDocument — symbol editors (Task 6)', () => {
   it('the Anticipation sections triggerSymbols is drawn by chips, off ctx.symbols.known()', async () => {
     const { ctx } = await harness([
@@ -400,7 +438,7 @@ describe('ReelsDocument — symbol editors (Task 6)', () => {
 });
 
 describe('ReelsDocument — canvas sync', () => {
-  it('sends the canvas every reel rows current config after a successful write, and again on ready', async () => {
+  it('sends the canvas every reel rows current config on ready, and just the written row after a successful write', async () => {
     const { ctx } = await harness([
       row('reels1', { grid: { cols: 5 } }),
       row('motion1', { style: 'swap' }),
@@ -416,15 +454,34 @@ describe('ReelsDocument — canvas sync', () => {
       ],
     });
 
+    // Final review M1: a write re-applies only the row it wrote — every
+    // re-applied row rebuilds on the canvas, and the others did not change.
     fireEvent.change(screen.getByLabelText('cols'), { target: { value: '6' } });
     fireEvent.blur(screen.getByLabelText('cols'));
     await waitFor(() => expect(c.reqs('rows')).toHaveLength(2));
     expect(c.reqs('rows')[1]).toEqual({
-      rows: [
-        { id: 'reels1', config: { grid: { cols: 6 } } },
-        { id: 'motion1', config: { style: 'swap' } },
+      rows: [{ id: 'reels1', config: { grid: { cols: 6 } } }],
+    });
+  });
+
+  // Final review M5: the canvas answers each row's verdict; a `failed` one
+  // used to vanish.
+  it("a row the canvas answers 'failed' for shows in reels-action-status", async () => {
+    const { ctx } = await harness([row('reels1'), row('motion1')]);
+    renderDocument(ctx);
+    const c = canvas();
+    c.setAnswer('rows', {
+      results: [
+        { id: 'reels1', result: 'failed' },
+        { id: 'motion1', result: 'updated' },
       ],
     });
+    c.ready();
+    await waitFor(() =>
+      expect(screen.getByTestId('reels-action-status')).toHaveTextContent(
+        "couldn't apply reels1 on the canvas",
+      ),
+    );
   });
 
   it('a write that comes back with diagnostics does not re-send the canvas', async () => {
@@ -480,6 +537,23 @@ describe('ReelsDocument — canvas actions', () => {
     const { ctx } = await harness([row('reels1'), row('anticipation1', {})]);
     renderDocument(ctx);
     expect(screen.getByTestId('reels-action-scatters')).toBeDisabled();
+  });
+
+  // Final review M3/M4: an empty trigger list has nothing to seed a
+  // scatter board with, and a disabled Scatters used to say nothing about why.
+  it('reels-action-scatters is disabled with an empty trigger list, and says why it is disabled', async () => {
+    const { ctx, setRows } = await harness([row('reels1'), row('anticipation1', {})]);
+    renderDocument(ctx);
+    const scatters = screen.getByTestId('reels-action-scatters');
+    expect(scatters).toHaveAttribute('title', 'turn on Anticipation › enabled');
+
+    setRows([row('reels1'), row('anticipation1', { enabled: true, triggerSymbols: [] })]);
+    expect(scatters).toBeDisabled();
+    expect(scatters).toHaveAttribute('title', 'no trigger symbols');
+
+    setRows([row('reels1'), row('anticipation1', { enabled: true })]);
+    expect(scatters).toBeEnabled();
+    expect(scatters).not.toHaveAttribute('title');
   });
 
   it('reels-action-tumble exists only with cascade1', async () => {

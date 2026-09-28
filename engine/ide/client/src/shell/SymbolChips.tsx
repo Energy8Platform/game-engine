@@ -13,8 +13,8 @@ import type { FieldProps } from '../schema-form/fields';
  * explaining why, same "don't corrupt, flag it" rule `fields.tsx`'s own
  * unparsable-draft handling follows.
  *
- * `FieldProps`' `id`/`node`/`commit`/`ariaLabel`/`describedBy`/`path` ride
- * along unused: `triggerSymbols`/`onlyOnSymbols` are both `array` nodes,
+ * `FieldProps`' `id`/`commit`/`ariaLabel`/`describedBy`/`path` ride
+ * along unused (`node` only for its default): `triggerSymbols`/`onlyOnSymbols` are both `array` nodes,
  * which `ObjectFields` already wraps in its own `<fieldset><legend>` (no
  * `<label for>` this component needs to be the target of), and the
  * override is reached before any node-specific rendering — see `Field`.
@@ -32,10 +32,15 @@ import type { FieldProps } from '../schema-form/fields';
  */
 export function SymbolChips({
   value,
+  node,
   onChange,
   known,
 }: FieldProps & { known: readonly { id: string; name: string }[] }) {
-  const list = Array.isArray(value) ? (value as string[]) : [];
+  // An override gets the RAW value (see `SchemaForm.fieldOverrides`): an
+  // unset field shows — and an add builds on — the schema default, which is
+  // what the row actually runs with.
+  const current = value ?? node.meta?.default;
+  const list = Array.isArray(current) ? (current as string[]) : [];
   const knownIds = new Set(known.map((s) => s.id));
   const remaining = known.filter((s) => !list.includes(s.id));
 

@@ -7,8 +7,20 @@ export interface BoardShape {
   rows: number[];
 }
 
-/** `board[col][row]` — a symbol id, or `null` for an empty cell. */
-export type BoardGrid = (string | null)[][];
+/** One saved cell: what the painter writes (a symbol id, `null` for empty), or
+ * anything else `reels1`'s `Board` vocabulary allows — a number, or a
+ * `{ symbol, …extras }` record (`@energy8engine/contracts`' `BoardCell`). */
+export type BoardCellValue =
+  string | number | { symbol?: unknown; [extra: string]: unknown } | null;
+
+/** `board[col][row]`. */
+export type BoardGrid = BoardCellValue[][];
+
+/** The id a cell shows — a record's `symbol`; `null` (drawn empty) for anything without a string/number one. */
+function symbolOf(cell: BoardCellValue): string | null {
+  const symbol = typeof cell === 'object' && cell !== null ? cell.symbol : cell;
+  return typeof symbol === 'string' || typeof symbol === 'number' ? String(symbol) : null;
+}
 
 function isGrid(board: unknown): board is BoardGrid {
   return Array.isArray(board) && board.every((col) => Array.isArray(col));
@@ -59,10 +71,13 @@ function fitBoard(board: BoardGrid, shape: BoardShape): BoardGrid {
  * under it (a labelled `role="group"`, plain buttons; not `role="menu"`,
  * which implies arrow-key/`menuitem` semantics this never offers); picking
  * one replaces just that cell in whatever grid is currently drawn and
- * hands the WHOLE grid to `onChange`. `board-clear` hands up `undefined`
- * outright — the section drops the `board` key entirely rather than
- * writing an empty grid, so a later `reels1.config` with no `board` at all
- * reads exactly as "no starting board", not "one cell of nothing".
+ * hands the WHOLE grid to `onChange` (a `{ symbol, … }` record cell keeps
+ * its other fields — only `symbol` changes). `board-clear` hands up
+ * `undefined` outright — the section drops the `board` key entirely rather
+ * than writing an empty grid, so a later `reels1.config` with no `board` at
+ * all reads exactly as "no starting board", not "one cell of nothing". It
+ * is disabled while nothing is saved, and `board-fit` while nothing
+ * mismatches — neither would change anything.
  *
  * The popup closes three ways, same rule a native `<select>` follows:
  * picking an entry (`paint`, above), `Escape` (focus returns to the cell
@@ -89,10 +104,14 @@ export function BoardPainter({
   const mismatched = saved !== null && !sameShape(shapeOf(saved), shape);
   const grid = saved ?? emptyGrid(shape);
 
+  // A record cell keeps its other fields (a multiplier, a sticky counter) —
+  // only `symbol` is the painter's; any other cell becomes the plain id.
   const paint = (col: number, row: number, symbol: string | null) => {
+    const repaint = (cell: BoardCellValue): BoardCellValue =>
+      typeof cell === 'object' && cell !== null ? { ...cell, symbol } : symbol;
     onChange(
       grid.map((cells, c) =>
-        c === col ? cells.map((cell, r) => (r === row ? symbol : cell)) : cells,
+        c === col ? cells.map((cell, r) => (r === row ? repaint(cell) : cell)) : cells,
       ),
     );
     setOpen(null);
@@ -120,12 +139,18 @@ export function BoardPainter({
   return (
     <div className="e8-board-painter" ref={containerRef}>
       <div className="e8-board-toolbar">
-        <button type="button" data-testid="board-clear" onClick={() => onChange(undefined)}>
+        <button
+          type="button"
+          data-testid="board-clear"
+          disabled={board == null}
+          onClick={() => onChange(undefined)}
+        >
           clear
         </button>
         <button
           type="button"
           data-testid="board-fit"
+          disabled={!mismatched}
           onClick={() => onChange(fitBoard(grid, shape))}
         >
           fit to grid
@@ -139,41 +164,44 @@ export function BoardPainter({
       <div className="e8-board-grid">
         {grid.map((cells, col) => (
           <div className="e8-board-col" key={col}>
-            {cells.map((symbol, row) => (
-              <div className="e8-board-cell-wrap" key={row}>
-                <button
-                  type="button"
-                  className="e8-board-cell"
-                  data-testid={`board-cell-${col}-${row}`}
-                  aria-label={`column ${col}, row ${row}: ${symbol ?? 'empty'}`}
-                  aria-expanded={open?.col === col && open.row === row}
-                  onClick={(e) => {
-                    triggerRef.current = e.currentTarget;
-                    setOpen((current) =>
-                      current?.col === col && current.row === row ? null : { col, row },
-                    );
-                  }}
-                >
-                  {symbol ?? '·'}
-                </button>
-                {open?.col === col && open.row === row ? (
-                  <div
-                    className="e8-board-menu"
-                    role="group"
-                    aria-label={`symbol for reel ${col} row ${row}`}
+            {cells.map((cell, row) => {
+              const symbol = symbolOf(cell);
+              return (
+                <div className="e8-board-cell-wrap" key={row}>
+                  <button
+                    type="button"
+                    className="e8-board-cell"
+                    data-testid={`board-cell-${col}-${row}`}
+                    aria-label={`column ${col}, row ${row}: ${symbol ?? 'empty'}`}
+                    aria-expanded={open?.col === col && open.row === row}
+                    onClick={(e) => {
+                      triggerRef.current = e.currentTarget;
+                      setOpen((current) =>
+                        current?.col === col && current.row === row ? null : { col, row },
+                      );
+                    }}
                   >
-                    <button type="button" onClick={() => paint(col, row, null)}>
-                      empty
-                    </button>
-                    {known.map((s) => (
-                      <button key={s.id} type="button" onClick={() => paint(col, row, s.id)}>
-                        {s.id}
+                    {symbol ?? '·'}
+                  </button>
+                  {open?.col === col && open.row === row ? (
+                    <div
+                      className="e8-board-menu"
+                      role="group"
+                      aria-label={`symbol for reel ${col} row ${row}`}
+                    >
+                      <button type="button" onClick={() => paint(col, row, null)}>
+                        empty
                       </button>
-                    ))}
-                  </div>
-                ) : null}
-              </div>
-            ))}
+                      {known.map((s) => (
+                        <button key={s.id} type="button" onClick={() => paint(col, row, s.id)}>
+                          {s.id}
+                        </button>
+                      ))}
+                    </div>
+                  ) : null}
+                </div>
+              );
+            })}
           </div>
         ))}
       </div>
