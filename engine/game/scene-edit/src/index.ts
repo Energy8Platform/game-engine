@@ -99,6 +99,8 @@ export interface ReelsSnapshot {
   rows: number[];
   fitted: { w: number; h: number };
   busy: boolean;
+  /** What each cell of the live board holds, `board[col][row]` (`null` empty); `null` for a board with no `grid` to read. */
+  symbols: (string | null)[][] | null;
 }
 
 /** Which layer of the document an edit lands in: the node's own props (`null`), or `portrait.nodes[<id>]` while the safe rect is portrait (spec §7). */
@@ -464,11 +466,13 @@ export function apply(ctx: Context, config: SceneEditConfig): void {
      * — an optional escape hatch a test board can offer so `win()`/
      * `tumble()` have something to read before any lab `spin()` has run.
      * The real board has none, so on it those two always need a `spin()`
-     * first.
+     * first. `grid` is only read by `snapshot` (what the cells hold — a
+     * painted start board included), never by an action.
      */
     interface ReelsBoardLike {
       readonly view: Container;
       readonly config?: { grid?: { cols?: number; rows?: number; rowsPerReel?: number[] } };
+      readonly grid?: { getCell(col: number, row: number): { data: { symbol: string | null } } | undefined };
       spinTo(step: SpinToStep): Promise<void>;
       revealWins(step: RevealWinsStep): Promise<void>;
       tumble(step: TumbleStep): Promise<void>;
@@ -523,14 +527,18 @@ export function apply(ctx: Context, config: SceneEditConfig): void {
     /**
      * The reel lab's test actions: synthetic spins, scatters, a win and a
      * tumble (`./lab`), built from the project's own symbol ids and played
-     * through the board's real steps — no mechanic, no server. `lastBoard`
-     * is what the last `spinTo` landed, read back by `win`/`tumble` so
-     * they act on what is actually showing; `busy` serialises the four
+     * through the board's real steps — no mechanic, no server. `last` is
+     * what the last spin or tumble left showing, and ON WHICH board: read
+     * back by `win`/`tumble` so they act on what is actually there, and
+     * ignored once `currentBoard()` is a different one (a `reels1`
+     * re-apply rebuilt it — its cells are the start board now, which the
+     * lab cannot read, so `'spin first'`). `busy` serialises the four
      * actions one at a time (like a real spin) and is what `snapshot`
      * reports below. `Math.random` here; `lab.test.ts` is where a seeded
      * `Rand` proves the shapes without one.
      */
-    let lastBoard: string[][] | null = null;
+    let last: { board: ReelsBoardLike; grid: string[][] } | null = null;
+    const showing = (board: ReelsBoardLike) => (last?.board === board ? last.grid : board.symbols?.() ?? null);
     let busy = false;
     const rand: Rand = Math.random;
 
@@ -587,21 +595,23 @@ export function apply(ctx: Context, config: SceneEditConfig): void {
         const built = randomBoard(shapeOf(board), symbols, rand);
         await board.spinTo({ kind: 'spinTo', board: built });
         if (currentBoard() !== board) throw new Error('board replaced');
-        lastBoard = built;
+        last = { board, grid: built };
       }),
     );
     wire.handle('scatters', (p) => {
       const { triggers, threshold } = (p ?? {}) as { triggers?: string[]; threshold?: number };
+      // Nothing to seed the first reels with — `scatterBoard` would drop `undefined` cells.
+      if (!triggers?.length) return { ok: false, reason: 'no trigger symbols' };
       return runStep(async (board, symbols) => {
-        const built = scatterBoard(shapeOf(board), symbols, triggers ?? [], threshold ?? 0, rand);
+        const built = scatterBoard(shapeOf(board), symbols, triggers, threshold ?? 0, rand);
         await board.spinTo({ kind: 'spinTo', board: built });
         if (currentBoard() !== board) throw new Error('board replaced');
-        lastBoard = built;
+        last = { board, grid: built };
       });
     });
     wire.handle('win', () =>
       runStep(async (board) => {
-        const grid = lastBoard ?? board.symbols?.() ?? null;
+        const grid = showing(board);
         if (!grid) throw new Error('spin first');
         await board.revealWins(lineWin(grid, rand));
         if (currentBoard() !== board) throw new Error('board replaced');
@@ -609,10 +619,13 @@ export function apply(ctx: Context, config: SceneEditConfig): void {
     );
     wire.handle('tumble', () =>
       runStep(async (board, symbols) => {
-        const grid = lastBoard ?? board.symbols?.() ?? null;
+        const grid = showing(board);
         if (!grid) throw new Error('spin first');
-        await board.tumble(clusterTumble(grid, symbols, rand));
+        const step = clusterTumble(grid, symbols, rand);
+        await board.tumble(step);
         if (currentBoard() !== board) throw new Error('board replaced');
+        // `clusterTumble` builds `settled` from these same string ids.
+        last = { board, grid: step.settled as string[][] };
       }),
     );
 
@@ -628,13 +641,18 @@ export function apply(ctx: Context, config: SceneEditConfig): void {
       return { results };
     });
     const snapshot = (): ReelsSnapshot => {
-      const { cols, rows } = shapeOf(currentBoard());
-      return { mode: 'reels', cols, rows, fitted: { w: laid.bw * box.scale.x, h: laid.bh * box.scale.y }, busy };
+      const board = currentBoard();
+      const { cols, rows } = shapeOf(board);
+      const grid = board?.grid;
+      const symbols = grid
+        ? rows.map((height, col) => Array.from({ length: height }, (_, row) => grid.getCell(col, row)?.data.symbol ?? null))
+        : null;
+      return { mode: 'reels', cols, rows, fitted: { w: laid.bw * box.scale.x, h: laid.bh * box.scale.y }, busy, symbols };
     };
     wire.handle('snapshot', () => snapshot());
     // Same test-hook slot symbol/scene mode install (`emitted`/`snapshot`
     // only — no node to `select`, no `frameOf`): a browser e2e reads
-    // `emitted()` for `ready` and `snapshot()` for the live board shape,
+    // `emitted()` for `ready` and `snapshot()` for the live board shape and cells,
     // independently of the `rows`/`spin`/… wire calls the real
     // `ReelsDocument` drives it with.
     const winHook = window as unknown as { __e8edit?: Pick<SceneEdit, 'emitted' | 'snapshot'> };

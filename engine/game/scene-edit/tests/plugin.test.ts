@@ -471,7 +471,23 @@ describe('reels mode', () => {
     expect(box.position.x).toBeCloseTo(240 - (500 / 2) * s, 5);
     expect(box.position.y).toBeCloseTo(144 - (300 / 2) * s, 5);
     const snap = (await call('snapshot')).result;
-    expect(snap).toEqual({ mode: 'reels', cols: 5, rows: [3, 3, 3, 3, 3], fitted: { w: s * 500, h: s * 300 }, busy: false });
+    expect(snap).toEqual({ mode: 'reels', cols: 5, rows: [3, 3, 3, 3, 3], fitted: { w: s * 500, h: s * 300 }, busy: false, symbols: null });
+  });
+
+  // For the browser e2e: what the board's cells actually hold (a painted
+  // start board, a spin's landing) — read off `board.grid`, which the fake
+  // above has none of (`symbols: null`).
+  it("snapshot's symbols are the board grid's cells, board[col][row], null for an empty one", async () => {
+    const cells: Record<string, string | null> = { '0,0': 'wild', '1,1': '4' };
+    const board = {
+      ...fakeBoard(),
+      config: { grid: { cols: 2, rows: 2 } },
+      grid: { getCell: (col: number, row: number) => ({ data: { symbol: cells[`${col},${row}`] ?? null } }) },
+    };
+    const { call, ready } = bootReels(board);
+    await ready();
+    const snap = (await call('snapshot')).result as { symbols: (string | null)[][] };
+    expect(snap.symbols).toEqual([['wild', null], [null, '4']]);
   });
 
   // Fix round 1: `bootReels` registered `snapshot`/`rows`/the lab actions on
@@ -750,6 +766,54 @@ describe('reels mode: lab actions', () => {
     rejectSpin(new Error('board destroyed — reels1 was re-applied'));
     const res = await pending;
     expect(res.result).toEqual({ ok: false, reason: 'board replaced' });
+  });
+
+  // Final review I4: `lastBoard` was only ever the last SPIN's — a second
+  // tumble re-tumbled the pre-tumble board — and it outlived a rebuilt board.
+  it('a second tumble in a row builds on the first one\'s settled board', async () => {
+    let i = 0;
+    const random = vi.spyOn(Math, 'random').mockImplementation(() => ((i++ * 7) % 6) / 6);
+    try {
+      const board = fakeBoard();
+      const { call, ready } = bootReels(board, undefined, fakeSymbolsService(SIX));
+      await ready();
+      await call('spin');
+      const spun = (board.spinTo.mock.calls[0][0] as { board: string[][] }).board;
+      await call('tumble');
+      await call('tumble');
+      type Step = { removed: { row: number }[]; settled: string[][] };
+      const [first, second] = board.tumble.mock.calls.map((c) => c[0] as Step);
+      const row = second.removed[0].row;
+      const without = (col: string[]) => col.filter((_, r) => r !== row);
+      for (const c of [0, 1, 2]) expect(second.settled[c].slice(1)).toEqual(without(first.settled[c]));
+      // …and that is not what the spin's board would have given.
+      expect([0, 1, 2].map((c) => without(first.settled[c]))).not.toEqual([0, 1, 2].map((c) => without(spun[c])));
+    } finally {
+      random.mockRestore();
+    }
+  });
+
+  it('win() after the board was rebuilt answers spin first — the last spin was on the old board', async () => {
+    const { ctx, call, ready } = bootReels(undefined, undefined, fakeSymbolsService(SIX));
+    const first = fakeBoard();
+    const disposeFirst = ctx.provide('board', first);
+    await ready();
+    expect((await call('spin')).result).toEqual({ ok: true });
+    disposeFirst();
+    const second = fakeBoard();
+    ctx.provide('board', second);
+    expect((await call('win')).result).toEqual({ ok: false, reason: 'spin first' });
+    expect((await call('tumble')).result).toEqual({ ok: false, reason: 'spin first' });
+    expect(second.revealWins).not.toHaveBeenCalled();
+  });
+
+  // Final review M3: an empty trigger list seeded `undefined` cells.
+  it('scatters() with no trigger symbols answers a reason and spins nothing', async () => {
+    const board = fakeBoard();
+    const { call, ready } = bootReels(board, undefined, fakeSymbolsService(SIX));
+    await ready();
+    expect((await call('scatters', { triggers: [], threshold: 2 })).result).toEqual({ ok: false, reason: 'no trigger symbols' });
+    expect(board.spinTo).not.toHaveBeenCalled();
   });
 
   it('tumble() on a 2-reel board answers a clear reason instead of crashing', async () => {
