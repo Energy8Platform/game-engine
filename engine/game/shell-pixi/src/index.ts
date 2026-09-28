@@ -108,42 +108,55 @@ declare module 'cordis' {
  * gives the bar's space back on its own, no `refit()` needed. Shown again,
  * both answer the real shell's current values.
  *
- * `Object.create(shell)` inherits everything else — `state`, `actions`,
- * every setter, `on`/`off` — unchanged: `ShellController` has no `#`-private
- * fields (its `private` is TS-only, erased at runtime), and its methods
- * only ever mutate through `this.state`/`this.renderer`, both inherited off
- * the real shell, so they keep working with the wrapper as `this`. Only
- * `setVisible`/`barHeight`/`safeArea` are own properties here, so they
- * don't rely on that inheritance at all.
+ * A `Proxy` whose target IS the real shell — NOT `Object.create(shell)`.
+ * `Object.create` makes the wrapper its own object with `shell` only as its
+ * PROTOTYPE: an inherited method then runs with the WRAPPER as `this`, and
+ * `ShellController.setBalance`/`setWin` (packages/shell/src/core/
+ * ShellController.ts) do a bare `this.prevBalance = n` — not nested under
+ * `this.state` — which would silently create a SHADOW own property on the
+ * wrapper and leave the real shell's bookkeeping stale forever. The `get`
+ * trap below answers the three overrides itself and otherwise reads
+ * `Reflect.get(shell, key, shell)` — receiver = the REAL shell, so an
+ * inherited getter also computes against it — and binds a function result
+ * to the real shell (cached, so `handle.setBalance === handle.setBalance`)
+ * before handing it back: every mutation an inherited method makes lands on
+ * the real shell, never on a copy. `set` mirrors this for symmetry, though
+ * nothing here writes through the handle today.
  */
 function wrapShell(shell: Shell): Shell {
   let hidden = false;
   // Reused, not reallocated: `scenes1` reads `safeArea` every ticker frame while hidden.
   const hiddenSafeArea: SafeArea = { top: 0, right: 0, bottom: 0, left: 0 };
-  return Object.create(shell, {
-    setVisible: {
-      value: (v: boolean) => {
-        hidden = !v;
-        shell.setVisible(v);
-      },
-      enumerable: true,
-    },
-    barHeight: {
-      get: () => (hidden ? 0 : shell.barHeight),
-      enumerable: true,
-    },
-    safeArea: {
-      get: () => {
+  const setVisible = (v: boolean) => {
+    hidden = !v;
+    shell.setVisible(v);
+  };
+  // Bound functions, cached by key so repeated reads answer the same identity.
+  const bound = new Map<PropertyKey, (...args: unknown[]) => unknown>();
+  return new Proxy(shell, {
+    get(_target, key) {
+      if (key === 'setVisible') return setVisible;
+      if (key === 'barHeight') return hidden ? 0 : shell.barHeight;
+      if (key === 'safeArea') {
         if (!hidden) return shell.safeArea;
         const { top, right, left } = shell.safeArea;
         hiddenSafeArea.top = top;
         hiddenSafeArea.right = right;
         hiddenSafeArea.left = left;
         return hiddenSafeArea;
-      },
-      enumerable: true,
+      }
+      const value = Reflect.get(shell, key, shell);
+      if (typeof value !== 'function') return value;
+      const cached = bound.get(key);
+      if (cached) return cached;
+      const fn = value.bind(shell) as (...args: unknown[]) => unknown;
+      bound.set(key, fn);
+      return fn;
     },
-  }) as Shell;
+    set(_target, key, value) {
+      return Reflect.set(shell, key, value, shell);
+    },
+  });
 }
 
 /** The flow bus, as much of it as this row uses. Not cordis's own `ctx.events`. */

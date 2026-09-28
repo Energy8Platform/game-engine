@@ -249,6 +249,66 @@ describe('shell-pixi — the Pixi shell as a row', () => {
 
       await ctx.fiber.dispose();
     });
+
+    /**
+     * Ruling 3's exact footgun, reproduced: the real `ShellController.
+     * setBalance` (packages/shell/src/core/ShellController.ts) does a bare
+     * `this.prevBalance = n` — not nested under `this.state` — and
+     * `prevBalanceReadout` below stands in for a getter reading a
+     * `this`-field. `fakeShell()`'s plain-object mock never exercised this
+     * (its methods only close over local vars, never `this`), so this test
+     * swaps in a real CLASS instance for one boot to prove the provided
+     * `shell` handle runs every inherited method with the REAL instance as
+     * `this` — never the wrapper.
+     */
+    it("a bare `this.<field> =` write inside an inherited method mutates the REAL shell, not a wrapper shadow", async () => {
+      class RealishShell {
+        state = { bet: 2, turbo: 1, busy: false, autoplay: { active: false, remaining: 0 } };
+        actions = { spin: vi.fn() };
+        on = vi.fn();
+        off = vi.fn();
+        listeners = () => 0;
+        destroy = vi.fn(async () => {});
+        setVisible = vi.fn();
+        barHeight = 64;
+        safeArea = { top: 0, right: 0, bottom: 64, left: 0 };
+        // Declared, not initialized — same as the real `ShellController`'s
+        // `prevBalance` is a real own field, but here it starts genuinely
+        // ABSENT so `hasOwnProperty` before/after is unambiguous.
+        declare prevBalance: number | undefined;
+        setBalance(n: number) {
+          this.prevBalance = n;
+        }
+        get prevBalanceReadout(): number | undefined {
+          return this.prevBalance;
+        }
+      }
+      const real = new RealishShell();
+      const { createPixiShell } = await import('@energy8platform/shell/pixi');
+      vi.mocked(createPixiShell).mockImplementationOnce((config) => {
+        captured.config = config as unknown as Record<string, unknown>;
+        captured.shell = real as unknown as FakeShell;
+        captured.root = new Container();
+        (config.parent as Container).addChild(captured.root);
+        return real as unknown as ReturnType<typeof createPixiShell>;
+      });
+
+      const { ctx } = await boot();
+      const handle = ctx.get('shell')!;
+
+      expect(Object.prototype.hasOwnProperty.call(real, 'prevBalance')).toBe(false);
+      handle.setBalance(777);
+
+      // The mutation must land on the REAL instance — a wrapper that ran
+      // the inherited method with ITSELF as `this` would instead create a
+      // shadow own property on the wrapper and leave `real` untouched.
+      expect(real.prevBalance).toBe(777);
+      expect(Object.prototype.hasOwnProperty.call(real, 'prevBalance')).toBe(true);
+      // The getter, read back through the handle, must also see the real change.
+      expect((handle as unknown as { prevBalanceReadout: number }).prevBalanceReadout).toBe(777);
+
+      await ctx.fiber.dispose();
+    });
   });
 
   it('re-emits every ShellEvents entry on the flow bus as shell.<name> with an object payload', async () => {
