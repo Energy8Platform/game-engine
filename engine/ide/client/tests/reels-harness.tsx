@@ -126,14 +126,24 @@ export async function harness(
   // override and the board painter both read `ctx.symbols.known()`/`.doc()`
   // through it, and neither `reels.tsx` nor `ReelsSettings` need the rest
   // of the real service (sockets, PUTs, selection).
-  ctx.provide('symbols', {
-    doc: () => opts.symbolsDoc ?? null,
-    known: () => opts.known ?? KNOWN_SYMBOLS,
-    diagnostics: () => [],
-    selected: () => null,
-    select: () => {},
-    update: async () => [],
-    subscribe: () => () => {},
+  //
+  // A FORK, not a bare `ctx.provide` on the root: `symbols` is its own
+  // sibling plugin in the real app (`context.ts`'s `ctx.plugin(symbols,
+  // config)`), so cordis isolates the service to that fork and any
+  // consumer — `reels` among them — has to declare it in its own `inject`
+  // to read it. A root-level provide skips that isolation boundary
+  // entirely, which is exactly what let `reels.tsx` ship without
+  // `symbols` in its `inject` while this very harness stayed green.
+  await ctx.plugin(function stubSymbols(c: Context) {
+    c.provide('symbols', {
+      doc: () => opts.symbolsDoc ?? null,
+      known: () => opts.known ?? KNOWN_SYMBOLS,
+      diagnostics: () => [],
+      selected: () => null,
+      select: () => {},
+      update: async () => [],
+      subscribe: () => () => {},
+    });
   });
   const listeners = new Set<() => void>();
   const updateCalls: { id: string; config: Record<string, unknown> }[] = [];

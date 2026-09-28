@@ -22,7 +22,11 @@ import { ReelsSettings } from '../shell/ReelsSettings';
  * Symbols'/Flow's own `sideRight` flags do.
  */
 export const name = 'reels';
-export const inject = ['gameComposition', 'slots', 'shell'];
+// `symbols`: `ReelsSettings`' chips and board painter read the project's
+// symbol ids off `ctx.symbols` (`useSymbols`) — a sibling plugin's own
+// service, so cordis refuses the bare read without it declared here, the
+// same rule `flow.tsx` already follows for its own read of `ctx.scenes`.
+export const inject = ['gameComposition', 'slots', 'shell', 'symbols'];
 
 const hasReels1 = (ctx: Context) =>
   (ctx.gameComposition.rows ?? []).some((row) => row.id === 'reels1');
