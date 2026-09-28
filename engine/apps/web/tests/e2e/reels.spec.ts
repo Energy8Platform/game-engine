@@ -42,16 +42,22 @@ import { projectCopy, startDevHost, type DevHost } from './project-fixture';
 const IDE_URL = `http://127.0.0.1:${IDE_WEB_PORT}/`;
 const REELS_CANVAS = 'iframe[title="reels canvas"]';
 
-let dir: string;
-let host: DevHost;
+// `| undefined`, RESET after each test's own cleanup (Task 6 fix round 1):
+// a test that throws before ever calling `boot()` (a bad `writeFileSync`,
+// say) must not leave a stale reference to the PREVIOUS test's already-
+// stopped `host`/removed `dir` for ITS OWN `afterEach` to act on.
+let dir: string | undefined;
+let host: DevHost | undefined;
 
 test.beforeEach(() => {
   dir = projectCopy();
 });
 
 test.afterEach(async () => {
-  if (host) await host.stop();
+  await host?.stop();
+  host = undefined;
   if (dir) rmSync(dir, { recursive: true, force: true });
+  dir = undefined;
 });
 
 /**
@@ -62,14 +68,16 @@ test.afterEach(async () => {
  * (`project-fixture.ts`'s own doc on `startDevHost`); an edit to
  * `src/editor.ts` made only AFTER that has started risks the canvas iframe
  * being served the version vite already read, not the one the test wrote.
+ * `dir!`: always set by `beforeEach` before any test body (and so before
+ * `boot()`) runs.
  */
 async function boot(): Promise<void> {
-  host = await startDevHost(dir);
+  host = await startDevHost(dir!);
 }
 
 /** `e8.patch.yml`, parsed — the config object a patch row currently carries, or `undefined` for a row the patch does not mention at all yet. */
 function patchConfig(id: string): Record<string, any> | undefined {
-  const doc = load(readFileSync(join(dir, 'e8.patch.yml'), 'utf8')) as {
+  const doc = load(readFileSync(join(dir!, 'e8.patch.yml'), 'utf8')) as {
     rows: { id: string; config?: Record<string, unknown> }[];
   };
   return doc.rows.find((row) => row.id === id)?.config;
@@ -281,7 +289,7 @@ await game.ctx.plugin(sceneEdit, {
 test('a project whose editor page passes no reels mode still shows a filled board, no Spin needed', async ({
   page,
 }) => {
-  writeFileSync(join(dir, 'src', 'editor.ts'), PRE_SLICE_43_EDITOR_TS);
+  writeFileSync(join(dir!, 'src', 'editor.ts'), PRE_SLICE_43_EDITOR_TS);
   await boot();
   await openReels(page);
 

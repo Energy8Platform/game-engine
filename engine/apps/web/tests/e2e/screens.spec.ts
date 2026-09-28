@@ -68,6 +68,8 @@ interface SessionInit {
   currency: { code: string };
   device?: string;
   social?: boolean;
+  /** The bet-multiplier price of each named action (`session-host`'s own `init.actions`) — fixed for the life of the seed, unaffected by any play. */
+  actions?: Record<string, number>;
 }
 
 /**
@@ -88,27 +90,45 @@ const session = (frame: Frame) =>
 const viewport = (frame: Frame) => frame.evaluate(() => [innerWidth, innerHeight]);
 
 /**
- * The one `sessionStorage` entry `session-host` keeps for the game's dev
- * wallet (Task 1's `e8:wallet:<gameId>:<balance>:<currency>:<wallet>`), or
- * `undefined` before any play has landed under the address's current key.
+ * The shell's own live readout (`build.spec.ts`'s and `game-shell.spec.ts`'s
+ * own window onto the RUNNING wallet) — `balance` is what the flow's `bal`
+ * node last landed there from a spin's own result, `bet` the current bet
+ * level. Unlike `session(frame)` above (always the STATIC seed
+ * `session.init` answered, never touched by a play), this is the one
+ * signal that reflects what `session-host`'s own in-memory `balance`
+ * actually is right now.
  */
-const wallet = (frame: Frame) =>
+const shellState = (frame: Frame) =>
+  frame.evaluate(() => (window as any).__e8.shell()!.state as { balance: number; bet: number });
+
+/** One spin's own result, off the durable spin log (`build.spec.ts`'s own read) — `.balance` the running total AFTER this spin, `.winAmount` what it paid. */
+const lastResult = (frame: Frame) =>
   frame.evaluate(
-    () => Object.entries(sessionStorage).find(([k]) => k.startsWith('e8:wallet:'))?.[1],
+    () => (window as any).__e8.spins().at(-1).result as { balance: number; winAmount: number },
   );
+
 /**
- * Same, scoped to ONE specific `?wallet=` suffix — needed once `↺` has
- * bumped the address's own wallet number: the OLD key (a different suffix)
- * may still be sitting in `sessionStorage` from the play before it, and a
- * plain `wallet()` would find that one instead.
+ * One spin on `frame`, asserting its result CONTINUES the running wallet
+ * from `start` at `price` (bet × `session().actions.spin`) — the same
+ * arithmetic `build.spec.ts` checks (`result.balance ≈ start - bet×price +
+ * winAmount`). This is the only check in this test that actually exercises
+ * `session-host`'s own READ of a persisted wallet: `__e8.session()` never
+ * changes (the static seed) regardless of what got stored, and a raw
+ * `sessionStorage` read only proves a PRIOR write landed — never that the
+ * CURRENT page's own code read it back. A `session-host` that silently
+ * ignored the address's `wallet=` (or its stored value) would still leave
+ * the old bytes sitting there for a naive storage read to find, but this
+ * spin's own resulting balance would betray it — it would continue from
+ * the wrong `start`. Returns the resulting balance, so a caller can chain
+ * `start` into the next `spinFrom` call.
  */
-const walletUnder = (frame: Frame, suffix: string) =>
-  frame.evaluate(
-    (s) =>
-      Object.entries(sessionStorage).find(([k]) => k.startsWith('e8:wallet:') && k.endsWith(`:${s}`))
-        ?.[1],
-    suffix,
-  );
+async function spinFrom(frame: Frame, start: number, price: number): Promise<number> {
+  const bet = (await shellState(frame)).bet;
+  await frame.evaluate(() => (window as any).__e8.spin());
+  const result = await lastResult(frame);
+  expect(result.balance).toBeCloseTo(start - bet * price + result.winAmount, 6);
+  return result.balance;
+}
 
 test('the IDE opens on a screen, and a second screen is one click away', async ({ page }) => {
   const dir = projectCopy();
@@ -275,8 +295,12 @@ test('currency, balance and social reach the game’s own session, and survive a
  * "Rotate swaps the frame without relaunching it" above proves the
  * opposite for a resize). `↺` instead bumps the address's own `wallet=<n>`
  * (Task 1's last key segment) WITHOUT touching `balance`/`currency` — a
- * fresh key, so the wallet starts over at the seed, and nothing is stored
- * under it until the next play.
+ * fresh key, so the wallet starts over at the seed.
+ *
+ * Every checkpoint spins through `spinFrom` — the LIVE wallet, not
+ * `sessionStorage`'s raw bytes or `__e8.session()`'s static seed (see its
+ * own doc for why a storage-only read cannot tell a working persistence
+ * from a `session-host` that silently ignores it).
  */
 test('↻ relaunches the game at the same address and keeps its wallet; ↺ bumps the address and starts over', async ({
   page,
@@ -290,24 +314,20 @@ test('↻ relaunches the game at the same address and keeps its wallet; ↺ bump
     const frame1 = await previewFrame(page);
     await gameBooted(frame1);
     const srcBefore = await page.locator(PREVIEW).getAttribute('src');
+    const price = (await session(frame1)).actions?.spin ?? 1;
 
-    await frame1.evaluate(() => (window as any).__e8.spin());
-    const postSpin = await wallet(frame1);
-    // Differs from the seed, or a refresh that silently dropped the whole
-    // wallet could still pass by coincidence.
-    expect(postSpin).toBeDefined();
-    expect(Number(postSpin)).not.toBe(10_000);
+    const postSpin = await spinFrom(frame1, 10_000, price);
 
     // ↻: a genuinely NEW frame element (a plain `src` reassignment on the
-    // same node would have kept this marker) at the SAME address, and the
-    // wallet it finds there is the one the spin just wrote.
+    // same node would have kept this marker) at the SAME address, and a
+    // spin on it continues the wallet from `postSpin`, not the seed.
     await page.locator(PREVIEW).evaluate((el) => el.setAttribute('data-e8-marker', 'pre-refresh-1'));
     await page.getByTestId('preview-refresh').click();
     await expect(page.locator(PREVIEW)).not.toHaveAttribute('data-e8-marker', 'pre-refresh-1');
     expect(await page.locator(PREVIEW).getAttribute('src')).toBe(srcBefore);
     const frame2 = await previewFrame(page);
     await gameBooted(frame2);
-    expect(await wallet(frame2)).toBe(postSpin);
+    const postRefresh1 = await spinFrom(frame2, postSpin, price);
 
     // A second ↻ is no different — nothing about the wallet is tied to how
     // many times the button has been pressed.
@@ -316,17 +336,16 @@ test('↻ relaunches the game at the same address and keeps its wallet; ↺ bump
     await expect(page.locator(PREVIEW)).not.toHaveAttribute('data-e8-marker', 'pre-refresh-2');
     const frame3 = await previewFrame(page);
     await gameBooted(frame3);
-    expect(await wallet(frame3)).toBe(postSpin);
+    await spinFrom(frame3, postRefresh1, price);
 
     // ↺: the address's `wallet=` bumps by one — a fresh key nothing has
-    // written to yet, and the session's own SEED (never the running
-    // wallet total) is what `__e8.session().balance` always answers.
+    // written to yet, so a spin here must continue from the FULL SEED
+    // again, not from wherever the depleted wallet left off.
     const walletBefore = new URL(srcBefore!).searchParams.get('wallet');
     const nextWallet = String(Number(walletBefore) + 1);
     await page.getByTestId('preview-balance-reset').click();
     const frame4 = await relaunched(page, new RegExp(`[?&]wallet=${nextWallet}(&|$)`));
-    expect(await walletUnder(frame4, nextWallet)).toBeUndefined();
-    expect((await session(frame4)).balance).toBe(10_000);
+    await spinFrom(frame4, 10_000, price);
   } finally {
     await host.stop();
     rmSync(dir, { recursive: true, force: true });
