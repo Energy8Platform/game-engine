@@ -1393,21 +1393,66 @@ describe('sidebars follow the active tab', () => {
     expect(ctx.shell.sidebar()).toBe('a');
   });
 
-  it("the activity view's own sideRight wins over the tab's; one without leaves the tab's", () => {
+  it('a press after the tab changed under a pick, with nothing read in between, shows the view', () => {
     const ctx = harness();
-    ctx.slots.register({ name: 'shell.sidebar', key: 'scenes', title: 'S', sideRight: 's' }, Dummy);
-    ctx.slots.register({ name: 'shell.sidebar', key: 'explorer', title: 'E' }, Dummy);
-    doc(ctx, 'd', { sideRight: 'r' });
-    ctx.shell.setSideRight('s', true);
-    ctx.shell.setSideRight('r', true);
-    expect(ctx.shell.sideRight()).toBe('r');
-    ctx.shell.showSidebar('scenes');
-    expect(ctx.shell.sideRight()).toBe('s');
-    // The view's key is chosen first, then its flag read: off is collapsed, not the tab's.
-    ctx.shell.setSideRight('s', false);
-    expect(ctx.shell.sideRight()).toBeUndefined();
+    doc(ctx, 'code');
     ctx.shell.showSidebar('explorer');
-    expect(ctx.shell.sideRight()).toBe('r');
+    // A tab with its own sidebar opens; no render reads `sidebar()` before the press.
+    doc(ctx, 'sym', { sidebar: 'a' });
+    ctx.shell.showSidebar('explorer');
+    expect(ctx.shell.sidebar()).toBe('explorer');
+  });
+
+  it('Back onto a tab with its own sidebar lapses the pick, and the shell shows that sidebar', () => {
+    const ctx = harness();
+    ctx.slots.register({ name: 'shell.sidebar', key: 'a', title: 'A' }, () => <p>list</p>);
+    ctx.slots.register({ name: 'shell.sidebar', key: 'explorer', title: 'E' }, () => <p>files</p>);
+    doc(ctx, 'sym', { sidebar: 'a' });
+    doc(ctx, 'code');
+    render(<Shell ctx={ctx} />);
+    act(() => ctx.shell.showSidebar('explorer'));
+    expect(screen.getByTestId('sidebar-explorer')).toBeVisible();
+    act(() => {
+      location.hash = '#/doc/sym';
+      window.dispatchEvent(new HashChangeEvent('hashchange'));
+    });
+    expect(screen.getByTestId('sidebar-a')).toBeVisible();
+    expect(screen.getByTestId('sidebar-explorer')).not.toBeVisible();
+    expect(ctx.shell.sidebar()).toBe('a');
+  });
+
+  it("the tab's own sideRight shows while it has something; the picked view's fills in when it has not", () => {
+    const ctx = harness();
+    ctx.slots.register(
+      { name: 'shell.sidebar', key: 'scenes', title: 'S', sideRight: 'scenes' },
+      Dummy,
+    );
+    ctx.slots.register({ name: 'shell.sidebar', key: 'explorer', title: 'E' }, Dummy);
+    ctx.shell.setSideRight('scenes', true);
+
+    // The Scenes list picked over the Reels tab: Reels keeps its settings.
+    doc(ctx, 'reels', { sideRight: 'reels' });
+    ctx.shell.setSideRight('reels', true);
+    ctx.shell.showSidebar('scenes');
+    expect(ctx.shell.sideRight()).toBe('reels');
+
+    // Over a Flow tab with no node selected, the scene the list selected.
+    // (Flow's own left sidebar lapses the pick; the list is picked again.)
+    doc(ctx, 'flow', { sidebar: 'nodes', sideRight: 'flow' });
+    ctx.shell.showSidebar('scenes');
+    expect(ctx.shell.sideRight()).toBe('scenes');
+    // A Flow node selected: the tab's own again.
+    ctx.shell.setSideRight('flow', true);
+    expect(ctx.shell.sideRight()).toBe('flow');
+
+    // Neither has anything: collapsed.
+    ctx.shell.setSideRight('flow', false);
+    ctx.shell.setSideRight('scenes', false);
+    expect(ctx.shell.sideRight()).toBeUndefined();
+    // A view with no sideRight of its own leaves the tab's.
+    ctx.shell.setSideRight('flow', true);
+    ctx.shell.showSidebar('explorer');
+    expect(ctx.shell.sideRight()).toBe('flow');
   });
 
   it('the right sidebar leaves with its tab and comes back with it, the flag untouched', () => {

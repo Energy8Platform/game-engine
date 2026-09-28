@@ -12,6 +12,7 @@ import * as scenes from '../src/plugins/scenes';
 import * as assetNodeTypes from '../src/plugins/asset-node-types';
 import * as files from '../src/plugins/files';
 import { mergedSchema } from '../src/shell/PropertiesSidebar';
+import { openPath } from '../src/shell/Explorer';
 
 /**
  * The Properties sidebar, rendered through the plugin's OWN
@@ -140,6 +141,16 @@ describe('PropertiesSidebar', () => {
     expect(ctx.shell.sideRight()).toBe('scenes');
     ctx.scenes.select(null);
     expect(ctx.shell.sideRight()).toBeUndefined();
+  });
+
+  it('two scene tabs each show it', async () => {
+    const { ctx } = await harness();
+    ctx.scenes.select({ scene: 'base_game', node: null });
+    openPath(ctx, 'scenes/base_game.scene.yml');
+    openPath(ctx, 'scenes/bonus.scene.yml');
+    expect(ctx.shell.sideRight()).toBe('scenes');
+    ctx.shell.activate('f:scenes/base_game.scene.yml');
+    expect(ctx.shell.sideRight()).toBe('scenes');
   });
 
   it("a node: id, type, the common fields merged with the type's own; a change PUTs", async () => {

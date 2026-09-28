@@ -60,13 +60,17 @@ stay where they are).
   override is cleared; a tab that declares none keeps it showing — so a
   file opened from the Explorer leaves the Explorer in place, and opening
   Symbols shows the symbol list. The boot default (Explorer / Projects) is
-  that same override, set only while no document is active.
+  that same override, set whenever the left would otherwise be empty at
+  boot: a deep link to Symbols or Flow keeps their own sidebar, a reload
+  onto the Composition gets the Explorer back.
 - The activity button is highlighted while its view is the one shown.
 
 ## 4. The right sidebar
 
-- The right sidebar's key comes from what the left shows: the override's
-  `sideRight`, else the active tab's `sideRight`.
+- The right sidebar shows the first of the active tab's `sideRight` and
+  the override's `sideRight` whose flag (below) is on — Reels keeps its
+  settings under a picked Scenes list; a Flow tab with no node selected
+  shows the scene Properties the Scenes list selected.
 - It is shown only while that key's plugin says it has something to show:
   `ctx.shell.setSideRight(key, on)` replaces `showSideRight`/
   `hideSideRight` (Scenes and Flow: a node selected; Symbols: a symbol or
@@ -109,9 +113,10 @@ stay where they are).
 
 - `ide-client` shell: a tab's declared `sidebar`/`sideRight` show; none
   declared → both collapse; an activity click overrides, a second click
-  or another tab clears the override; the override's `sideRight` wins over
-  the tab's; `setSideRight(key, false)` hides, `true` shows only when the
-  current right key is `key`; a sidebar shown once stays mounted.
+  or another tab clears the override; the tab's `sideRight` wins while it
+  has something to show, else the override's; `setSideRight(key, false)`
+  hides, `true` shows only when the current right key is `key`; a sidebar
+  shown once stays mounted.
 - Symbols / Flow / Reels documents: the list / palette / sections render
   in their sidebars (not in the document); a palette drag onto the Flow
   canvas still adds a node; a Reels section write re-applies that row on

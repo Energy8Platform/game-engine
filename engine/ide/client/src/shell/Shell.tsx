@@ -308,11 +308,11 @@ export function Shell({ ctx }: { ctx: Context }) {
   // Every `shell.sidebar` / `shell.sideRight` key shown at least once stays
   // in this set for the life of the component, so the entry below is kept
   // mounted (hidden, not removed) after the pick moves on — the same rule
-  // `documents` and the panel's own entries already keep (Ruling 13, Task
-  // 4), now extended to the two sides. Updated while rendering rather than
-  // in an effect: a set that already has the key is left alone, so this
-  // never loops, and the entry appears in the very render that first shows
-  // it instead of one frame late.
+  // the document panes and the panel's own entries keep, so a half-typed
+  // field survives a tab switch on the two sides too. Updated while
+  // rendering rather than in an effect: a set that already has the key is
+  // left alone, so this never loops, and the entry appears in the very
+  // render that first shows it instead of one frame late.
   const [shownSidebars, setShownSidebars] = useState<ReadonlySet<string>>(() => new Set());
   if (sidebar !== undefined && !shownSidebars.has(sidebar)) {
     setShownSidebars(new Set(shownSidebars).add(sidebar));
@@ -477,7 +477,12 @@ export function Shell({ ctx }: { ctx: Context }) {
         {sidebarEntries
           .filter((entry) => shownSidebars.has(entry.key))
           .map((entry) => (
-            <div key={entry.key} data-testid={`sidebar-${entry.key}`} hidden={entry.key !== sidebar}>
+            <div
+              key={entry.key}
+              className="e8-sidebar-entry"
+              data-testid={`sidebar-${entry.key}`}
+              hidden={entry.key !== sidebar}
+            >
               <entry.component ctx={ctx} />
             </div>
           ))}
@@ -566,6 +571,7 @@ export function Shell({ ctx }: { ctx: Context }) {
           .map((entry) => (
             <div
               key={entry.key}
+              className="e8-sidebar-entry"
               data-testid={`side-right-${entry.key}`}
               hidden={entry.key !== sideRight}
             >

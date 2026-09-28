@@ -241,12 +241,14 @@ export function App({ ctx }: { ctx: Context }) {
     const decide = () => {
       const state = ctx.workspace.state();
       if (state === null) return;
-      // Ahead of the composition: the default is an activity view picked
-      // over a tab, laid only while no document is active — a deep link
-      // to a tab with its own sidebar keeps that sidebar.
+      // The default is an activity view picked over a tab, laid only where
+      // the left would otherwise be empty: a deep link to a tab with its
+      // own sidebar keeps that sidebar; a reload onto the composition (a
+      // deep link too, since the default writes the address) gets the
+      // Explorer back.
       if (!sidebarDecided) {
         sidebarDecided = true;
-        if (ctx.shell.sidebar() === undefined && ctx.shell.active() === undefined) {
+        if (ctx.shell.sidebar() === undefined) {
           ctx.shell.showSidebar(state.active === null ? 'workspace' : 'explorer');
         }
       }

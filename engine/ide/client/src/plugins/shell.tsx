@@ -180,10 +180,9 @@ export interface ShellService {
   panelBadge(key: string): number | string | undefined;
 
   /**
-   * The `shell.sideRight` key shown, or `undefined` — collapsed. The key
-   * comes from what the left shows: the picked activity view's
-   * `sideRight`, else the active tab's; it shows only while its plugin
-   * has said it has something to show (`setSideRight`).
+   * The `shell.sideRight` key shown, or `undefined` — collapsed: the
+   * first of the active tab's `sideRight` and the picked activity view's
+   * whose plugin has said it has something to show (`setSideRight`).
    */
   sideRight(): string | undefined;
   /**
@@ -640,7 +639,9 @@ export function apply(ctx: Context) {
     },
 
     showSidebar(key) {
-      activeSeen = service.active()?.key;
+      // A pick the active tab has overtaken lapses first, so the press
+      // below compares against what is shown, not a stale pick.
+      effectiveLeft();
       override = key === undefined || override === key ? undefined : key;
       notify();
     },
@@ -688,8 +689,9 @@ export function apply(ctx: Context) {
           : ctx.slots
               .list<SlotMeta & SidebarMeta>(SLOT_NAMES.sidebar)
               .find((entry) => entry.key === override);
-      const key = picked?.sideRight ?? service.active()?.sideRight;
-      return key !== undefined && rightOn.get(key) ? key : undefined;
+      return [service.active()?.sideRight, picked?.sideRight].find(
+        (key) => key !== undefined && rightOn.get(key),
+      );
     },
 
     setSideRight(key, on) {

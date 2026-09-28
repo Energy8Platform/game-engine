@@ -292,9 +292,8 @@ describe('App', () => {
     render(<App ctx={ctx} />);
     await waitFor(() => expect(ctx.workspace.state()).not.toBeNull());
     expect(ctx.shell.active()?.key).toBe('flow');
-    // No Explorer default laid over the tab the address named: the left
-    // sidebar is that tab's own.
-    expect(ctx.shell.sidebar()).toBe(ctx.shell.active()?.sidebar);
+    // No Explorer default laid over a tab with a left sidebar of its own.
+    expect(ctx.shell.sidebar()).toBe('flow');
     // The document the address named, and the Preview behind it — never
     // the composition, which only a fresh load with nothing named opens.
     expect(ctx.shell.documents().map((d) => d.key)).toEqual(['flow', 'preview']);
@@ -388,8 +387,19 @@ describe('App', () => {
     render(<App ctx={ctx} />);
     await waitFor(() => expect(ctx.workspace.state()).not.toBeNull());
     expect(ctx.shell.active()?.key).toBe('preview');
-    expect(ctx.shell.sidebar()).toBeUndefined();
+    // The Preview has no left sidebar of its own: the Explorer default fills it.
+    expect(ctx.shell.sidebar()).toBe('explorer');
     expect(ctx.shell.documents().map((d) => d.key)).toEqual(['preview']);
+  });
+
+  it('a reload onto the composition gets the Explorer back', async () => {
+    location.hash = '#/doc/composition';
+    const { ctx } = await harness(undefined, OPEN_PROJECT);
+    render(<App ctx={ctx} />);
+    await waitFor(() => expect(ctx.workspace.state()).not.toBeNull());
+    expect(ctx.shell.active()?.key).toBe('composition');
+    expect(ctx.shell.sidebar()).toBe('explorer');
+    expect(screen.getByTestId('sidebar-explorer')).toBeTruthy();
   });
 
   it('a deep link still pending when the workspace answers is left alone too', async () => {

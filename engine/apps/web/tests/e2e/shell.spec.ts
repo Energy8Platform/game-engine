@@ -377,10 +377,6 @@ test('the sidebar can be dragged wider, and stays so after a reload', async ({ p
   try {
     await openIde(page, host, '#/doc/preview');
     await expect(page.locator(PREVIEW)).toBeVisible({ timeout: 20_000 });
-    // The Preview declares no `sidebar`, and a deep link straight onto it
-    // lays no default over it — a press is what opens the column this
-    // test drags.
-    await page.getByTestId('activity-explorer').click();
     const sidebar = page.getByTestId('sidebar');
     const before = (await sidebar.boundingBox())!.width;
 
@@ -396,11 +392,40 @@ test('the sidebar can be dragged wider, and stays so after a reload', async ({ p
       .poll(async () => (await sidebar.boundingBox())!.width)
       .toBeCloseTo(before + 150, -1);
     await page.reload();
-    // The reload is the same deep link again, so the press is repeated —
-    // only the WIDTH persists (`localStorage`), not which sidebar is shown.
-    await page.getByTestId('activity-explorer').click();
     await expect(page.getByTestId('sidebar')).toBeVisible();
     expect((await page.getByTestId('sidebar').boundingBox())!.width).toBeCloseTo(before + 150, -1);
+  } finally {
+    await host.stop();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('the right sidebar is dragged wider from its own left edge', async ({ page }) => {
+  const dir = projectCopy();
+  const host = await startDevHost(dir);
+  try {
+    await openIde(page, host);
+    // Reels' settings are the right sidebar while `reels1` is composed.
+    await page.getByTestId('activity-reels').click({ timeout: 20_000 });
+    await expect(page.getByTestId('side-right-reels')).toBeVisible();
+    const aside = page.getByTestId('side-right');
+    const before = (await aside.boundingBox())!;
+
+    // The handle sits on the aside's left edge, not the window's.
+    const handle = (await page.getByTestId('resize-side-right').boundingBox())!;
+    expect(Math.abs(handle.x - before.x)).toBeLessThanOrEqual(3);
+    expect(handle.y).toBeGreaterThanOrEqual(before.y - 1);
+
+    const x = handle.x + handle.width / 2;
+    const y = handle.y + handle.height / 2;
+    await page.mouse.move(x, y);
+    await page.mouse.down();
+    await page.mouse.move(x - 120, y, { steps: 5 });
+    await page.mouse.up();
+
+    await expect
+      .poll(async () => (await aside.boundingBox())!.width)
+      .toBeCloseTo(before.width + 120, -1);
   } finally {
     await host.stop();
     rmSync(dir, { recursive: true, force: true });

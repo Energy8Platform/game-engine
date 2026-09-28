@@ -1,11 +1,10 @@
 /**
- * Sidebars follow the tab, proven in a real browser (slice 44): a
- * document's declared `sidebar`/`sideRight` are what show beside it —
- * Flow's properties leave with the tab and come back with the same
- * node's, Symbols' list and Reels' settings sit beside their own canvas
- * rather than inside the document pane — and the Explorer activity view,
- * picked OVER a tab's own sidebar, yields only to a tab that declares one
- * of its own.
+ * Sidebars follow the tab, proven in a real browser: a document's declared
+ * `sidebar`/`sideRight` are what show beside it — Flow's properties leave
+ * with the tab and come back with the same node's, Symbols' list and
+ * Reels' settings sit beside their own canvas rather than inside the
+ * document pane — and the Explorer activity view, picked OVER a tab's own
+ * sidebar, yields only to a tab that declares one of its own.
  *
  * Same fixture and idioms as `flow.spec.ts` (`openComposition`/`openFlow`,
  * the Preview's `window.__e8`) and `reels.spec.ts` (`readyCanvas` on the
@@ -118,6 +117,13 @@ test('Symbols: the symbol list is the left sidebar, not part of the document pan
   await expect(
     page.getByTestId('symbols-doc').locator('[data-testid^="symbol-row-"]'),
   ).toHaveCount(0);
+
+  // The entry fills the column, so the list's "drop here for a new
+  // symbol" area stretches down it rather than sitting at its 48px floor.
+  const column = (await page.getByTestId('sidebar').boundingBox())!;
+  const entry = (await page.getByTestId('sidebar-symbols').boundingBox())!;
+  expect(entry.height).toBeGreaterThanOrEqual(column.height - 4);
+  expect((await page.getByTestId('symbols-drop-new').boundingBox())!.height).toBeGreaterThan(100);
 });
 
 test('Reels: the settings are the right sidebar, and cols 5 to 6 rebuilds the canvas board', async ({

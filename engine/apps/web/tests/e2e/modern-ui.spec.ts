@@ -57,12 +57,6 @@ test('activity bar and sidebar are one card, the editor another, the panel a thi
   const host = await startDevHost(dir);
   try {
     await openIde(page, host, '#/doc/composition');
-    // The composition declares no `sidebar` of its own, and a deep link
-    // lays no default over it (Ruling: a document already named by the
-    // address gets none) — the card this test measures needs the sidebar
-    // actually open.
-    await page.getByTestId('activity-explorer').click();
-    await expect(page.getByTestId('sidebar')).toBeVisible();
     const sidebar = (await page.getByTestId('sidebar').boundingBox())!;
     const editors = (await page.locator('.e8-editors').boundingBox())!;
     const panel = (await page.getByTestId('panel').boundingBox())!;
@@ -88,11 +82,8 @@ test('with the sidebar collapsed the activity bar closes its own card', async ({
   const dir = projectCopy();
   const host = await startDevHost(dir);
   try {
-    // The composition declares no `sidebar`, and a deep link straight onto
-    // a document lays no default over it (a click would only SHOW the
-    // Explorer, the opposite of what this test needs) — so the sidebar is
-    // already collapsed the moment this lands, nothing to press.
     await openIde(page, host, '#/doc/composition');
+    await page.getByTestId('activity-explorer').click();
     await expect(page.getByTestId('sidebar')).toBeHidden();
     for (const corner of ['top-left', 'top-right', 'bottom-left', 'bottom-right']) {
       expect(await style(page, '[data-testid="activity-bar"]', `border-${corner}-radius`)).toBe(
@@ -142,11 +133,8 @@ test('the pressed activity button is a filled square, not an accent stripe', asy
     await openIde(page, host, '#/doc/composition');
     // `aria-pressed` follows the SIDEBAR (Shell.tsx: `entry.opens === 'sidebar'
     // && sidebar === entry.key`); a document button such as `composition` is
-    // never pressed. The composition declares no sidebar of its own, so a
-    // deep link onto it lays no default over it — a press is what picks
-    // Explorer as the override shown here.
+    // never pressed. Explorer is the sidebar the shell opens with.
     const button = '[data-testid="activity-explorer"]';
-    await page.locator(button).click();
     await expect(page.locator(button)).toHaveAttribute('aria-pressed', 'true');
     // The 32×32 indicator is the button's `::before` layer (styles.css); the
     // button's own background stays transparent by design (Ruling 2).
@@ -204,9 +192,6 @@ test('the light theme repaints the ground, the cards and Monaco together', async
   const host = await startDevHost(dir);
   try {
     await openIde(page, host, '#/doc/composition');
-    // The composition's deep link lays no sidebar default; a press is what
-    // opens the Explorer this test reads a file from.
-    await page.getByTestId('activity-explorer').click();
     await page.getByTestId('explorer-game/script.spin').click();
     const pane = page.getByTestId('doc-pane-f:game/script.spin');
     await expect(pane.locator('.monaco-editor')).toBeVisible({ timeout: 10_000 });

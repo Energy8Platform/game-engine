@@ -326,6 +326,12 @@ label {
   border: 1px solid var(--e8-border);
   border-radius: 0 var(--e8-radius-lg) var(--e8-radius-lg) 0;
 }
+/* Each entry of either sidebar fills its column's height, so a view that
+   stretches a part of itself (the symbol list's drop area) has a height to
+   fill. */
+.e8-sidebar-entry {
+  height: 100%;
+}
 /* No sidebar chosen: the column is 0, not 260px of empty chrome (DESIGN.md
    §2). The aside is hidden with it, and the activity bar closes its own
    card: right border back, all four corners, the gap to the editor. The
@@ -347,9 +353,11 @@ label {
 
 /* The same floating card as `.e8-sidebar`, mirrored: the gap to the editor
    is a margin inside the column, so the shown column is
-   `--e8-side-right-w` plus it. */
+   `--e8-side-right-w` plus it. Positioned, so its drag handle sits on
+   its own edge rather than the window's. */
 .e8-side-right {
   grid-area: right;
+  position: relative;
   overflow: auto;
   scrollbar-width: thin;
   box-sizing: border-box;

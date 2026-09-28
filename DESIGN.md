@@ -38,13 +38,14 @@ record is `docs/superpowers/specs/2026-09-13-modern-ui-design.md`.
 └────────────────────────────────────────────────────────────┘
 ```
 
-| Region       | Class          | Default size                                    | Slot             |
-| ------------ | -------------- | ----------------------------------------------- | ---------------- |
-| Activity bar | `.e8-activity` | `--e8-activity-w` (56px)                        | `shell.activity` |
-| Sidebar      | `.e8-sidebar`  | `--e8-sidebar-w` (260px), collapses to 0        | `shell.sidebar`  |
-| Editor group | `.e8-editors`  | remaining width                                 | `shell.document` |
-| Panel        | `.e8-panel`    | `--e8-panel-h` (200px), collapses to its header | `shell.panel`    |
-| Status bar   | `.e8-status`   | `--e8-status-h` (22px)                          | `shell.status`   |
+| Region        | Class            | Default size                                    | Slot              |
+| ------------- | ---------------- | ----------------------------------------------- | ----------------- |
+| Activity bar  | `.e8-activity`   | `--e8-activity-w` (56px)                        | `shell.activity`  |
+| Sidebar       | `.e8-sidebar`    | `--e8-sidebar-w` (260px), collapses to 0        | `shell.sidebar`   |
+| Editor group  | `.e8-editors`    | remaining width                                 | `shell.document`  |
+| Panel         | `.e8-panel`      | `--e8-panel-h` (200px), collapses to its header | `shell.panel`     |
+| Right sidebar | `.e8-side-right` | `--e8-side-right-w` (280px), collapses to 0     | `shell.sideRight` |
+| Status bar    | `.e8-status`     | `--e8-status-h` (22px)                          | `shell.status`    |
 
 Three cards and one strip:
 
@@ -72,13 +73,20 @@ Three cards and one strip:
 The shell itself has `padding: var(--e8-gap) var(--e8-gap) 0` and each card
 a `margin` of one gap on the side facing its neighbour, so the 4px between
 any two cards and the 4px to the window edge are the same token. Sidebar
-and panel are resized by dragging their shared edge (`Shell.tsx`'s
-`useResize`, reading `--e8-sidebar-w` / `--e8-panel-h`), the chosen size
-kept in `localStorage` for this browser — a convenience, not state. The
-drag handle is transparent and carries one 2px dot at its centre, fg at
-30%, that disappears on hover and while dragging. Clicking the pressed
-activity button collapses the sidebar; the panel's toggle collapses it to
-its 28px header.
+and panel are resized by dragging their shared edge, the right sidebar by
+its own left edge (`Shell.tsx`'s `useResize`, reading `--e8-sidebar-w` /
+`--e8-panel-h` / `--e8-side-right-w`), the chosen size kept in
+`localStorage` for this browser — a convenience, not state. The drag
+handle is transparent and carries one 2px dot at its centre, fg at 30%,
+that disappears on hover and while dragging. The panel's toggle collapses
+it to its 28px header.
+
+Both sidebars follow the active tab: a tab shows the sidebars it declares,
+and one that declares none collapses them. An activity button shows its
+view over the tab's own until the tab changes to one with a left sidebar
+of its own; pressing it again returns to the tab's sidebar. The right
+sidebar shows only while its plugin has something to show — the tab's
+own first, else the picked view's.
 
 ## 3. Principles
 
@@ -162,6 +170,7 @@ name. Sizes and fonts do not change between themes and live only on
   --e8-radius-sm: 4px;
   --e8-activity-w: 56px;
   --e8-sidebar-w: 260px;
+  --e8-side-right-w: 280px;
   --e8-panel-h: 200px;
   --e8-status-h: 22px;
   --e8-title-h: 32px;
