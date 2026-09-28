@@ -125,3 +125,34 @@ default `[]`:
 - A `rope`/`mesh` node type (the cords' sag), i18n hooks, a mobile asset
   tier, pulsing text — round 7's "still not the original" list.
 - Changing `setProps`/`once` (they already act on every copy).
+
+## 10. Amendments made while running the plan
+
+- **A loaded host is a pending host** (the final review found the load →
+  pose → show workflow missed nested documents: with nothing shown yet,
+  `view()` answered the hidden own mount). `view()` answers shown hosts
+  (latest first), then hosts `load` readied (latest first, dropped by
+  `hide` and by a `replace` that no longer declares them), then the own
+  mount. `load` of an undeclared id is `show`'s `notDeclared`. A `hide`
+  keeps the art of pending hosts (it unloaded everything no shown document
+  needed, undoing a `load` before its `show`).
+- **`hide` refreshes narrowly too**: after unloading, `update` re-runs only
+  on nodes using the unloaded paths (types without `assets()` stay in
+  every sweep, as for a load). `remount` is the only blanket refresh left.
+- **`fitWidth` is measured before the node's `scale`**, the fitted size is
+  floored to a 0.5 px step (≥ 1), and a wrapped text scales its wrap
+  width, `lineHeight` and `letterSpacing` by the same factor as the font
+  (at most 3 passes) — the single-shot shrink let re-wrapping undo the fit.
+- **Fonts load alongside the boot GET** (only `replace` waits for both);
+  a font URL is quoted and never doubles a leading slash; the faces are
+  removed from `document.fonts` on dispose.
+- **The flow package has no README**: `emit.wait`'s description and the
+  `emit`/`load` doc comments carry §4's note. `load` with no `scenes`
+  service is a warning and `next` (it prepares; `show` is where a missing
+  renderer fails).
+- **The shell handle is a `Proxy` of the Pixi shell** with every method
+  bound to the real instance (a prototype wrapper let `setBalance`'s
+  `this` writes land on the wrapper). No `refit()`: the scenes' per-tick
+  inset check re-fits when `safeArea.bottom` changes.
+- **The e2e reads every copy on its own** (`__e8.nodeCopies`) and a text's
+  family (`__e8.nodeFontFamily`), in both `main.ts` copies.
