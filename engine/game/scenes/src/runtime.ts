@@ -49,7 +49,7 @@ export interface ScenesConfig {
   mode?: 'contain' | 'cover';
   transition?: string;
   transitionMs?: number;
-  /** Web fonts loaded before the boot GET's `replace` mounts the first document — `scenes1.fonts` in the schema. */
+  /** Web fonts, started alongside the boot GET and awaited before its `replace` mounts the first document — `scenes1.fonts` in the schema. */
   fonts?: { family: string; src: string; weight?: string; style?: string }[];
   /** Tests only; wraps `new FontFace(family, url, descriptors)` otherwise. */
   fontFace?: (
@@ -64,11 +64,11 @@ export interface ScenesConfig {
 }
 
 /**
- * `scenes1.fonts` → real `@font-face`s, loaded and awaited before the boot
- * GET's `replace` mounts the first document — F19's fix: nothing in a
- * composition could load a web font before this, so a game drew in the
- * system sans until it shipped its own `@font-face` + `document.fonts.load`
- * by hand.
+ * `scenes1.fonts` → real `@font-face`s, started alongside the boot GET and
+ * awaited before its `replace` mounts the first document — F19's fix:
+ * nothing in a composition could load a web font before this, so a game
+ * drew in the system sans until it shipped its own `@font-face` +
+ * `document.fonts.load` by hand.
  *
  * `FontFace`/`document.fonts` do not exist in THIS module's own test
  * environment (node) — nor in any non-browser host — so both are optional
@@ -363,15 +363,23 @@ export function apply(ctx: Context, config: ScenesConfig): void {
   // as ready even when the GET then fails; nobody else awaiting it is fine
   // too (the `catch` below keeps a rejection from surfacing as unhandled).
   scenes.ready = (async () => {
-    // `scenes1.fonts` before the GET: a `text` node in the FIRST document
-    // may already name one of these families, so the fonts must have
-    // landed (or failed, one diagnostic each) before `replace` mounts it.
-    await loadFonts(config.fonts ?? [], config, report);
+    // Fonts and the GET start TOGETHER — neither's own round trip should
+    // wait on the other. Only the mount below (`scenes.replace`) waits for
+    // BOTH: a `text` node in the first document may already name one of
+    // these families, so the fonts must have landed (or failed, one
+    // diagnostic each) before `replace` shows it. `loadFonts` never
+    // rejects (see its own doc) — the `catch` here only keeps the error
+    // path below, which never awaits it, from leaving this promise looking
+    // unhandled — same idiom as `scenes.ready.catch` at the end of this
+    // function.
+    const fontsLoaded = loadFonts(config.fonts ?? [], config, report);
+    fontsLoaded.catch(() => {});
     try {
       const res = await fetchFn('/api/scenes');
       if (!res.ok) throw new Error(`the host answered ${res.status}`);
       const body = (await res.json()) as Partial<ScenesResponse>;
       if (!Array.isArray(body.scenes)) throw new Error('the response has no "scenes" array');
+      await fontsLoaded;
       if (!replaced && alive) scenes.replace(body.scenes);
     } catch (error) {
       if (!alive) return;

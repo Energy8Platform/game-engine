@@ -372,7 +372,7 @@ describe('scenes1.fonts', () => {
     return { ctx, app, fiber };
   };
 
-  it('creates each face, adds it, and awaits load() BEFORE the GET replaces the documents', async () => {
+  it('creates each face and adds it right away; the GET starts concurrently, but only `scenes.replace` waits for both', async () => {
     let resolveLoad!: () => void;
     const face = {
       load: vi.fn(() => new Promise<void>((resolve) => { resolveLoad = resolve; })),
@@ -393,13 +393,18 @@ describe('scenes1.fonts', () => {
       style: 'normal',
     });
     expect(add).toHaveBeenCalledWith(face);
-    // Still loading: the GET has not fired, so nothing is mounted yet.
-    expect(fetchFn).not.toHaveBeenCalled();
+    // The GET already started — it does not wait on the (still-pending)
+    // font load. Flush its own fetch/json microtasks (same device the
+    // "a `replace` that lands before the gated /api/scenes fetch resolves
+    // wins over it" test above uses) so it has every chance to finish.
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(fetchFn).toHaveBeenCalled();
+    // ...but nothing is mounted yet: `scenes.replace` still waits on the font.
     expect(ctx.get('scenes')!.docs().has('a')).toBe(false);
 
     resolveLoad();
     await vi.waitFor(() => expect(ctx.get('scenes')!.docs().has('a')).toBe(true));
-    expect(fetchFn).toHaveBeenCalled();
   });
 
   it('a rejected load is one diagnostic naming the src; scenes.ready still settles with the documents mounted', async () => {

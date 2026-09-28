@@ -235,12 +235,27 @@ const styleOf = (props: TextProps, fontFamily: string) => ({
  * it). Called AFTER the style (including `wrap`) is on the view, so a
  * wrapped text is measured by its widest LINE, not the whole string on one
  * line — `t.width` is whatever pixi already laid out.
+ *
+ * A wrapped text also gets `wordWrapWidth` scaled by the SAME factor as
+ * `fontSize`: pixi's wrap boundary does not move with the font, so
+ * shrinking the font alone lets it re-wrap MORE words onto each line at
+ * the old boundary and the width climbs back toward `wrap` instead of
+ * settling at `fitWidth`. Scaling both keeps the authored line breaks and
+ * shrinks the whole block uniformly. Re-measured for up to 3 passes total
+ * — a single proportional guess can under- or overshoot (rounding, a
+ * bitmap font's discrete glyph widths), so one more pass corrects it
+ * instead of leaving the text slightly over.
  */
 function fitText(t: Text, props: TextProps): void {
   if (!(props.fitWidth > 0)) return;
-  const width = t.width; // measured with the full size first
-  if (width <= props.fitWidth) return;
-  t.style.fontSize = Math.max(1, props.size * (props.fitWidth / width));
+  for (let pass = 0; pass < 3; pass++) {
+    const width = t.width; // measured with the current size first
+    if (width <= props.fitWidth) return;
+    const factor = props.fitWidth / width;
+    t.style.fontSize = Math.max(1, t.style.fontSize * factor);
+    // The wrap boundary shrinks WITH the font — see this function's doc.
+    if (t.style.wordWrap) t.style.wordWrapWidth = Math.max(1, t.style.wordWrapWidth * factor);
+  }
 }
 
 /** A pixi `Text` — or a `BitmapText` when `font` names a bitmap font. Both have an `anchor`, so the common anchor props apply to either. */

@@ -178,10 +178,17 @@ describe('fitWidth', () => {
    * real (this file's own header doc comment). `width` is ONE accessor,
    * defined once on `AbstractText.prototype` and shared by `Text` AND
    * `BitmapText` (both extend it) — patching it there covers both classes
-   * with one stub. Modelled proportionally to the font size
-   * (`text.length * fontSize`) because that is the one property `fitText`'s
-   * math leans on: shrink the size by a ratio, and a later read reflects
-   * that same ratio — not a claim about real glyph metrics.
+   * with one stub.
+   *
+   * Modelled as the one-line width (`text.length * fontSize`) — proportional
+   * to the font size, the property `fitText`'s math leans on — CLAMPED to
+   * `wordWrapWidth` once wrapping is on, so a wrapped text's widest line
+   * reads as "pinned near the wrap boundary" rather than the whole string
+   * on one line. That clamp is what makes the wrap+fit test below able to
+   * tell a `fitText` that only shrinks `fontSize` apart from one that also
+   * shrinks `wordWrapWidth`: with the OLD (fontSize-only) shrink, the
+   * boundary stays put and the clamp keeps reporting it — the fix has to
+   * move the boundary too before a re-measure can read anything smaller.
    */
   const abstractTextProto = Object.getPrototypeOf(Text.prototype) as object;
   let originalWidth!: PropertyDescriptor;
@@ -189,8 +196,9 @@ describe('fitWidth', () => {
     originalWidth = Object.getOwnPropertyDescriptor(abstractTextProto, 'width')!;
     Object.defineProperty(abstractTextProto, 'width', {
       configurable: true,
-      get(this: { text: string; style: { fontSize: number } }) {
-        return this.text.length * this.style.fontSize;
+      get(this: { text: string; style: { fontSize: number; wordWrap?: boolean; wordWrapWidth?: number } }) {
+        const oneLine = this.text.length * this.style.fontSize;
+        return this.style.wordWrap ? Math.min(oneLine, this.style.wordWrapWidth ?? oneLine) : oneLine;
       },
     });
   });
@@ -219,15 +227,34 @@ describe('fitWidth', () => {
     view.destroy();
   });
 
-  it('wraps at `wrap` first, then fits the widest line to `fitWidth`', () => {
+  it('wraps at `wrap` first, then fits the widest line to `fitWidth` — scaling `wordWrapWidth` by the SAME factor as `fontSize`', () => {
+    // text.length(50) × size(24) = 1200, one line — but wrapped (`wrap: 80`)
+    // the stub clamps the pre-fit width to the boundary itself: 80. That is
+    // > fitWidth(60), so fitText shrinks by 60/80 = 0.75: fontSize
+    // 24 → 18, wordWrapWidth 80 → 60 — and a re-measure at that smaller
+    // font is STILL clamped to (the now smaller) boundary, 60, which is
+    // exactly `fitWidth`. A fontSize-only shrink would leave the boundary
+    // at 80 and the clamp would keep reporting 80 forever — see the stub's
+    // own doc comment above.
     const view = text.mount(
-      props({ text: 'a'.repeat(5), size: 24, wrap: 80, fitWidth: 60 }),
+      props({ text: 'a'.repeat(50), size: 24, wrap: 80, fitWidth: 60 }),
       null as never,
     ) as Text;
     expect(view.style.wordWrap).toBe(true);
-    expect(view.style.wordWrapWidth).toBe(80);
-    expect(view.style.fontSize).toBeLessThan(24);
+    expect(view.style.fontSize).toBe(18);
+    expect(view.style.wordWrapWidth).toBe(60);
+    expect(view.style.wordWrapWidth / 80).toBeCloseTo(view.style.fontSize / 24, 10);
     expect(view.width).toBeLessThanOrEqual(60);
+    view.destroy();
+  });
+
+  it('a short, already-wrapped text keeps `size` and `wrap` exactly', () => {
+    // Short enough that even wrapped, the one line (2×24=48) never reaches
+    // the 80px boundary — the clamp never engages, so `fitText`'s very
+    // first read is already ≤ 60 and it touches nothing.
+    const view = text.mount(props({ text: 'hi', size: 24, wrap: 80, fitWidth: 60 }), null as never) as Text;
+    expect(view.style.fontSize).toBe(24);
+    expect(view.style.wordWrapWidth).toBe(80);
     view.destroy();
   });
 
@@ -248,5 +275,18 @@ describe('fitWidth', () => {
     expect(view).toBeInstanceOf(BitmapText);
     expect(view.style.fontSize).toBeLessThan(24);
     expect(view.width).toBeLessThanOrEqual(100);
+  });
+
+  it('a BitmapText `update` from a long text back to a short one also restores the full size', () => {
+    const ctx = ctxWith({ 'fonts/hb.fnt': { fontFamily: 'Hellbuddha' } });
+    const p = props({ text: 'a'.repeat(50), font: 'fonts/hb.fnt', size: 24, fitWidth: 100 });
+    const view = text.mount(p, ctx) as BitmapText;
+    expect(view.style.fontSize).toBeLessThan(24);
+    text.update!(
+      view,
+      props({ text: 'hi', font: 'fonts/hb.fnt', size: 24, fitWidth: 100 }),
+      ctx,
+    );
+    expect(view.style.fontSize).toBe(24);
   });
 });
