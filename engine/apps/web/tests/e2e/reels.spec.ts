@@ -20,11 +20,13 @@
  * `yaml.dump`'s own indentation without becoming as long as the parser
  * itself.
  *
- * One field id per assertion (`#field-reels1-cols`,
- * `#field-anticipation1-enabled`, `#field-reels1-frameStyle-idle`) rather
- * than `getByLabelText` — `SchemaForm`'s own doc explains why: `frameStyle`
- * carries the SAME field names (`color`, `alpha`, and a "hex" textbox with
- * no scoping of its own) once for every one of its four states (`idle`,
+ * One field id per assertion (`#field-reels-reels1-cols`,
+ * `#field-reels-anticipation1-enabled`, `#field-reels-reels1-frameStyle-idle`
+ * — the Reels document prefixes its forms' `rowId` with `reels-` so they
+ * never collide with Composition's copy of the same rows) rather than
+ * `getByLabelText` — `SchemaForm`'s own doc explains why: `frameStyle`
+ * carries the SAME field names (`color`, `alpha`, and a `color hex`
+ * textbox) once for every one of its four states (`idle`,
  * `winning`, `removed`, `fresh`), and Anticipation's own `zoom` group
  * repeats `enabled` a second time under a different id — `getByLabelText`
  * would go ambiguous on either. `hot-fork.spec.ts`'s `commit()` helper
@@ -92,6 +94,7 @@ type ReelsSnapshot = {
   rows: number[];
   fitted: { w: number; h: number };
   busy: boolean;
+  symbols: (string | null)[][] | null;
 };
 
 async function openReels(page: Page): Promise<void> {
@@ -104,7 +107,7 @@ async function openReels(page: Page): Promise<void> {
   await expect(page.getByTestId('reels-doc')).toBeVisible();
 }
 
-test('the Reels document edits the reel rows, rebuilds the lab board, spins it, writes a colour as a number and resets a value', async ({
+test('the Reels document edits the reel rows, rebuilds the lab board, spins it, writes a colour as a number, resets a value and paints a start board', async ({
   page,
 }) => {
   await openReels(page);
@@ -119,7 +122,7 @@ test('the Reels document edits the reel rows, rebuilds the lab board, spins it, 
   await expect.poll(snapshot).toMatchObject({ mode: 'reels', cols: 5 });
 
   await test.step('cols to 6 (blur): the patch and the canvas both pick it up', async () => {
-    const cols = page.locator('#field-reels1-cols');
+    const cols = page.locator('#field-reels-reels1-cols');
     await cols.fill('6');
     await cols.blur();
     await expect.poll(() => patchConfig('reels1')?.grid?.cols).toBe(6);
@@ -139,20 +142,20 @@ test('the Reels document edits the reel rows, rebuilds the lab board, spins it, 
     await expect(page.getByTestId('reels-action-scatters')).toBeDisabled();
     // Scoped to the Reels document's own section: Composition (open in the
     // background — the IDE opens it on project open, and it stays mounted
-    // while hidden) draws the SAME row's whole config, unrooted, so its
-    // own `#field-anticipation1-enabled` collides with this one.
+    // while hidden) draws the SAME row's whole config as
+    // `#field-anticipation1-enabled`; this one is `reels-`-prefixed.
     const anticipation = page.getByTestId('reels-section-anticipation');
     // `.click()`, not `.check()`: the write round-trips through the real
     // host before this controlled checkbox's own `checked` reflects it, so
     // `.check()`'s own "did it change" verification fires before the PUT
     // resolves. The button's own state is the thing the brief cares about.
-    await anticipation.locator('#field-anticipation1-enabled').click();
+    await anticipation.locator('#field-reels-anticipation1-enabled').click();
     await expect(page.getByTestId('reels-action-scatters')).toBeEnabled({ timeout: 10_000 });
   });
 
   await test.step('a colour under Grid > frameStyle > idle > color writes a number', async () => {
-    const idle = page.locator('#field-reels1-frameStyle-idle');
-    const hex = idle.getByRole('textbox', { name: 'hex' });
+    const idle = page.locator('#field-reels-reels1-frameStyle-idle');
+    const hex = idle.getByRole('textbox', { name: 'color hex' });
     await hex.fill('#ff0000');
     await hex.blur();
     await expect.poll(() => patchConfig('reels1')?.grid?.frameStyle?.idle?.color).toBe(16711680);
@@ -163,6 +166,19 @@ test('the Reels document edits the reel rows, rebuilds the lab board, spins it, 
     await grid.getByRole('button', { name: 'reset cols' }).click();
     await expect.poll(() => patchConfig('reels1')?.grid?.cols).toBeUndefined();
     await expect.poll(async () => (await snapshot()).cols).toBe(5);
+  });
+
+  await test.step('a painted start board cell reaches the canvas board', async () => {
+    const board = page.getByTestId('reels-section-board');
+    await board.getByTestId('board-cell-0-0').click();
+    // The popup's entries: `empty`, then the project's symbol ids.
+    const pick = board.getByRole('group', { name: 'symbol for reel 0 row 0' }).getByRole('button').nth(1);
+    const id = (await pick.textContent())!.trim();
+    await pick.click();
+    await expect.poll(() => patchConfig('reels1')?.board?.[0]?.[0]).toBe(id);
+    // `reels1` re-applied with that start board: the rebuilt grid's cell
+    // holds the id (a plain id used to seat an empty cell).
+    await expect.poll(async () => (await snapshot()).symbols?.[0]?.[0]).toBe(id);
   });
 
   await test.step('Composition draws reels1 with its real union widgets, not a fallback', async () => {
