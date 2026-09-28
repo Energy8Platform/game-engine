@@ -87,6 +87,29 @@ const session = (frame: Frame) =>
 /** The size the game itself is laid out at — the frame's inside, not its border. */
 const viewport = (frame: Frame) => frame.evaluate(() => [innerWidth, innerHeight]);
 
+/**
+ * The one `sessionStorage` entry `session-host` keeps for the game's dev
+ * wallet (Task 1's `e8:wallet:<gameId>:<balance>:<currency>:<wallet>`), or
+ * `undefined` before any play has landed under the address's current key.
+ */
+const wallet = (frame: Frame) =>
+  frame.evaluate(
+    () => Object.entries(sessionStorage).find(([k]) => k.startsWith('e8:wallet:'))?.[1],
+  );
+/**
+ * Same, scoped to ONE specific `?wallet=` suffix — needed once `↺` has
+ * bumped the address's own wallet number: the OLD key (a different suffix)
+ * may still be sitting in `sessionStorage` from the play before it, and a
+ * plain `wallet()` would find that one instead.
+ */
+const walletUnder = (frame: Frame, suffix: string) =>
+  frame.evaluate(
+    (s) =>
+      Object.entries(sessionStorage).find(([k]) => k.startsWith('e8:wallet:') && k.endsWith(`:${s}`))
+        ?.[1],
+    suffix,
+  );
+
 test('the IDE opens on a screen, and a second screen is one click away', async ({ page }) => {
   const dir = projectCopy();
   const host = await startDevHost(dir);
@@ -205,20 +228,22 @@ test('currency, balance and social reach the game’s own session, and survive a
     await page.goto(`${IDE_URL}#/doc/preview`);
     const before = await previewFrame(page);
     await gameBooted(before);
-    // The control: the dev host's own defaults, before the toolbar says anything.
-    expect(await session(before)).toMatchObject({ balance: 1000, currency: { code: 'USD' } });
+    // The control: the Preview's OWN default (`DEFAULT_PREVIEW_STATE.balance`,
+    // slice 43), before the toolbar says anything — not the dev host's bare
+    // fallback, since the Preview's address always carries a `balance=`.
+    expect(await session(before)).toMatchObject({ balance: 10_000, currency: { code: 'USD' } });
     expect((await session(before)).social).toBeUndefined();
 
     await page.getByTestId('preview-currency').selectOption('EUR');
     await relaunched(page, /[?&]currency=EUR(&|$)/);
-    // The balance commits on Enter (or blur), not per keystroke.
-    await page.getByTestId('preview-balance').fill('250');
-    await page.getByTestId('preview-balance').press('Enter');
-    await relaunched(page, /[?&]balance=250(&|$)/);
+    // A pick commits at once — `preview-balance` is a `<select>` of the
+    // harness's own levels (slice 43), not a free-typed amount.
+    await page.getByTestId('preview-balance').selectOption({ label: '1K' });
+    await relaunched(page, /[?&]balance=1000(&|$)/);
     await page.getByTestId('preview-social').check();
     const after = await relaunched(page, /[?&]social=1(&|$)/);
     expect(await session(after)).toMatchObject({
-      balance: 250,
+      balance: 1000,
       currency: { code: 'EUR' },
       social: true,
     });
@@ -227,14 +252,81 @@ test('currency, balance and social reach the game’s own session, and survive a
     // comes back with the same choice, and the game with the same session.
     await page.reload();
     await expect(page.getByTestId('preview-currency')).toHaveValue('EUR', { timeout: 20_000 });
-    await expect(page.getByTestId('preview-balance')).toHaveValue('250');
+    await expect(page.getByTestId('preview-balance')).toHaveValue('1000');
     await expect(page.getByTestId('preview-social')).toBeChecked();
     const reloaded = await relaunched(page, /[?&]social=1(&|$)/);
     expect(await session(reloaded)).toMatchObject({
-      balance: 250,
+      balance: 1000,
       currency: { code: 'EUR' },
       social: true,
     });
+  } finally {
+    await host.stop();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+/**
+ * `↻` is a RELAUNCH AT THE SAME ADDRESS (`Preview.tsx`'s own doc): a new
+ * frame element, but `previewAddress` unchanged, so `session-host`'s
+ * wallet key (Task 1, `e8:wallet:<gameId>:<balance>:<currency>:<wallet>`)
+ * is unchanged too and the dev wallet survives — even though the iframe
+ * ELEMENT itself is new (a marker attribute proves that, the same way
+ * "Rotate swaps the frame without relaunching it" above proves the
+ * opposite for a resize). `↺` instead bumps the address's own `wallet=<n>`
+ * (Task 1's last key segment) WITHOUT touching `balance`/`currency` — a
+ * fresh key, so the wallet starts over at the seed, and nothing is stored
+ * under it until the next play.
+ */
+test('↻ relaunches the game at the same address and keeps its wallet; ↺ bumps the address and starts over', async ({
+  page,
+}) => {
+  const dir = projectCopy();
+  const host = await startDevHost(dir);
+  try {
+    await page.goto(host.gameUrl);
+    await gameBooted(page);
+    await page.goto(`${IDE_URL}#/doc/preview`);
+    const frame1 = await previewFrame(page);
+    await gameBooted(frame1);
+    const srcBefore = await page.locator(PREVIEW).getAttribute('src');
+
+    await frame1.evaluate(() => (window as any).__e8.spin());
+    const postSpin = await wallet(frame1);
+    // Differs from the seed, or a refresh that silently dropped the whole
+    // wallet could still pass by coincidence.
+    expect(postSpin).toBeDefined();
+    expect(Number(postSpin)).not.toBe(10_000);
+
+    // ↻: a genuinely NEW frame element (a plain `src` reassignment on the
+    // same node would have kept this marker) at the SAME address, and the
+    // wallet it finds there is the one the spin just wrote.
+    await page.locator(PREVIEW).evaluate((el) => el.setAttribute('data-e8-marker', 'pre-refresh-1'));
+    await page.getByTestId('preview-refresh').click();
+    await expect(page.locator(PREVIEW)).not.toHaveAttribute('data-e8-marker', 'pre-refresh-1');
+    expect(await page.locator(PREVIEW).getAttribute('src')).toBe(srcBefore);
+    const frame2 = await previewFrame(page);
+    await gameBooted(frame2);
+    expect(await wallet(frame2)).toBe(postSpin);
+
+    // A second ↻ is no different — nothing about the wallet is tied to how
+    // many times the button has been pressed.
+    await page.locator(PREVIEW).evaluate((el) => el.setAttribute('data-e8-marker', 'pre-refresh-2'));
+    await page.getByTestId('preview-refresh').click();
+    await expect(page.locator(PREVIEW)).not.toHaveAttribute('data-e8-marker', 'pre-refresh-2');
+    const frame3 = await previewFrame(page);
+    await gameBooted(frame3);
+    expect(await wallet(frame3)).toBe(postSpin);
+
+    // ↺: the address's `wallet=` bumps by one — a fresh key nothing has
+    // written to yet, and the session's own SEED (never the running
+    // wallet total) is what `__e8.session().balance` always answers.
+    const walletBefore = new URL(srcBefore!).searchParams.get('wallet');
+    const nextWallet = String(Number(walletBefore) + 1);
+    await page.getByTestId('preview-balance-reset').click();
+    const frame4 = await relaunched(page, new RegExp(`[?&]wallet=${nextWallet}(&|$)`));
+    expect(await walletUnder(frame4, nextWallet)).toBeUndefined();
+    expect((await session(frame4)).balance).toBe(10_000);
   } finally {
     await host.stop();
     rmSync(dir, { recursive: true, force: true });

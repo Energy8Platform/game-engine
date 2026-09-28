@@ -32,7 +32,7 @@
  * would go ambiguous on either. `hot-fork.spec.ts`'s `commit()` helper
  * reads a game row's field the same way, one level shallower.
  */
-import { readFileSync, rmSync } from 'node:fs';
+import { readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { load } from 'js-yaml';
 import { expect, test, type Frame, type Page } from '@playwright/test';
@@ -45,15 +45,27 @@ const REELS_CANVAS = 'iframe[title="reels canvas"]';
 let dir: string;
 let host: DevHost;
 
-test.beforeEach(async () => {
+test.beforeEach(() => {
   dir = projectCopy();
-  host = await startDevHost(dir);
 });
 
 test.afterEach(async () => {
   if (host) await host.stop();
   if (dir) rmSync(dir, { recursive: true, force: true });
 });
+
+/**
+ * Starts the host over `dir` — split out of `beforeEach` (Task 6) so a test
+ * may edit the project's files first, the way `declared.spec.ts`'s inline
+ * edits do. Needed here because `startDevHost` boots vite over `dir`
+ * straight away and hands it every row to pre-bundle in the background
+ * (`project-fixture.ts`'s own doc on `startDevHost`); an edit to
+ * `src/editor.ts` made only AFTER that has started risks the canvas iframe
+ * being served the version vite already read, not the one the test wrote.
+ */
+async function boot(): Promise<void> {
+  host = await startDevHost(dir);
+}
 
 /** `e8.patch.yml`, parsed — the config object a patch row currently carries, or `undefined` for a row the patch does not mention at all yet. */
 function patchConfig(id: string): Record<string, any> | undefined {
@@ -111,6 +123,7 @@ async function openReels(page: Page): Promise<void> {
 test('the Reels document edits the reel rows, rebuilds the lab board, spins it, writes a colour as a number, resets a value and paints a start board', async ({
   page,
 }) => {
+  await boot();
   await openReels(page);
 
   // `e8-base` composes all five reel rows, so every section draws.
@@ -218,4 +231,67 @@ test('the Reels document edits the reel rows, rebuilds the lab board, spins it, 
     await expect(colGapField.getByRole('radio', { name: 'per reel' })).toBeVisible();
     await expect(row).not.toContainText('unsupported (union)');
   });
+});
+
+/**
+ * `first-slot`'s OWN `src/editor.ts`, before slice 43 (Task 5) stopped
+ * parsing the address at all — the exact shape paper-duel's own
+ * `editor.ts` never got past: it still reads `?scene=`/`?symbol=` off
+ * `location.search` and passes them (plus `parentOrigin`) to `sceneEdit`
+ * explicitly, but it never knew `reels` was a thing, so it never reads or
+ * forwards `?reels=` either way.
+ */
+const PRE_SLICE_43_EDITOR_TS = `import { createGame } from '@energy8engine/game-runtime';
+import * as sceneEdit from '@energy8engine/scene-edit';
+
+const params = new URLSearchParams(location.search);
+const safeBottom = Number(params.get('safeBottom') ?? 0) || 0;
+const game = await createGame({
+  mount: document.getElementById('mount')!,
+  without: ['ui.shell'],
+  provide: { safeArea: { top: 0, right: 0, bottom: safeBottom, left: 0 }, editorPage: true },
+});
+const parentOrigin = document.referrer ? new URL(document.referrer).origin : '*';
+await game.ctx.plugin(sceneEdit, {
+  scene: params.get('scene') ?? '',
+  symbol: params.has('symbol') ? params.get('symbol')! : undefined,
+  parentOrigin,
+});
+`;
+
+/**
+ * Task 6: a project whose `editor.ts` never names `reels` at all still
+ * opens the Reels document's canvas in reels mode, because the Reels
+ * document's own iframe addresses it with `editor.html?reels=` regardless
+ * of what the project's `editor.ts` does with that query string
+ * (`ReelsDocument.tsx`), and `scene-edit`'s `pageMode` reads `reels` off
+ * the URL itself whenever the plugin's own config leaves it out
+ * (`config.reels !== undefined ? config.reels : p.has('reels')` — Task 5).
+ * Without that fallback this project's canvas would fall through to plain
+ * scene mode instead (no `reels`/`symbol` in the plugin config, and no
+ * `scene` param on the address either), whose `snapshot()` carries no
+ * `mode` field at all — so the first assertion below is exactly the one a
+ * regression in Task 5's fallback would turn red.
+ *
+ * `first-slot` composes no `reels1.board`, so the board is EMPTY until
+ * something fills it — this project runs no flow on the editor page
+ * (`editorPage: true`), so the only thing that ever will is Task 4's
+ * `fillIfEmpty`, and it does so at once, before any lab action.
+ */
+test('a project whose editor page passes no reels mode still shows a filled board, no Spin needed', async ({
+  page,
+}) => {
+  writeFileSync(join(dir, 'src', 'editor.ts'), PRE_SLICE_43_EDITOR_TS);
+  await boot();
+  await openReels(page);
+
+  const canvas = await readyCanvas(page, REELS_CANVAS);
+  const snapshot = () => canvas.evaluate(() => (window as any).__e8edit.snapshot() as ReelsSnapshot);
+  await expect.poll(snapshot).toMatchObject({ mode: 'reels', cols: 5 });
+  // Every cell, not merely some — `randomBoard` (Task 4's fill) never
+  // leaves a gap, and this is the fill, not a lab `spin()` this test never
+  // presses.
+  await expect
+    .poll(async () => (await snapshot()).symbols?.every((col) => col.every((cell) => cell !== null)))
+    .toBe(true);
 });
