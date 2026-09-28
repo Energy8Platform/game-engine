@@ -11,6 +11,7 @@ import {
   KNOWN,
   PREVIEW_URL,
   renderDocument,
+  transfer,
   TWO,
 } from './symbols-harness';
 
@@ -308,6 +309,58 @@ describe('SymbolsDocument', () => {
     });
   });
 
+  // The symbol list and the Explorer share the left sidebar, so a file
+  // from the Explorer is dropped on the canvas, which is on screen beside it.
+  describe('an Explorer drop on the canvas', () => {
+    it('with a symbol selected, sets its selected state to the file', async () => {
+      const { ctx, docs } = await booted();
+      renderDocument(ctx);
+      act(() => ctx.symbols.select({ id: '2', state: 'win' }));
+      fireEvent.drop(screen.getByTestId('symbols-canvas'), transfer('assets/coin.json'));
+      await waitFor(() => expect(docs()).toHaveLength(1));
+      expect(docs()[0].symbols[1].win).toEqual({
+        type: 'spritesheet',
+        props: { sheet: 'assets/coin.json', loop: false },
+      });
+    });
+
+    it('with nothing selected, adds a symbol named from the file', async () => {
+      const { ctx, docs } = await booted();
+      renderDocument(ctx);
+      fireEvent.drop(screen.getByTestId('symbols-canvas'), transfer('assets/9.png'));
+      await waitFor(() => expect(docs()).toHaveLength(1));
+      expect(docs()[0].symbols.at(-1)).toEqual({
+        id: '9',
+        static: { type: 'image', props: { src: 'assets/9.png' } },
+      });
+    });
+
+    it('a refusal shows in the canvas status line', async () => {
+      const { ctx, docs } = await booted();
+      renderDocument(ctx);
+      act(() => ctx.symbols.select({ id: '1', state: 'idle' }));
+      fireEvent.drop(screen.getByTestId('symbols-canvas'), transfer('assets/song.mp3'));
+      await waitFor(() =>
+        expect(screen.getByTestId('symbols-canvas-status')).toHaveTextContent(
+          'no node type for .mp3',
+        ),
+      );
+      expect(docs()).toHaveLength(0);
+    });
+
+    it('a drag that carries no Explorer path is left alone', async () => {
+      const { ctx, docs } = await booted();
+      renderDocument(ctx);
+      const area = screen.getByTestId('symbols-canvas');
+      const other = { dataTransfer: { types: ['Files'], getData: () => '', dropEffect: 'none' } };
+      // `fireEvent` answers `false` only when the handler called `preventDefault`.
+      expect(fireEvent.dragOver(area, other)).toBe(true);
+      expect(fireEvent.drop(area, other)).toBe(true);
+      await act(async () => {});
+      expect(docs()).toHaveLength(0);
+    });
+  });
+
   describe('zoom', () => {
     afterEach(() => {
       try {
@@ -368,7 +421,9 @@ describe('SymbolsDocument', () => {
       expect(help).toHaveTextContent(/static/);
       expect(help).toHaveTextContent(/idle/);
       expect(help).toHaveTextContent(/win/);
-      expect(help).toHaveTextContent(/drop a file/i);
+      expect(help).toHaveTextContent(
+        'Drop a file from the Explorer onto the canvas to set the selected state, or with nothing selected to add a symbol',
+      );
       expect(help).not.toHaveTextContent('symbols.yml');
       expect(screen.queryByTestId('symbols-header')).toBeNull();
     });
@@ -410,7 +465,7 @@ describe('SymbolsDocument', () => {
       renderDocument(ctx);
       act(() => ctx.symbols.select({ id: '2', state: 'win' }));
       expect(await screen.findByTestId('symbols-state-empty')).toHaveTextContent(
-        'no win yet — drop a file on the chip, or Create in Properties',
+        'no win yet — drop a file here, or Create in Properties',
       );
       expect(screen.queryByTestId('symbols-help')).toBeNull();
     });

@@ -1,20 +1,18 @@
 /**
  * Symbols as data, proven in a real browser (Task 9): the Symbols document
- * draws one row per `symbols.yml` id with its state chips; a drop from the
- * Explorer onto a chip sets that state through the game's own node-types
- * report (`assetNodeTypes.pick`), and both the symbol canvas and the
- * running game draw the result.
+ * draws one row per `symbols.yml` id with its state chips; a file dragged
+ * from the Explorer onto the symbol canvas sets the selected state through
+ * the game's own node-types report (`assetNodeTypes.pick`), and both the
+ * symbol canvas and the running game draw the result.
  *
  * Same fixture and idioms as `media.spec.ts`: a private `projectCopy()`
  * served by `startDevHost`, and `frameOf`/`readyCanvas` — generalised here
  * to take any canvas selector, so the same readers work for
  * `iframe[title="scene canvas"]` there and `iframe[title="symbol canvas"]`
- * here. The synthesised Explorer drop is the same manually-built
- * `DataTransfer`/`DragEvent('drop')` dispatch `canvas.spec.ts`'s own
- * Explorer-drop test uses — `Locator.dragTo`'s native HTML5 drag simulation
- * proved unreliable once source and target sit in different React
- * subtrees (measured: no `symbols.yml` write followed), so this file
- * dispatches directly on the target element instead, iframe or not.
+ * here. The Explorer drag is Playwright's own `Locator.dragTo`, a real
+ * pointer drag: the Explorer allows only a `move` effect, so a target
+ * asking for any other refuses the drop — which is what once made this
+ * drag look unreliable (no `symbols.yml` write followed).
  *
  * The last two cases are the symbol-scenes slice's own, and they are about
  * the running game rather than the Symbols tab:
@@ -132,39 +130,25 @@ test('the Symbols tab lists rows 1..6, the win chip of 1 reads spritesheet, and 
   await expect(page.locator('[data-testid^="symbol-ghost-"]')).toHaveCount(0);
 });
 
-test('a drop of coin.json onto a chip sets its state, and the symbol canvas previews it spinning', async ({
+test('a drag of coin.json from the Explorer onto the canvas sets the selected state, and the canvas previews it spinning', async ({
   page,
 }) => {
   await reportNodeTypes(page);
   await openSymbols(page);
-
-  // `#/doc/symbols` is a deep link, and the Symbols document declares its
-  // OWN left sidebar (the symbol list, `sidebar-symbols`) — a document
-  // already named by the address gets no Explorer default laid over it
-  // (`App.tsx`'s `decide()`), so a press is what picks Explorer as the
-  // override shown here. This is only a readiness gate — the file backing
-  // the synthetic drop below actually has to exist on the host first — not
-  // a need for Explorer's OWN row to stay on screen for the drop itself
-  // (the drop is dispatched by path, not by dragging that row); a second
-  // press clears the override and brings the symbol list (and its chips)
-  // back, since the list — not Explorer — is what the chip click needs
-  // visible next. `activity-explorer` opens `sidebar`, not `document`, so
-  // the Symbols document stays mounted underneath either way.
-  await page.getByTestId('activity-explorer').click();
-  await expect(page.getByTestId('explorer-assets/coin.json')).toBeVisible({ timeout: 20_000 });
-  await page.getByTestId('activity-explorer').click();
-  await expect(page.getByTestId('sidebar-symbols')).toBeVisible();
 
   // The canvas boots symbol mode on its own (`editor.html?symbol=`); a chip
   // click is a `symbol` call into it, never a navigation.
   const canvas = await readyCanvas(page, SYMBOL_CANVAS);
   await page.getByTestId('symbol-chip-2-win').click();
 
-  await page.getByTestId('symbol-chip-2-win').evaluate((el) => {
-    const dt = new DataTransfer();
-    dt.setData('text/x-e8-path', 'assets/coin.json');
-    el.dispatchEvent(new DragEvent('drop', { bubbles: true, cancelable: true, dataTransfer: dt }));
-  });
+  // The symbol list and the Explorer share the left sidebar: picking the
+  // Explorer puts it beside the canvas, the selection held meanwhile. The
+  // file is then dragged the way a person drags it — a real pointer drag
+  // from its row onto the canvas, which takes the drop for the selection.
+  await page.getByTestId('activity-explorer').click();
+  const source = page.getByTestId('explorer-assets/coin.json');
+  await expect(source).toBeVisible({ timeout: 20_000 });
+  await source.dragTo(page.getByTestId('symbols-canvas'));
 
   await expect
     .poll(symbolsFile, { timeout: 15_000 })
@@ -189,6 +173,18 @@ test('a drop of coin.json onto a chip sets its state, and the symbol canvas prev
   await page.getByTestId('symbol-replay').click();
   await expect.poll(frameOfSymbol, { intervals: [10], timeout: 5000 }).toBe(0);
   await expect.poll(frameOfSymbol, { timeout: 5000 }).not.toBe(0);
+
+  // The state exists now, so nothing covers the canvas: a drag onto the
+  // iframe's box still reaches the document, and replaces the state.
+  // `force`: what the pointer hits there is the stage behind the iframe,
+  // which Playwright's own target check would otherwise refuse.
+  await expect(page.getByTestId('symbols-state-empty')).toHaveCount(0);
+  await page
+    .getByTestId('explorer-assets/logo.png')
+    .dragTo(page.locator(SYMBOL_CANVAS), { force: true });
+  await expect
+    .poll(symbolsFile, { timeout: 15_000 })
+    .toMatch(/id: '2'[\s\S]*?win:\s+type: image\s+props:\s+src: assets\/logo\.png/);
 });
 
 test('the Symbols canvas shows a symbol large, zooms to 1:1 and 2x, plays a win, explains itself', async ({

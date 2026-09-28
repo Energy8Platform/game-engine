@@ -135,3 +135,19 @@ describe('M3 — the symbols toolbar right group wraps', () => {
     expect(rule).toMatch(/flex-wrap:\s*wrap/);
   });
 });
+
+describe('the Symbols canvas', () => {
+  const css = readFileSync('src/styles.css', 'utf8');
+  const rule = (selector: string) =>
+    new RegExp(`${selector.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\s*{([^}]*)}`).exec(css)?.[1];
+
+  it('pads its own loading / unavailable text', () => {
+    expect(rule('.e8-symbols-canvas > .e8-empty')).toMatch(/padding:\s*16px/);
+  });
+
+  // An Explorer drag over the iframe would land in its document, which
+  // takes no drops; with no pointer events it lands on the stage instead.
+  it('lets a drag through its iframe to the stage', () => {
+    expect(rule('.e8-symbols-stage iframe')).toMatch(/pointer-events:\s*none/);
+  });
+});

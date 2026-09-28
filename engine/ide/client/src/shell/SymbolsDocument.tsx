@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState, type DragEvent } from 'react';
 import type { Context } from 'cordis';
 import { BUILTIN_STATES, stateNode } from '@energy8engine/contracts';
 import { useSymbols } from '../plugins/symbols';
@@ -6,16 +6,23 @@ import { useWorkspace } from '../plugins/workspace';
 import { useGameComposition } from '../plugins/game-composition';
 import { createCanvasRpc, type CanvasRpc } from './canvas-rpc';
 import { CANVAS_SILENT, useCanvasSilence } from './useCanvasSilence';
+import { DROP_TYPE, symbolWrites } from './symbols-writes';
 
 /**
  * The Symbols document: a toolbar + the live canvas filling the pane
  * (`editor.html?symbol=` in `@energy8engine/scene-edit`'s symbol mode,
  * talked to through `canvas-rpc` exactly as `SceneDocument` talks to the
- * scene canvas) and this canvas' own status line — its `ready`-silence or
- * its `error` event, never a write refusal (that status, and the row
- * list itself, is `SymbolsList` now, the tab's `shell.sidebar` entry;
- * this document shares only `ctx.symbols` with it — the doc and the
- * selection).
+ * scene canvas) and this canvas' own status line — its `ready`-silence,
+ * its `error` event, or what a drop onto it answered. The row list is
+ * `SymbolsList`, the tab's `shell.sidebar` entry; this document shares
+ * only `ctx.symbols` with it — the doc and the selection.
+ *
+ * The list and the Explorer share the left sidebar, so a file from the
+ * Explorer (`DROP_TYPE`) is dropped here instead: with a symbol selected
+ * it becomes the selected state, with none a new symbol named by the
+ * file's stem — `symbolWrites`, the list's own drops. The symbol canvas
+ * takes no pointer input of its own (styles.css), so a drag over it lands
+ * on this document rather than in the iframe.
  *
  * The toolbar shows the picked symbol (`id · name · state`), the board's
  * cell size (read back from the canvas' `snapshot`) and the zoom group
@@ -110,6 +117,27 @@ export function SymbolsDocument({ ctx }: { ctx: Context }) {
       .catch(() => {});
   };
 
+  // A clean write clears what a drop said, never the canvas' own text.
+  const { dropState, dropNew } = symbolWrites(ctx, (line) =>
+    setStatus((current) => line ?? (current === canvasText.current ? current : null)),
+  );
+  const [dropping, setDropping] = useState(false);
+  // No `dropEffect` of its own: the Explorer allows only `move`, and any
+  // other effect would refuse the drop.
+  const onDragOver = (e: DragEvent<HTMLElement>) => {
+    if (!Array.from(e.dataTransfer.types).includes(DROP_TYPE)) return;
+    e.preventDefault();
+    setDropping(true);
+  };
+  const onDrop = (e: DragEvent<HTMLElement>) => {
+    const path = e.dataTransfer.getData(DROP_TYPE);
+    if (!path) return;
+    e.preventDefault();
+    setDropping(false);
+    const sel = ctx.symbols.selected();
+    void (sel ? dropState(sel.id, sel.state, path) : dropNew(path));
+  };
+
   const setZoom = (mode: ZoomMode) => {
     setZoomModeState(mode);
     writeZoomState(mode);
@@ -199,7 +227,15 @@ export function SymbolsDocument({ ctx }: { ctx: Context }) {
 
   return (
     <div className="e8-symbols-doc" data-testid="symbols-doc">
-      <div className="e8-symbols-canvas" data-testid="symbols-canvas">
+      <div
+        className={['e8-symbols-canvas', dropping ? 'e8-drop-target' : '']
+          .filter(Boolean)
+          .join(' ')}
+        data-testid="symbols-canvas"
+        onDragOver={onDragOver}
+        onDragLeave={() => setDropping(false)}
+        onDrop={onDrop}
+      >
         {workspace === null ? (
           <p className="e8-empty">loading…</p>
         ) : previewUrl === null ? (
@@ -277,8 +313,8 @@ export function SymbolsDocument({ ctx }: { ctx: Context }) {
                     </li>
                   </ul>
                   <p>
-                    Drop a file from the Explorer onto a state chip, onto a row (its static), or
-                    below the list (a new symbol). Pick a symbol on the left to see it here.
+                    Drop a file from the Explorer onto the canvas to set the selected state, or with
+                    nothing selected to add a symbol. Pick a symbol on the left to see it here.
                   </p>
                   {doc === null ? (
                     <p>There is no symbols.yml yet — the first symbol you add creates it.</p>
@@ -286,7 +322,7 @@ export function SymbolsDocument({ ctx }: { ctx: Context }) {
                 </div>
               ) : stateMissing ? (
                 <div className="e8-symbols-state-empty" data-testid="symbols-state-empty">
-                  {`no ${selected.state} yet — drop a file on the chip, or Create in Properties`}
+                  {`no ${selected.state} yet — drop a file here, or Create in Properties`}
                 </div>
               ) : null}
             </div>

@@ -1,29 +1,16 @@
 import { useState, type DragEvent, type KeyboardEvent } from 'react';
 import type { Context } from 'cordis';
-import Schema from 'schemastery';
 import {
-  diagnostic,
   stateNode,
   type Diagnostic,
-  type NodeTypeInfo,
   type SymbolDef,
   type SymbolState,
-  type SymbolsDoc,
 } from '@energy8engine/contracts';
-import { extOf } from '../plugins/asset-node-types';
 import { useSymbols } from '../plugins/symbols';
 import { activateOnKey } from './activate';
 import { ExplorerMenu } from './ExplorerMenu';
-import {
-  addState,
-  addSymbol,
-  EMPTY,
-  nodeForDrop,
-  removeSymbol,
-  setState,
-  STATES,
-  statesOf,
-} from './symbols-doc';
+import { addState, addSymbol, removeSymbol, setState, STATES, statesOf } from './symbols-doc';
+import { DROP_TYPE, symbolWrites } from './symbols-writes';
 
 /**
  * The Symbols tab's left sidebar (`shell.sidebar` `symbols`): one row per
@@ -38,24 +25,11 @@ import {
  * (the doc, the selection — a chip/row click here is a `ctx.symbols.select`
  * the document's canvas RPC reacts to).
  *
- * Every write is a REDUCER over the doc, queued through `ctx.symbols.update`
- * (the Flow document's `commit`, moved into the service so `SymbolsProperties`
- * shares the same chain): each reduces `ctx.symbols.doc()` as it stands
- * when its turn comes — `EMPTY` when there is no symbols.yml yet, so the
- * first add creates the file — and PUTs unless nothing changed.
- *
- * A drop from the Explorer (`text/x-e8-path`) onto a chip sets that
- * state, onto a row its `static`, onto the empty area below the list a
- * new symbol named by the file's stem — any non-empty stem is a legal new
- * id (a math emits names as symbol ids too, so a name is first-class
- * here); an empty stem, or a stem already in the doc, is refused in the
- * status line. The node comes from `ctx.assetNodeTypes.pick` (the tree
- * read so a sibling rule can see what sits beside the file): its type,
- * the prop it put the path in, and — for `win` on a type whose schema has
- * `loop` — `loop: false`.
+ * Every write goes through `symbolWrites` (`symbols-writes.ts`), the chain
+ * the Symbols canvas writes through too. A file dropped (`DROP_TYPE`) onto
+ * a chip sets that state, onto a row its `static`, onto the empty area
+ * below the list a new symbol named by the file's stem.
  */
-type Reduce = (doc: SymbolsDoc) => SymbolsDoc;
-const DROP_TYPE = 'text/x-e8-path';
 const SEVERITY = { error: 2, warning: 1, info: 0 } as const;
 
 /** The worst severity among the diagnostics under `where` (itself or a path below it), or `undefined`. */
@@ -68,25 +42,6 @@ function worst(diagnostics: readonly Diagnostic[], where: string): string | unde
   return top?.severity;
 }
 
-/** Whether the type's props schema has a `loop` field — what a `win` turns off. */
-function hasLoop(info: NodeTypeInfo | undefined): boolean {
-  if (!info) return false;
-  try {
-    const schema = new Schema(info.schema as never) as unknown as {
-      dict?: Record<string, unknown>;
-    };
-    return 'loop' in (schema.dict ?? {});
-  } catch {
-    return false;
-  }
-}
-
-const stemOf = (path: string) => {
-  const base = path.slice(path.lastIndexOf('/') + 1);
-  const dot = base.lastIndexOf('.');
-  return dot > 0 ? base.slice(0, dot) : base;
-};
-
 export function SymbolsList({ ctx }: { ctx: Context }) {
   const { doc, known, diagnostics, selected } = useSymbols(ctx);
   const symbols = doc?.symbols ?? [];
@@ -95,13 +50,8 @@ export function SymbolsList({ ctx }: { ctx: Context }) {
   const [menu, setMenu] = useState<{ x: number; y: number; def: SymbolDef } | null>(null);
   const [dropTarget, setDropTarget] = useState<string | null>(null);
 
-  const commit = (reduce: Reduce) =>
-    ctx.symbols.update(reduce).then((answer) => {
-      setStatus(answer[0] ? `${answer[0].where} — ${answer[0].message}` : null);
-      return answer.length === 0;
-    });
+  const { commit, has, dropState, dropNew } = symbolWrites(ctx, setStatus);
 
-  const has = (id: string) => (ctx.symbols.doc() ?? EMPTY).symbols.some((s) => s.id === id);
   /** `false` when the id is already there — the status says so and the caller keeps what it typed. */
   const add = (id: string, name?: string) => {
     if (has(id)) {
@@ -117,53 +67,14 @@ export function SymbolsList({ ctx }: { ctx: Context }) {
     void commit((d) => removeSymbol(d, id));
   };
 
-  /** The dropped file as a node, or `undefined` (refused in the status line and reported). */
-  const pickNode = async (path: string, state: SymbolState) => {
-    const tree = await ctx.files.tree();
-    for (const diag of tree.diagnostics) ctx.connection.report(diag);
-    // A tree that could not be read whole says nothing about what is beside the file.
-    const def = ctx.assetNodeTypes.pick(path, tree.diagnostics.length ? undefined : tree.entries);
-    if (!def) {
-      const ext = extOf(path);
-      const warn = diagnostic(
-        'warning',
-        'symbols',
-        path,
-        ext ? `no node type for .${ext}` : `no node type for "${path}"`,
-        'the game has not reported its node types yet (is the preview running?)',
-      );
-      ctx.connection.report(warn);
-      setStatus(warn.message);
-      return undefined;
-    }
-    const { type, props } = def.node(path, { x: 0, y: 0 });
-    const prop = Object.keys(props).find((k) => props[k] === path) ?? 'src';
-    const info = ctx.scenes.nodeTypes().find((t) => t.type === type);
-    return nodeForDrop({ type, prop, hasLoop: hasLoop(info) }, path, state);
-  };
-
-  const dropState = async (id: string, state: SymbolState, path: string) => {
-    const node = await pickNode(path, state);
-    if (node) void commit((d) => setState(d, id, state, node));
-  };
-
-  const dropNew = async (path: string) => {
-    const stem = stemOf(path);
-    if (!stem) return setStatus('drop onto a symbol');
-    if (has(stem)) return setStatus(`"${stem}" is already a symbol`);
-    const node = await pickNode(path, 'static');
-    if (!node) return;
-    const k = known.find((k) => k.id === stem);
-    void commit((d) => setState(addSymbol(d, stem, k?.name), stem, 'static', node));
-  };
-
   const isPath = (e: DragEvent<HTMLElement>) =>
     Array.from(e.dataTransfer.types).includes(DROP_TYPE);
+  // No `dropEffect` of its own: the Explorer allows only `move`, and any
+  // other effect would refuse the drop.
   const onDragOver = (target: string) => (e: DragEvent<HTMLElement>) => {
     if (!isPath(e)) return;
     e.preventDefault();
     e.stopPropagation();
-    e.dataTransfer.dropEffect = 'copy';
     if (dropTarget !== target) setDropTarget(target);
   };
   const onDrop = (handle: (path: string) => void) => (e: DragEvent<HTMLElement>) => {

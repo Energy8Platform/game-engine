@@ -1662,6 +1662,9 @@ input[type='radio'] {
   flex: 1 1 auto;
   min-height: 0;
 }
+.e8-symbols-canvas > .e8-empty {
+  padding: 16px;
+}
 .e8-symbols-toolbar {
   display: flex;
   align-items: center;
@@ -1728,12 +1731,16 @@ input[type='radio'] {
   min-height: 0;
   background: var(--e8-shell-bg);
 }
+/* The symbol canvas takes no input of its own; without pointer events a
+   file dragged over it from the Explorer lands on the stage, where
+   `SymbolsDocument` takes the drop. */
 .e8-symbols-stage iframe {
   display: block;
   width: 100%;
   height: 100%;
   border: 0;
   background: var(--e8-editor-bg);
+  pointer-events: none;
 }
 .e8-symbols-help,
 .e8-symbols-state-empty {
