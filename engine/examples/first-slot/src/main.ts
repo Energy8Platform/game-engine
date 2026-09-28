@@ -822,6 +822,22 @@ let nextViewId = 0;
     const v = s?.view?.({ scene, node });
     return v && typeof v.text === 'string' ? v.text : null;
   },
+  /**
+   * A mounted top-level scene node's `style.fontFamily` — what a `text`
+   * node's `Text`/`BitmapText` view resolved its `family`/`font` prop to
+   * (`nodeText`'s companion: that reads the string it shows, this reads
+   * the face it shows it in — round7's `scenes1.fonts` proof needs both).
+   * `null` when there is no such node, or its view has no `.style.
+   * fontFamily` string at all (anything but a `text` node).
+   */
+  nodeFontFamily(scene: string, node: string): string | null {
+    const s = ctx.reflect.get('scenes', false) as
+      | { view?(ref: { scene: string; node: string }): { style?: { fontFamily?: unknown } } | undefined }
+      | undefined;
+    const v = s?.view?.({ scene, node });
+    const family = v?.style?.fontFamily;
+    return typeof family === 'string' ? family : null;
+  },
   /** A mounted top-level scene node's `x`/`y`/`alpha`/`width`/`height`/`tint`, off the same `scenes.view` `nodeVisible` reads `visible` from; `null` when there is no such node. */
   nodeProps(
     scene: string,
