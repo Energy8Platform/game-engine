@@ -50,9 +50,9 @@ function fakeFetch(opts: { session?: () => unknown; spin?: (body: Record<string,
   }) as unknown as typeof fetch;
 }
 
-async function boot(fetchFn: typeof fetch): Promise<Context> {
+async function boot(fetchFn: typeof fetch, search?: string): Promise<Context> {
   const ctx = new Context();
-  await ctx.plugin(sessionHost, { fetchFn });
+  await ctx.plugin(sessionHost, { fetchFn, search });
   return ctx;
 }
 
@@ -246,6 +246,10 @@ describe('session-host — the page query reaches /api/session', () => {
     expect(sessionQuery('?game=preview')).toBe('');
   });
 
+  it('does not forward wallet — the host is never told the Preview’s wallet number', () => {
+    expect(sessionQuery('?wallet=3&balance=7')).toBe('?balance=7');
+  });
+
   it('fetches /api/session with the forwarded query', async () => {
     const urls: string[] = [];
     const recording = (fetchFn: typeof fetch): typeof fetch =>
@@ -359,6 +363,30 @@ describe('session-host — the wallet survives a reload', () => {
     const { result: r2 } = await second.get('session')!.play({ action: 'spin', betLevel: 1 });
     expect(r2!.balance).toBe(51);
     await second.fiber.dispose();
+  });
+
+  it('the address’s ?wallet=<n> is the key’s last segment', async () => {
+    g.sessionStorage = fake;
+    const ctx = await boot(fakeFetch({ session: withGameId }), '?wallet=3');
+    await ctx.get('session')!.play({ action: 'spin', betLevel: 1 });
+    expect(storage.get(`e8:wallet:first-slot:${INIT.balance}:${INIT.currency.code}:3`)).toBe('1001');
+    await ctx.fiber.dispose();
+  });
+
+  it('a picked wallet (?wallet=4) does not find the previous wallet’s (?wallet=3) stored balance', async () => {
+    g.sessionStorage = fake;
+    const key3 = `e8:wallet:first-slot:${INIT.balance}:${INIT.currency.code}:3`;
+    storage.set(key3, '250');
+
+    const same = await boot(fakeFetch({ session: withGameId }), '?wallet=3');
+    const { result: r1 } = await same.get('session')!.play({ action: 'spin', betLevel: 1 });
+    expect(r1!.balance).toBe(251);
+    await same.fiber.dispose();
+
+    const picked = await boot(fakeFetch({ session: withGameId }), '?wallet=4');
+    const { result: r2 } = await picked.get('session')!.play({ action: 'spin', betLevel: 1 });
+    expect(r2!.balance).toBe(1001);
+    await picked.fiber.dispose();
   });
 
   it('no gameId from the host (or no sessionStorage at all): nothing is stored', async () => {

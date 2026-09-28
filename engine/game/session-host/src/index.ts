@@ -42,6 +42,20 @@
  * (a plain reload) still finds its own key and keeps the balance it left
  * off at.
  *
+ * **Why the key's last segment is the Preview's wallet number (slice 43),
+ * carried separately from the seed above.** The Preview's `?wallet=<n>`
+ * is not part of what `GET /api/session` is even asked — `sessionQuery`
+ * forwards none of it, the host never sees it — because it is the Preview
+ * itself, not the seed, that owns it: it is bumped on every balance pick
+ * or `↺`, so the SAME seed can be told to start over without touching
+ * `balance`/`currency` at all. Folding it into this row's own key does
+ * exactly that: a pick changes the number, so the next load finds no
+ * stored value under it and starts fresh at `init.balance`; a refresh
+ * keeps the same address, so the same number finds the same key and keeps
+ * the wallet where it left off. No `wallet` in the address (a shell that
+ * predates the Preview, or any host run outside it) leaves the key exactly
+ * as it was before this paragraph existed.
+ *
  * What an opening play charges is `betLevel × init.actions[req.action]`, not
  * `betLevel` alone — an unpriced action (no `init.actions`, or one that
  * names no entry for it) charges `× 1`, same as before `actions` existed.
@@ -124,12 +138,15 @@ const FALLBACK_INIT: SessionInit = {
  * Keyed on `init.balance`/`init.currency.code` too (see the module doc's
  * "why the key also carries balance/currency"): a new seed from the toolbar
  * starts a fresh wallet under a fresh key; the same toolbar (same seed on
- * reload) keeps finding the old one.
+ * reload) keeps finding the old one. `wallet` — the address's `?wallet=<n>`
+ * — is a further, separate segment (see the module doc's "why the key's
+ * last segment is the Preview's wallet number"): `null` when the address
+ * carries none, which reproduces today's key unchanged.
  */
-function walletStore(gameId: string | undefined, init: SessionInit) {
+function walletStore(gameId: string | undefined, init: SessionInit, wallet: string | null) {
   try {
     if (!gameId || typeof sessionStorage === 'undefined') return undefined;
-    const key = `e8:wallet:${gameId}:${init.balance}:${init.currency.code}`;
+    const key = `e8:wallet:${gameId}:${init.balance}:${init.currency.code}${wallet === null ? '' : `:${wallet}`}`;
     return {
       read(): number | undefined {
         const stored = Number(sessionStorage.getItem(key) ?? NaN);
@@ -178,7 +195,7 @@ export async function apply(ctx: Context, config: SessionHostConfig = {}): Promi
   // The dev wallet (see the module doc). Charged/credited by `play` below;
   // read fresh by the live root's getter on every `$session.balance`. A
   // stored balance (this tab's earlier load) wins over the seed.
-  const store = walletStore(gameId, init);
+  const store = walletStore(gameId, init, new URLSearchParams(search).get('wallet'));
   let balance = store?.read() ?? init.balance;
 
   async function play(req: PlayRequest): Promise<{ result?: SpinResult; diagnostics: Diagnostic[] }> {
