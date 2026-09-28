@@ -968,6 +968,62 @@ describe('reels mode: an empty board is filled at once', () => {
     frame();
     expect(events().filter((e) => e.event === 'error')).toHaveLength(1);
   });
+
+  // Fix round 1, Important (ruled): `busy = true` then `board.spinTo(...)` with no guard — a
+  // SYNCHRONOUS throw out of `spinTo` used to escape to the ticker before `.finally` was ever
+  // attached, leaving `busy` stuck `true` forever and every lab action refused as busy from then
+  // on. `fillIfEmpty` now wraps the step in `try`/`catch`, same as `runStep` guards its own
+  // `await run(...)`. Also covers Fix round 1, Minor: the same failure door reports through
+  // `emit('error', ...)` instead of being swallowed.
+  it("a fill whose spinTo throws synchronously still clears busy (a following spin is not stuck answering busy) and tells the IDE why", async () => {
+    const board = {
+      ...fakeBoard(),
+      config: { grid: { cols: 5, rows: 3 } },
+      grid: emptyGrid,
+      spinTo: vi.fn(() => { throw new Error('reel jam'); }),
+    };
+    const { call, events, ready, frame } = bootReels(board, undefined, fakeSymbolsService(['a', 'b']));
+    await ready();
+    frame();
+    expect(events().filter((e) => e.event === 'error')).toEqual([
+      { event: 'error', payload: { message: "couldn't fill the board: reel jam" } },
+    ]);
+    const res = await call('spin');
+    expect(res.result).not.toEqual({ ok: false, reason: 'busy' });
+  });
+
+  it("a fill whose spinTo rejects — its board still current — tells the IDE why, instead of swallowing the reason", async () => {
+    const board = {
+      ...fakeBoard(),
+      config: { grid: { cols: 5, rows: 3 } },
+      grid: emptyGrid,
+      spinTo: vi.fn(() => Promise.reject(new Error('reel jam'))),
+      skip: vi.fn(),
+    };
+    const { events, ready, frame } = bootReels(board, undefined, fakeSymbolsService(['a', 'b']));
+    await ready();
+    frame();
+    await vi.waitFor(() => expect(events().some((e) => e.event === 'error')).toBe(true));
+    expect(events().filter((e) => e.event === 'error')).toEqual([
+      { event: 'error', payload: { message: "couldn't fill the board: reel jam" } },
+    ]);
+  });
+
+  it("a fill's spinTo rejection after its board was replaced stays silent — no error for a board no longer live", async () => {
+    const { ctx, call, events, ready, frame } = bootReels(undefined, undefined, fakeSymbolsService(['a', 'b']));
+    let rejectSpin!: (e: Error) => void;
+    const spinTo = vi.fn(() => new Promise<void>((_resolve, reject) => { rejectSpin = reject; }));
+    const first = { ...fakeBoard(), config: { grid: { cols: 5, rows: 3 } }, grid: emptyGrid, spinTo, skip: vi.fn() };
+    const disposeFirst = ctx.provide('board', first);
+    await ready();
+    frame();
+    expect(spinTo).toHaveBeenCalledTimes(1);
+    disposeFirst();
+    ctx.provide('board', fakeBoard());
+    rejectSpin(new Error('board destroyed — reels1 was re-applied'));
+    await call('snapshot'); // flushes the rejection's own microtask before we check for an event it must not have raised
+    expect(events().filter((e) => e.event === 'error')).toEqual([]);
+  });
 });
 
 describe('the mode comes from the page address', () => {

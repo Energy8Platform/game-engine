@@ -585,6 +585,16 @@ export function apply(ctx: Context, config: SceneEditConfig): void {
      * seeded (the editor page runs no flow) — gets a random board at once:
      * the lab's own spin, skipped to its end, so the canvas shows reels, not
      * frames. Runs from `layout` (every tick) until the board is judged once.
+     *
+     * Fix round 1: the board step is wrapped in `try`/`catch`, same reason
+     * `runStep` below wraps its own `await run(...)` — a SYNCHRONOUS throw
+     * out of `spinTo`/`skip` (a board fake, or a real board that validates
+     * its input eagerly) must still clear `busy`, or every lab action is
+     * disabled from here on. Either door — a sync throw or the `spinTo`
+     * promise rejecting — reports through the same `fail`, which stays
+     * quiet for a board no longer current (a `reels1` re-apply swapped it
+     * mid-step, same "board replaced" idea `runStep` already has) and
+     * otherwise tells the IDE, instead of swallowing the reason.
      */
     const fillIfEmpty = (board: ReelsBoardLike) => {
       if (busy || seen.has(board)) return;
@@ -597,13 +607,22 @@ export function apply(ctx: Context, config: SceneEditConfig): void {
         return;
       }
       const built = randomBoard(shapeOf(board), symbols, rand);
+      const fail = (e: unknown) => {
+        if (currentBoard() !== board) return; // a rebuild already moved on — nothing to tell
+        emit('error', { message: `couldn't fill the board: ${e instanceof Error ? e.message : String(e)}` });
+      };
       busy = true;
-      const done = board.spinTo({ kind: 'spinTo', board: built });
-      board.skip?.();
-      void done
-        .then(() => { if (currentBoard() === board) last = { board, grid: built }; })
-        .catch(() => {})
-        .finally(() => { busy = false; });
+      try {
+        const done = board.spinTo({ kind: 'spinTo', board: built });
+        board.skip?.();
+        void done
+          .then(() => { if (currentBoard() === board) last = { board, grid: built }; })
+          .catch(fail)
+          .finally(() => { busy = false; });
+      } catch (e) {
+        busy = false;
+        fail(e);
+      }
     };
 
     let mounted: Container | null = null;
