@@ -11,9 +11,10 @@ import { ViewerDocument, extensionOf } from './ViewerDocument';
  * One sidebar view over the project tree, registered on `shell.sidebar` —
  * replacing the two screens (`AssetsScreen`, `CodeScreen`) that each fetched
  * `ctx.files.tree()` and drew their own copy of it. `entries` is fetched
- * once on mount; folding a directory only ever changes which rows this
- * draws — it never re-fetches (see `explorer.test.tsx`'s "one tree() call,
- * not one per fold").
+ * on mount, and again each time the shell picks this sidebar back over
+ * another one (see the effect below) — folding a directory changes only
+ * which rows this draws; it never re-fetches on its own (see
+ * `explorer.test.tsx`'s "one tree() call, not one per fold").
  *
  * Upload and delete are the same rule `AssetsScreen`'s own doc already
  * argues for, carried over whole: the tree on screen only ever shows what
@@ -206,6 +207,30 @@ export function Explorer({ ctx }: { ctx: Context }): JSX.Element {
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [ctx]);
+
+  // A `shell.sidebar` entry shown once stays MOUNTED, just hidden, while
+  // another takes over (Shell's own rule) — so unlike the old per-activity
+  // screens, coming back to Explorer is not a fresh mount, and the fetch
+  // above runs only that first time. `files.ts` pushes no live frame of
+  // its own for a change another part of the app makes (the Scenes
+  // sidebar's "add scene", a symbol import), so without this an already-
+  // shown Explorer would keep drawing the tree as it stood before that
+  // change until a reload. `'explorer'` is the key `App.tsx` registers
+  // this component under; the ref is this component's own memory of
+  // whether IT was the one shown last time this fired, so the refetch
+  // happens only on the hidden→shown edge, never on every shell change
+  // (a panel toggle, another tab's own pick) while Explorer already shows.
+  const wasShown = useRef(ctx.shell.sidebar() === 'explorer');
+  useEffect(
+    () =>
+      ctx.shell.subscribe(() => {
+        const isShown = ctx.shell.sidebar() === 'explorer';
+        if (isShown && !wasShown.current) void refreshTree();
+        wasShown.current = isShown;
+      }),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [ctx],
+  );
 
   // Shared by every verb: the only path that ever changes what `entries`
   // shows, and only ever called once the host has confirmed the change

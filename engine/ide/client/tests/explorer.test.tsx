@@ -339,6 +339,33 @@ describe('Explorer', () => {
     await userEvent.click(screen.getByTestId('explorer-b'));
     expect(calls.filter((u) => u.endsWith('/api/files')).length).toBe(1);
   });
+
+  it('refetches when the shell shows Explorer again, but not on every unrelated shell change while it already shows', async () => {
+    // Explorer is a mount-once `shell.sidebar` entry (Shell's own rule):
+    // another view taking over hides it rather than unmounting it, so the
+    // mount-time fetch above never runs again on its own — and `files.ts`
+    // pushes no live frame for a change made elsewhere (the Scenes
+    // sidebar's own "add scene", say). Without its own refetch on
+    // becoming shown again, a person switching back to Explorer would see
+    // a tree as stale as the moment it first mounted.
+    const { ctx, calls } = await harnessWithCalls(tree(['a.txt']));
+    ctx.shell.showSidebar('explorer'); // already the shown sidebar when Explorer mounts, as at boot
+    render(<Explorer ctx={ctx} />);
+    await screen.findByTestId('explorer-a.txt');
+    expect(calls.filter((u) => u.endsWith('/api/files')).length).toBe(1);
+
+    // An unrelated shell change while Explorer already shows must not
+    // refetch — only the hidden→shown edge does.
+    ctx.shell.setSideRight('scenes', true);
+    expect(calls.filter((u) => u.endsWith('/api/files')).length).toBe(1);
+
+    ctx.files.nextTree(tree(['a.txt', 'b.txt']));
+    ctx.shell.showSidebar('scenes'); // Explorer hidden, still mounted
+    expect(calls.filter((u) => u.endsWith('/api/files')).length).toBe(1);
+    ctx.shell.showSidebar('explorer'); // shown again
+    expect(await screen.findByTestId('explorer-b.txt')).toBeTruthy();
+    expect(calls.filter((u) => u.endsWith('/api/files')).length).toBe(2);
+  });
 });
 
 describe('Explorer — verbs', () => {
