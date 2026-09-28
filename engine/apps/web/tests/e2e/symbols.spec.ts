@@ -138,15 +138,22 @@ test('a drop of coin.json onto a chip sets its state, and the symbol canvas prev
   await reportNodeTypes(page);
   await openSymbols(page);
 
-  // The Explorer sidebar opens on its own once the workspace's boot GET
-  // resolves and finds a project active (`App.tsx`'s `decide()`) — a
-  // `shell.sidebar` default, independent of the main document panel
-  // (`explorer` opens `sidebar`, not `document`, so the Symbols document
-  // stays mounted throughout). No click needed, and clicking
-  // `activity-explorer` here would be a TOGGLE off whatever the default
-  // already opened — `explorer.spec.ts`'s own `beforeEach` waits the same
-  // way, with no click either.
+  // `#/doc/symbols` is a deep link, and the Symbols document declares its
+  // OWN left sidebar (the symbol list, `sidebar-symbols`) — a document
+  // already named by the address gets no Explorer default laid over it
+  // (`App.tsx`'s `decide()`), so a press is what picks Explorer as the
+  // override shown here. This is only a readiness gate — the file backing
+  // the synthetic drop below actually has to exist on the host first — not
+  // a need for Explorer's OWN row to stay on screen for the drop itself
+  // (the drop is dispatched by path, not by dragging that row); a second
+  // press clears the override and brings the symbol list (and its chips)
+  // back, since the list — not Explorer — is what the chip click needs
+  // visible next. `activity-explorer` opens `sidebar`, not `document`, so
+  // the Symbols document stays mounted underneath either way.
+  await page.getByTestId('activity-explorer').click();
   await expect(page.getByTestId('explorer-assets/coin.json')).toBeVisible({ timeout: 20_000 });
+  await page.getByTestId('activity-explorer').click();
+  await expect(page.getByTestId('sidebar-symbols')).toBeVisible();
 
   // The canvas boots symbol mode on its own (`editor.html?symbol=`); a chip
   // click is a `symbol` call into it, never a navigation.

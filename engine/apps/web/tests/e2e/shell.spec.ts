@@ -377,6 +377,10 @@ test('the sidebar can be dragged wider, and stays so after a reload', async ({ p
   try {
     await openIde(page, host, '#/doc/preview');
     await expect(page.locator(PREVIEW)).toBeVisible({ timeout: 20_000 });
+    // The Preview declares no `sidebar`, and a deep link straight onto it
+    // lays no default over it — a press is what opens the column this
+    // test drags.
+    await page.getByTestId('activity-explorer').click();
     const sidebar = page.getByTestId('sidebar');
     const before = (await sidebar.boundingBox())!.width;
 
@@ -392,6 +396,9 @@ test('the sidebar can be dragged wider, and stays so after a reload', async ({ p
       .poll(async () => (await sidebar.boundingBox())!.width)
       .toBeCloseTo(before + 150, -1);
     await page.reload();
+    // The reload is the same deep link again, so the press is repeated —
+    // only the WIDTH persists (`localStorage`), not which sidebar is shown.
+    await page.getByTestId('activity-explorer').click();
     await expect(page.getByTestId('sidebar')).toBeVisible();
     expect((await page.getByTestId('sidebar').boundingBox())!.width).toBeCloseTo(before + 150, -1);
   } finally {
