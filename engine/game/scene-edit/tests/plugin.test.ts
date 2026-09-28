@@ -866,6 +866,110 @@ describe('reels mode: lab actions', () => {
   });
 });
 
+describe('reels mode: an empty board is filled at once', () => {
+  /** A 5×3 board whose `grid.getCell` answers a `null` symbol for every cell — `isEmpty`'s "nothing here yet" shape. */
+  const emptyGrid = { getCell: () => ({ data: { symbol: null } }) };
+
+  /** `spinTo` stays pending until `skip()` is called — the fill calls `skip()` synchronously right
+   * after `spinTo`, so this settles the promise on the SAME tick the fill runs, same as the real
+   * board's own skip-to-end would. Use for every fill test except the busy one, which needs the
+   * promise to survive past `skip()` (a manual deferred of its own, see that test below). */
+  function skipSettledBoard() {
+    let resolve!: () => void;
+    const spinTo = vi.fn((_step: unknown) => new Promise<void>((r) => { resolve = r; }));
+    const skip = vi.fn(() => resolve());
+    return { spinTo, skip };
+  }
+
+  it("fills an empty board with a random board of the project's symbols, skipped to its end, so a following win doesn't answer spin first", async () => {
+    const { spinTo, skip } = skipSettledBoard();
+    const board = { ...fakeBoard(), config: { grid: { cols: 5, rows: 3 } }, grid: emptyGrid, spinTo, skip };
+    const { call, ready, frame } = bootReels(board, undefined, fakeSymbolsService(['a', 'b']));
+    await ready();
+    frame();
+    expect(spinTo).toHaveBeenCalledTimes(1);
+    const step = spinTo.mock.calls[0][0] as { kind: string; board: string[][] };
+    expect(step.kind).toBe('spinTo');
+    expect(step.board).toHaveLength(5);
+    for (const col of step.board) {
+      expect(col).toHaveLength(3);
+      for (const cell of col) expect(['a', 'b']).toContain(cell);
+    }
+    expect(skip).toHaveBeenCalledTimes(1);
+    const res = await call('win');
+    expect(res.result).toEqual({ ok: true });
+  });
+
+  it('a board whose cells already hold symbols is left alone — no spinTo', async () => {
+    const board = { ...fakeBoard(), config: { grid: { cols: 2, rows: 2 } }, grid: { getCell: () => ({ data: { symbol: 'a' } }) } };
+    const { ready, frame } = bootReels(board, undefined, fakeSymbolsService(['a', 'b']));
+    await ready();
+    frame();
+    expect(board.spinTo).not.toHaveBeenCalled();
+  });
+
+  it('a lab spin sent while the fill is still awaiting its spinTo answers busy', async () => {
+    // A manual deferred, NOT tied to `skip()`: the fill calls `skip()` synchronously right after
+    // `spinTo`, so a fake that resolves on `skip` (like `skipSettledBoard` above) would already
+    // have cleared `busy` before this test's own `spin` rpc arrives. This one stays pending until
+    // the test itself releases it, below.
+    let releaseSpin!: () => void;
+    const spinTo = vi.fn((_step: unknown) => new Promise<void>((r) => { releaseSpin = r; }));
+    const board = { ...fakeBoard(), config: { grid: { cols: 5, rows: 3 } }, grid: emptyGrid, spinTo, skip: vi.fn() };
+    const { call, ready, frame } = bootReels(board, undefined, fakeSymbolsService(['a', 'b']));
+    await ready();
+    frame();
+    expect(spinTo).toHaveBeenCalledTimes(1);
+    const res = await call('spin');
+    expect(res.result).toEqual({ ok: false, reason: 'busy' });
+    releaseSpin();
+  });
+
+  it('symbols not known yet on the first tick: the fill happens once symbols.yml is read, and only once', async () => {
+    let ids: string[] | null = null;
+    const symbols = { doc: () => (ids === null ? null : { version: 1 as const, symbols: ids.map((id) => ({ id, static: { type: 'box', props: {} } })) }) };
+    const { spinTo, skip } = skipSettledBoard();
+    const board = { ...fakeBoard(), config: { grid: { cols: 5, rows: 3 } }, grid: emptyGrid, spinTo, skip };
+    const { ready, frame } = bootReels(board, undefined, symbols);
+    await ready();
+    frame();
+    expect(spinTo).not.toHaveBeenCalled();
+    ids = ['a', 'b'];
+    frame();
+    expect(spinTo).toHaveBeenCalledTimes(1);
+    frame();
+    expect(spinTo).toHaveBeenCalledTimes(1);
+  });
+
+  it('a rebuilt board (the service answers a new board object, empty) is filled again', async () => {
+    const { ctx, ready, frame } = bootReels(undefined, undefined, fakeSymbolsService(['a', 'b']));
+    const first = { ...fakeBoard(), config: { grid: { cols: 5, rows: 3 } }, grid: emptyGrid, ...skipSettledBoard() };
+    const disposeFirst = ctx.provide('board', first);
+    await ready();
+    frame();
+    expect(first.spinTo).toHaveBeenCalledTimes(1);
+    disposeFirst();
+    const second = { ...fakeBoard(), config: { grid: { cols: 5, rows: 3 } }, grid: emptyGrid, ...skipSettledBoard() };
+    ctx.provide('board', second);
+    frame();
+    expect(second.spinTo).toHaveBeenCalledTimes(1);
+  });
+
+  it('doc() with no symbols at all answers an error, once, and never spins', async () => {
+    const board = { ...fakeBoard(), config: { grid: { cols: 5, rows: 3 } }, grid: emptyGrid };
+    const { events, ready, frame } = bootReels(board, undefined, fakeSymbolsService([]));
+    await ready();
+    frame();
+    expect(board.spinTo).not.toHaveBeenCalled();
+    expect(events().filter((e) => e.event === 'error')).toEqual([
+      { event: 'error', payload: { message: 'the board is empty and the project has no symbols to fill it with' } },
+    ]);
+    frame();
+    frame();
+    expect(events().filter((e) => e.event === 'error')).toHaveLength(1);
+  });
+});
+
 describe('the mode comes from the page address', () => {
   it('reels: present (even empty) means true', () => {
     expect(plugin.pageMode({}, '?reels=', '').reels).toBe(true);

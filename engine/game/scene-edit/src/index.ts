@@ -527,6 +527,8 @@ export function apply(ctx: Context, config: SceneEditConfig): void {
         } | undefined;
       };
       spinTo(step: SpinToStep): Promise<void>;
+      /** Collapses whatever `spinTo`/`revealWins`/`tumble` is mid-flight to its end state at once — the real board's own hurry-up (`@energy8engine/reels`). `fillIfEmpty` calls it right after `spinTo` so an empty board shows landed reels, not a spin in progress. */
+      skip?(opts?: { overlays?: boolean }): void;
       revealWins(step: RevealWinsStep): Promise<void>;
       tumble(step: TumbleStep): Promise<void>;
       symbols?(): string[][];
@@ -541,50 +543,6 @@ export function apply(ctx: Context, config: SceneEditConfig): void {
       return fill?.data?.style?.alpha ?? null;
     };
 
-    let mounted: Container | null = null;
-    const MARGIN = 24;
-    // `bw`/`bh` are the measurement the CURRENT fit was taken from — read by
-    // `snapshot` below. Re-measured only when `view`/`w`/`h` change (a new
-    // mounted view, or a screen resize), never every tick: a spin's
-    // overshoot or a win glow bleeding past the grid changes the SAME
-    // view's `getLocalBounds()` frame to frame, and re-fitting on that
-    // would pulse the box mid-spin. A grid change rebuilds the board (a
-    // `reels1` re-apply), which IS a new `view` — covered below.
-    let laid = { w: -1, h: -1, view: null as Container | null, bw: -1, bh: -1 };
-    const layout = () => {
-      const board = currentBoard();
-      // A destroyed view is as good as none: `getLocalBounds()` on one is
-      // not safe to trust, and it must not linger in `box` either.
-      const view = board && !board.view.destroyed ? board.view : null;
-      if (view !== mounted) {
-        if (mounted && mounted.parent === box) box.removeChild(mounted);
-        mounted = view;
-        if (view) box.addChild(view);
-      }
-      const { width: w, height: h } = app.screen;
-      checker.resize(w, h); // redraws only on a size change
-      if (!view) return;
-      if (laid.w === w && laid.h === h && laid.view === view) return;
-      const b = view.getLocalBounds();
-      laid = { w, h, view, bw: b.width, bh: b.height };
-      const s = Math.min((w - 2 * MARGIN) / b.width, (h - 2 * MARGIN) / b.height);
-      box.scale.set(s);
-      box.position.set(w / 2 - (b.x + b.width / 2) * s, h / 2 - (b.y + b.height / 2) * s);
-    };
-    layout();
-    app.ticker.add(layout);
-    ctx.effect(() => () => {
-      app.ticker.remove(layout);
-      if (mounted?.parent === box) box.removeChild(mounted);
-      box.destroy();
-      checker.destroy();
-      root.visible = true;
-    }, 'scene-edit:reels');
-
-    /** The one `gameRows` method reels mode calls — see `@energy8engine/game-runtime`'s `GameRowsService`; not a dependency of this package either. */
-    interface GameRowsUpdater {
-      update(id: string, config: Record<string, unknown>): Promise<'updated' | 'unknown' | 'failed'>;
-    }
     /**
      * The reel lab's test actions: synthetic spins, scatters, a win and a
      * tumble (`./lab`), built from the project's own symbol ids and played
@@ -612,6 +570,90 @@ export function apply(ctx: Context, config: SceneEditConfig): void {
       const cols = grid?.cols ?? 0;
       return { cols, rows: grid?.rowsPerReel ?? Array.from({ length: cols }, () => grid?.rows ?? 0) };
     };
+
+    /** Boards this mode already looked at for emptiness — a board is filled (or reported) at most once. */
+    const seen = new WeakSet<ReelsBoardLike>();
+    const isEmpty = (board: ReelsBoardLike) => {
+      const { cols, rows } = shapeOf(board);
+      if (!board.grid || cols === 0) return false;
+      for (let c = 0; c < cols; c++)
+        for (let r = 0; r < (rows[c] ?? 0); r++) if (board.grid.getCell(c, r)?.data.symbol) return false;
+      return true;
+    };
+    /**
+     * An empty board — no `reels1.board`, symbols a flow step would have
+     * seeded (the editor page runs no flow) — gets a random board at once:
+     * the lab's own spin, skipped to its end, so the canvas shows reels, not
+     * frames. Runs from `layout` (every tick) until the board is judged once.
+     */
+    const fillIfEmpty = (board: ReelsBoardLike) => {
+      if (busy || seen.has(board)) return;
+      const symbols = symbolIds();
+      if (symbols === undefined) return; // symbols.yml not read yet: judge on a later tick
+      seen.add(board);
+      if (!isEmpty(board)) return;
+      if (symbols.length === 0) {
+        emit('error', { message: 'the board is empty and the project has no symbols to fill it with' });
+        return;
+      }
+      const built = randomBoard(shapeOf(board), symbols, rand);
+      busy = true;
+      const done = board.spinTo({ kind: 'spinTo', board: built });
+      board.skip?.();
+      void done
+        .then(() => { if (currentBoard() === board) last = { board, grid: built }; })
+        .catch(() => {})
+        .finally(() => { busy = false; });
+    };
+
+    let mounted: Container | null = null;
+    const MARGIN = 24;
+    // `bw`/`bh` are the measurement the CURRENT fit was taken from — read by
+    // `snapshot` below. Re-measured only when `view`/`w`/`h` change (a new
+    // mounted view, or a screen resize), never every tick: a spin's
+    // overshoot or a win glow bleeding past the grid changes the SAME
+    // view's `getLocalBounds()` frame to frame, and re-fitting on that
+    // would pulse the box mid-spin. A grid change rebuilds the board (a
+    // `reels1` re-apply), which IS a new `view` — covered below.
+    let laid = { w: -1, h: -1, view: null as Container | null, bw: -1, bh: -1 };
+    const layout = () => {
+      const board = currentBoard();
+      // A destroyed view is as good as none: `getLocalBounds()` on one is
+      // not safe to trust, and it must not linger in `box` either.
+      const view = board && !board.view.destroyed ? board.view : null;
+      if (view !== mounted) {
+        if (mounted && mounted.parent === box) box.removeChild(mounted);
+        mounted = view;
+        if (view) box.addChild(view);
+      }
+      const { width: w, height: h } = app.screen;
+      checker.resize(w, h); // redraws only on a size change
+      if (!view) return;
+      if (!(laid.w === w && laid.h === h && laid.view === view)) {
+        const b = view.getLocalBounds();
+        laid = { w, h, view, bw: b.width, bh: b.height };
+        const s = Math.min((w - 2 * MARGIN) / b.width, (h - 2 * MARGIN) / b.height);
+        box.scale.set(s);
+        box.position.set(w / 2 - (b.x + b.width / 2) * s, h / 2 - (b.y + b.height / 2) * s);
+      }
+      // Every tick, once the fit above (if any) has had its say — an empty
+      // board (no flow ran to seed it) is filled at once; see `fillIfEmpty`.
+      if (board) fillIfEmpty(board);
+    };
+    layout();
+    app.ticker.add(layout);
+    ctx.effect(() => () => {
+      app.ticker.remove(layout);
+      if (mounted?.parent === box) box.removeChild(mounted);
+      box.destroy();
+      checker.destroy();
+      root.visible = true;
+    }, 'scene-edit:reels');
+
+    /** The one `gameRows` method reels mode calls — see `@energy8engine/game-runtime`'s `GameRowsService`; not a dependency of this package either. */
+    interface GameRowsUpdater {
+      update(id: string, config: Record<string, unknown>): Promise<'updated' | 'unknown' | 'failed'>;
+    }
 
     /**
      * One lab action end to end: refuses a second one while `busy`, then
