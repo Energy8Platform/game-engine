@@ -307,6 +307,17 @@ describe('session-host — the wallet survives a reload', () => {
     await ctx.fiber.dispose();
   });
 
+  it('the provided init carries the stored balance; the wallet stays keyed on the seed', async () => {
+    g.sessionStorage = fake;
+    storage.set(`e8:wallet:first-slot:${INIT.balance}:${INIT.currency.code}`, '250');
+    const ctx = await boot(fakeFetch({ session: withGameId }));
+    expect(ctx.get('session')!.init).toEqual({ ...INIT, balance: 250 });
+    await ctx.get('session')!.play({ action: 'spin', betLevel: 1 });
+    expect(storage.get(`e8:wallet:first-slot:${INIT.balance}:${INIT.currency.code}`)).toBe('251');
+    expect(storage.has(`e8:wallet:first-slot:250:${INIT.currency.code}`)).toBe(false);
+    await ctx.fiber.dispose();
+  });
+
   it('a stored value that is not a number, or another game’s, is ignored', async () => {
     g.sessionStorage = fake;
     storage.set(`e8:wallet:first-slot:${INIT.balance}:${INIT.currency.code}`, 'lots');

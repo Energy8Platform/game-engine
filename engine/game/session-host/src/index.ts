@@ -252,7 +252,10 @@ export async function apply(ctx: Context, config: SessionHostConfig = {}): Promi
     }
   }
 
-  ctx.provide('session', { init, play });
+  // `init.balance` is what the player can spend right now — the stored
+  // wallet after a reload, not the seed. A copy: `init` may be the shared
+  // `FALLBACK_INIT`, and the wallet's key above stays the fetched seed.
+  ctx.provide('session', { init: { ...init, balance }, play });
 
   // The live root (`@energy8engine/flow`'s `provideRoot`) — `$session.…` in
   // any node of any run. `ctx.inject`, not a lenient read at apply time:

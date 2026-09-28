@@ -557,9 +557,10 @@ let nextViewId = 0;
    * What the session provider opened with — `session.init`, a plain copy
    * like `shell()`'s. Under `e8 dev` that is `/api/session`'s answer to the
    * address `session-host` forwarded, so it is where the Preview toolbar's
-   * currency, balance, social and device choices can be read back off the
-   * game itself (the shell's state keeps only the balance). `null` with no
-   * `session` row.
+   * currency, social and device choices can be read back off the game
+   * itself. Its `balance` is the one the game started with: the toolbar's
+   * seed in a fresh wallet, the stored wallet after a reload (the shell's
+   * state keeps the live one). `null` with no `session` row.
    */
   session(): SessionInit | null {
     const session = ctx.reflect.get('session', false) as { init: SessionInit } | undefined;
