@@ -1479,22 +1479,24 @@ input[type='radio'] {
   list-style: none;
 }
 
-/* Flow canvas: the palette (one `.e8-explorer-entry` button per kind) down
-   the left, React Flow filling the rest, the doc's diagnostics under it.
-   A node is a small card; the last run paints it — an accent border for
-   every node the run entered, an accent outline (shadows are `none`
+/* Flow canvas: React Flow filling the pane, the doc's diagnostics under
+   it. A node is a small card; the last run paints it — an accent border
+   for every node the run entered, an accent outline (shadows are `none`
    throughout, see styles.test.ts) on the node the run is at. React Flow's
-   own surfaces read our tokens through its `--xy-*` hooks. */
+   own surfaces read our tokens through its `--xy-*` hooks. The palette
+   (one `.e8-explorer-entry` button per kind) is `FlowPalette`, the tab's
+   left sidebar — it fills that `<aside>` alone, so no divider of its own. */
 .e8-flow-doc {
   height: 100%;
 }
-.e8-flow {
-  display: grid;
-  grid-template-columns: 180px minmax(0, 1fr);
+.e8-flow-main {
+  display: flex;
+  flex-direction: column;
   height: 100%;
+  min-height: 0;
 }
 .e8-flow-palette {
-  border-right: 1px solid var(--e8-border);
+  height: 100%;
   overflow: auto;
 }
 .e8-flow-add {
@@ -1506,11 +1508,6 @@ input[type='radio'] {
   text-align: left;
   padding-left: 8px;
   cursor: grab;
-}
-.e8-flow-main {
-  display: flex;
-  flex-direction: column;
-  min-height: 0;
 }
 .e8-flow-main .e8-canvas-error {
   flex: 0 0 auto;

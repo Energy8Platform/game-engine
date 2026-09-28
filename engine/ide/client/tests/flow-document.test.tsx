@@ -1,7 +1,7 @@
 import { act, fireEvent, screen, waitFor } from '@testing-library/react';
-import userEvent from '@testing-library/user-event';
-import { describe, expect, it, vi } from 'vitest';
+import { describe, expect, it } from 'vitest';
 import type { Diagnostic, FlowDoc } from '@energy8engine/contracts';
+import { KIND_MIME } from '../src/shell/flow-graph';
 import { boot, FIVE, FIVE_KINDS, harness, renderDocument, type Answer } from './flow-harness';
 
 /**
@@ -12,12 +12,25 @@ import { boot, FIVE, FIVE_KINDS, harness, renderDocument, type Answer } from './
  * does in a browser. `tests/setup.ts` stubs the `ResizeObserver` it
  * wants. Waits go through RTL's `waitFor` (act-aware), not vitest's: the
  * writes land from promise chains and timers, outside any event.
+ *
+ * The palette itself (`shell.sidebar` `flow`) is `FlowPalette`, tested in
+ * `flow-palette.test.tsx`; a click-add is driven here through
+ * `ctx.flow.requestAdd`, the same bridge the palette's button uses, so the
+ * tests below that are really about the canvas/write-queue (a refusal, a
+ * write racing an in-flight move) don't need the sidebar mounted too.
  */
 const ready = (doc: FlowDoc = FIVE) => boot({ doc, diagnostics: [], kinds: FIVE_KINDS });
 const accept = (body: unknown) => ({ body: { doc: body, diagnostics: [], kinds: FIVE_KINDS } });
 
 describe('FlowDocument canvas', () => {
-  it('draws every node with its ports, and the palette from kinds()', async () => {
+  it('alone (no sidebar rendered) draws no palette', async () => {
+    const { ctx } = await harness({ 'GET /api/flow': ready() });
+    renderDocument(ctx);
+    await screen.findByTestId('flow-node-spin');
+    expect(screen.queryByTestId('flow-palette')).toBeNull();
+  });
+
+  it('draws every node with its ports', async () => {
     const { ctx } = await harness({ 'GET /api/flow': ready() });
     renderDocument(ctx);
     for (const id of ['start', 'base', 'idle', 'spin', 'draw'])
@@ -34,49 +47,6 @@ describe('FlowDocument canvas', () => {
       screen.getByTestId(`flow-node-${id}`).querySelector('.react-flow__handle.target');
     expect(target('start')).toBeNull();
     for (const id of ['idle', 'spin']) expect(target(id)).toBeTruthy();
-    const palette = screen.getByTestId('flow-palette');
-    expect(palette.querySelectorAll('button')).toHaveLength(FIVE_KINDS.length);
-    expect(screen.getByTestId('flow-add-wait')).toHaveTextContent('wait');
-  });
-
-  it('clicking a palette button PUTs the doc with a new <kind>-<n> node, centred on the pane and stepped per click', async () => {
-    const { ctx, calls } = await harness({
-      'GET /api/flow': ready(),
-      'PUT /api/flow': accept,
-    });
-    renderDocument(ctx);
-    await screen.findByTestId('flow-node-spin');
-    // The pane's own box, mocked the way the drop test controls its
-    // `clientX`/`clientY` — jsdom gives every element a zero rect, so
-    // without this a click and a drop would be indistinguishable.
-    vi.spyOn(screen.getByTestId('flow-canvas'), 'getBoundingClientRect').mockReturnValue({
-      left: 0,
-      top: 0,
-      right: 800,
-      bottom: 600,
-      width: 800,
-      height: 600,
-      x: 0,
-      y: 0,
-      toJSON() {
-        return {};
-      },
-    });
-    await userEvent.setup().click(screen.getByTestId('flow-add-wait'));
-    await waitFor(() => expect(calls.at(-1)?.method).toBe('PUT'));
-    const sent = calls.at(-1)!.body as FlowDoc;
-    expect(sent.nodes).toHaveLength(6);
-    // The pane's centre: 800×600 at (0,0) client, identity viewport.
-    expect(sent.nodes.at(-1)).toEqual({ id: 'wait-1', kind: 'wait', ui: { x: 400, y: 300 } });
-    expect(await screen.findByTestId('flow-node-wait-1')).toBeTruthy();
-
-    // A second click in a row steps by 40 — it does not land on wait-1's
-    // exact spot, and does NOT grow with the doc's own node count (six by
-    // now) the way the old `80 + 40 * n` did.
-    await userEvent.setup().click(screen.getByTestId('flow-add-wait'));
-    await waitFor(() => expect(calls.filter((c) => c.method === 'PUT')).toHaveLength(2));
-    const sent2 = calls.at(-1)!.body as FlowDoc;
-    expect(sent2.nodes.at(-1)).toEqual({ id: 'wait-2', kind: 'wait', ui: { x: 440, y: 340 } });
   });
 
   it('a refused write shows inline as flow-error', async () => {
@@ -93,7 +63,10 @@ describe('FlowDocument canvas', () => {
     renderDocument(ctx);
     await screen.findByTestId('flow-node-spin');
     expect(screen.queryByTestId('flow-error')).toBeNull();
-    await userEvent.setup().click(screen.getByTestId('flow-add-wait'));
+    // `ctx.flow.requestAdd` is the bridge the palette's click goes through
+    // (`shell.sidebar` `flow`, a separate subtree from this document) —
+    // calling it directly exercises the same path without mounting it.
+    act(() => ctx.flow.requestAdd('wait'));
     expect(await screen.findByTestId('flow-error')).toHaveTextContent(refusal.message);
     expect(screen.queryByTestId('flow-node-wait-1')).toBeNull();
   });
@@ -223,8 +196,9 @@ describe('FlowDocument canvas', () => {
       y: 80,
     });
 
-    // Add a node now: it waits its turn behind the move.
-    await userEvent.setup().click(screen.getByTestId('flow-add-wait'));
+    // Add a node now (through the same bridge the palette's click uses):
+    // it waits its turn behind the move.
+    act(() => ctx.flow.requestAdd('wait'));
     expect(calls.filter((c) => c.method === 'PUT')).toHaveLength(1);
     answerMove(accept(calls.at(-1)!.body));
     await waitFor(() => expect(calls.filter((c) => c.method === 'PUT')).toHaveLength(2));
@@ -264,15 +238,16 @@ describe('FlowDocument canvas', () => {
     });
     renderDocument(ctx);
     await screen.findByTestId('flow-node-spin');
-    const data = new Map<string, string>();
+    // The palette lives in a separate subtree now (`shell.sidebar` `flow`,
+    // `flow-palette.test.tsx`); this feeds the canvas' own `onDrop` a
+    // `dataTransfer` carrying exactly what the palette's `dragStart` sets.
+    const data = new Map<string, string>([[KIND_MIME, 'wait']]);
     const dataTransfer = {
       setData: (k: string, v: string) => data.set(k, v),
       getData: (k: string) => data.get(k) ?? '',
       dropEffect: 'none',
       effectAllowed: 'all',
     };
-    fireEvent.dragStart(screen.getByTestId('flow-add-wait'), { dataTransfer });
-    expect(data.get('application/e8-flow-kind')).toBe('wait');
     const canvas = screen.getByTestId('flow-canvas');
     fireEvent.dragOver(canvas, { dataTransfer });
     fireEvent.drop(canvas, { dataTransfer, clientX: 100, clientY: 50 });

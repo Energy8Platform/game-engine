@@ -10,6 +10,7 @@ import {
 } from '@energy8engine/contracts';
 import type { ConnectionConfig } from './connection';
 import { FlowDocument } from '../shell/FlowDocument';
+import { FlowPalette } from '../shell/FlowPalette';
 import { FlowProperties } from '../shell/FlowProperties';
 
 /**
@@ -39,6 +40,14 @@ import { FlowProperties } from '../shell/FlowProperties';
  * selected is what the Flow tab's right sidebar (`sideRight: 'flow'`)
  * has to show; it is independent of the `scenes` and `symbols` ones,
  * each shown beside its own tab.
+ *
+ * `requestAdd`/`onAddRequest` bridge the palette's click-add (`shell.sidebar`
+ * `flow`) to the mounted canvas (`shell.document` `flow`): the two are
+ * separate subtrees under `Shell`, so a click can't reach the canvas'
+ * `screenToFlowPosition`/pane box through props the way it could when both
+ * lived in one component. The document registers its handler while its
+ * canvas is mounted; the palette only ever shows once that document is the
+ * active tab, so a request never arrives with nothing listening.
  */
 declare module 'cordis' {
   interface Context {
@@ -56,6 +65,10 @@ export interface FlowClientService {
   /** `PUT /api/flow`; `[]` on success, the host's refusal (or one transport diagnostic) otherwise. */
   update(doc: FlowDoc): Promise<Diagnostic[]>;
   subscribe(listener: () => void): () => void;
+  /** The palette's click-add: forwarded to the mounted canvas' handler, if any. */
+  requestAdd(kind: string): void;
+  /** Registers the canvas' click-add handler; returns the disposer. */
+  onAddRequest(handler: (kind: string) => void): () => void;
 }
 
 export interface FlowConfig extends ConnectionConfig {
@@ -102,6 +115,8 @@ export function apply(ctx: Context, config: FlowConfig) {
   // GET does not overwrite what is newer than it.
   let docLive = false;
   let kindsLive = false;
+  // The mounted canvas' click-add handler — see the module doc comment.
+  let addHandler: ((kind: string) => void) | null = null;
 
   const notify = () => {
     for (const listener of listeners) listener();
@@ -172,6 +187,15 @@ export function apply(ctx: Context, config: FlowConfig) {
       listeners.add(listener);
       return () => listeners.delete(listener);
     },
+    requestAdd(kind) {
+      addHandler?.(kind);
+    },
+    onAddRequest(handler) {
+      addHandler = handler;
+      return () => {
+        if (addHandler === handler) addHandler = null;
+      };
+    },
   };
 
   void (async () => {
@@ -217,10 +241,28 @@ export function apply(ctx: Context, config: FlowConfig) {
   ctx.effect(
     () =>
       ctx.slots.register(
-        { name: 'shell.document', key: 'flow', title: 'Flow', closable: false, sideRight: 'flow' },
+        {
+          name: 'shell.document',
+          key: 'flow',
+          title: 'Flow',
+          closable: false,
+          sidebar: 'flow',
+          sideRight: 'flow',
+        },
         FlowDocument,
       ),
     'flow:document',
+  );
+
+  ctx.effect(
+    () =>
+      ctx.slots.register(
+        { name: 'shell.sidebar', key: 'flow', title: 'Nodes' },
+        function FlowPaletteView() {
+          return <FlowPalette ctx={ctx} />;
+        },
+      ),
+    'flow:sidebar',
   );
 
   ctx.effect(

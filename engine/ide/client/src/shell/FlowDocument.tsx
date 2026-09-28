@@ -27,6 +27,7 @@ import { useFlow } from '../plugins/flow';
 import {
   addNode,
   connect,
+  KIND_MIME,
   moveNode,
   removeEdges,
   removeNodes,
@@ -48,9 +49,13 @@ import {
  * clicking it would silently overwrite whatever the user has half-written
  * in the file with the one-boot starter doc.
  *
- * With a doc: a palette (one button per registered kind — click adds at
- * the pane's centre, stepped on a small diagonal for consecutive clicks;
- * drag drops where the pointer is) and the React Flow canvas.
+ * With a doc: the React Flow canvas, and — a click away in the tab's left
+ * sidebar, `FlowPalette` (`shell.sidebar` `flow`) — one button per
+ * registered kind: click adds at the pane's centre, stepped on a small
+ * diagonal for consecutive clicks (`addKind`, reached from the palette's
+ * separate subtree through `ctx.flow.requestAdd`/`onAddRequest`); drag
+ * drops where the pointer is (`KIND_MIME` on `dataTransfer`, read back by
+ * `Canvas`'s own `onDrop`).
  * The doc is the source of truth; `flow-graph.ts` projects it and every
  * edit is a reducer over it PUT through `ctx.flow.update`. React Flow
  * still needs its own copy of the nodes (`measured` sizes, drag
@@ -76,7 +81,6 @@ const NEW_FLOW: FlowDoc = {
   nodes: [{ id: 'start', kind: 'boot', ui: { x: 40, y: 80 } }],
   edges: [],
 };
-const KIND_MIME = 'application/e8-flow-kind';
 const MOVE_DEBOUNCE_MS = 250;
 
 function E8NodeView({ data }: NodeProps<E8Node>) {
@@ -118,9 +122,9 @@ interface CanvasProps {
   selected: string | null;
   /** Queues one write; resolves `true` once the host took it. The document shows a refusal. */
   commit: (reduce: Reduce) => Promise<boolean>;
-  /** The pane's own element — the palette's click-add reads its box to centre a new node in it, same as a drag drop already does with the pointer's. */
+  /** The pane's own element — `addKind`'s click-add reads its box to centre a new node in it, same as a drag drop already does with the pointer's. */
   paneRef: RefObject<HTMLDivElement>;
-  /** Hands `screenToFlowPosition` up to the palette, which renders outside this `ReactFlowProvider` subtree. */
+  /** Hands `screenToFlowPosition` up to `FlowDocument`, outside this `ReactFlowProvider` subtree — `addKind` needs it to centre a click-add. */
   onReady: (toFlowPosition: ToFlowPosition) => void;
 }
 
@@ -280,22 +284,38 @@ export function FlowDocument({ ctx }: { ctx: Context }) {
     [ctx],
   );
 
-  // The palette's click-add centres a new node in the pane — the pane's
-  // own box (`paneRef`, attached to `Canvas`'s wrapper div) converted to a
-  // flow position through `screenToFlowPosition` (`toFlowRef`, handed up
-  // by `Canvas` once it mounts inside `ReactFlowProvider` — the palette
-  // renders outside that subtree, so it cannot call `useReactFlow` itself).
-  // `addCount` steps each consecutive click by a small amount so two adds
-  // in a row don't land on the exact same point; it does NOT grow with the
-  // doc's own node count the way the old `80 + 40 * d.nodes.length` did —
-  // that made the Nth add of a large document land further and further
-  // from the pane, eventually off it.
+  // A click-add (`FlowPalette`, `shell.sidebar` `flow` — a separate
+  // subtree, reached through `ctx.flow.requestAdd`) centres the new node
+  // in the pane — the pane's own box (`paneRef`, attached to `Canvas`'s
+  // wrapper div) converted to a flow position through `screenToFlowPosition`
+  // (`toFlowRef`, handed up by `Canvas` once it mounts inside
+  // `ReactFlowProvider` — outside that subtree, so this can't call
+  // `useReactFlow` itself). `addCount` steps each consecutive click by a
+  // small amount so two adds in a row don't land on the exact same point;
+  // it does NOT grow with the doc's own node count the way the old
+  // `80 + 40 * d.nodes.length` did — that made the Nth add of a large
+  // document land further and further from the pane, eventually off it.
   const paneRef = useRef<HTMLDivElement>(null);
   const toFlowRef = useRef<ToFlowPosition | null>(null);
   const addCount = useRef(0);
   const onCanvasReady = useCallback((toFlowPosition: ToFlowPosition) => {
     toFlowRef.current = toFlowPosition;
   }, []);
+  const addKind = useCallback(
+    (kind: string) => {
+      const info = kinds.find((k) => k.kind === kind);
+      if (!info) return;
+      const box = paneRef.current?.getBoundingClientRect();
+      const center =
+        box && toFlowRef.current
+          ? toFlowRef.current({ x: box.left + box.width / 2, y: box.top + box.height / 2 })
+          : { x: 80, y: 80 };
+      const n = addCount.current++;
+      void commit((d) => addNode(d, kind, info, { x: center.x + 40 * n, y: center.y + 40 * n }));
+    },
+    [kinds, commit],
+  );
+  useEffect(() => ctx.flow.onAddRequest(addKind), [ctx, addKind]);
 
   return (
     <div className="e8-explorer e8-flow-doc" data-testid="flow-screen">
@@ -317,68 +337,31 @@ export function FlowDocument({ ctx }: { ctx: Context }) {
           </button>
         </div>
       ) : (
-        <div className="e8-flow">
-          <div className="e8-flow-palette" data-testid="flow-palette">
-            <div className="e8-explorer-header">
-              <span className="e8-explorer-title">nodes</span>
-            </div>
-            {kinds.length === 0 && <p className="e8-empty">no kinds yet — run the game</p>}
-            {kinds.map((info) => (
-              <button
-                key={info.kind}
-                type="button"
-                className="e8-explorer-entry e8-flow-add"
-                data-testid={`flow-add-${info.kind}`}
-                draggable
-                onDragStart={(e) => {
-                  e.dataTransfer.setData(KIND_MIME, info.kind);
-                  e.dataTransfer.effectAllowed = 'move';
-                }}
-                onClick={() => {
-                  const box = paneRef.current?.getBoundingClientRect();
-                  const center =
-                    box && toFlowRef.current
-                      ? toFlowRef.current({
-                          x: box.left + box.width / 2,
-                          y: box.top + box.height / 2,
-                        })
-                      : { x: 80, y: 80 };
-                  const n = addCount.current++;
-                  void commit((d) =>
-                    addNode(d, info.kind, info, { x: center.x + 40 * n, y: center.y + 40 * n }),
-                  );
-                }}
-              >
-                {info.kind}
-              </button>
+        <div className="e8-flow-main">
+          {error && (
+            <p className="e8-explorer-diagnostic e8-canvas-error" data-testid="flow-error">
+              {`${error.where} — ${error.message}`}
+            </p>
+          )}
+          <ReactFlowProvider>
+            <Canvas
+              ctx={ctx}
+              doc={doc}
+              kinds={kinds}
+              trace={trace}
+              selected={selected}
+              commit={commit}
+              paneRef={paneRef}
+              onReady={onCanvasReady}
+            />
+          </ReactFlowProvider>
+          <ul className="e8-explorer-tree" data-testid="flow-diagnostics">
+            {diagnostics.map((d, i) => (
+              <li key={i} className="e8-explorer-diagnostic" data-severity={d.severity}>
+                {`${d.severity}: ${d.where} — ${d.message}`}
+              </li>
             ))}
-          </div>
-          <div className="e8-flow-main">
-            {error && (
-              <p className="e8-explorer-diagnostic e8-canvas-error" data-testid="flow-error">
-                {`${error.where} — ${error.message}`}
-              </p>
-            )}
-            <ReactFlowProvider>
-              <Canvas
-                ctx={ctx}
-                doc={doc}
-                kinds={kinds}
-                trace={trace}
-                selected={selected}
-                commit={commit}
-                paneRef={paneRef}
-                onReady={onCanvasReady}
-              />
-            </ReactFlowProvider>
-            <ul className="e8-explorer-tree" data-testid="flow-diagnostics">
-              {diagnostics.map((d, i) => (
-                <li key={i} className="e8-explorer-diagnostic" data-severity={d.severity}>
-                  {`${d.severity}: ${d.where} — ${d.message}`}
-                </li>
-              ))}
-            </ul>
-          </div>
+          </ul>
         </div>
       )}
     </div>

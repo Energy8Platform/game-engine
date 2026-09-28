@@ -154,3 +154,9 @@ export function renderDocument(ctx: Context) {
   if (!entry) throw new Error('flow did not register a shell.document entry');
   render(<entry.component ctx={ctx} />);
 }
+
+export function renderSidebar(ctx: Context) {
+  const entry = ctx.slots.list('shell.sidebar').find((e) => e.key === 'flow');
+  if (!entry) throw new Error('flow did not register a shell.sidebar entry');
+  render(<entry.component ctx={ctx} />);
+}

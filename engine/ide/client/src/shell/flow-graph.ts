@@ -9,6 +9,9 @@ import type { FlowDoc, FlowEdge, FlowKindInfo, FlowTraceEntry } from '@energy8en
  * these and PUTs the result; nothing here knows about the service.
  */
 
+/** The drag payload a palette kind carries (`FlowPalette`'s `dragStart`); the canvas' `onDrop` reads it back. */
+export const KIND_MIME = 'application/e8-flow-kind';
+
 /** What the `e8` node component reads. */
 export interface E8NodeData extends Record<string, unknown> {
   id: string;
