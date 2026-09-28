@@ -388,7 +388,7 @@ describe('scenes1.fonts', () => {
     });
     await fiber;
 
-    expect(fontFace).toHaveBeenCalledWith('E8Test', 'url(/assets/f.woff2)', {
+    expect(fontFace).toHaveBeenCalledWith('E8Test', 'url("/assets/f.woff2")', {
       weight: 'normal',
       style: 'normal',
     });
@@ -425,6 +425,46 @@ describe('scenes1.fonts', () => {
       expect.objectContaining({ severity: 'warning', plugin: 'scenes', where: 'assets/f.woff2' }),
     );
     expect(ctx.get('scenes')!.docs().has('a')).toBe(true);
+  });
+
+  it('the URL is quoted (a space in the path) and root-relative once (a leading slash or `./` in `src`)', async () => {
+    const fontFace = vi.fn(() => ({ load: async () => {} }));
+    const { fiber } = bootFonts({
+      fetchFn: fetchOk({ scenes: [], diagnostics: [], nodeTypes: [] }),
+      fonts: [
+        { family: 'A', src: 'assets/my font.woff2' },
+        { family: 'B', src: '/assets/b.woff2' },
+        { family: 'C', src: './assets/c.woff2' },
+      ],
+      fontFace,
+      fontSet: { add: vi.fn() },
+    });
+    await fiber;
+    expect(fontFace.mock.calls.map((c) => (c as unknown[])[1])).toEqual([
+      'url("/assets/my font.woff2")',
+      'url("/assets/b.woff2")',
+      'url("/assets/c.woff2")',
+    ]);
+  });
+
+  it('dispose takes every face this apply added back out of the font set', async () => {
+    const faces = [{ load: async () => {} }, { load: async () => {} }];
+    let made = 0;
+    const fontFace = vi.fn(() => faces[made++]!);
+    const del = vi.fn();
+    const { fiber } = bootFonts({
+      fetchFn: fetchOk({ scenes: [], diagnostics: [], nodeTypes: [] }),
+      fonts: [
+        { family: 'A', src: 'assets/a.woff2' },
+        { family: 'B', src: 'assets/b.woff2' },
+      ],
+      fontFace,
+      fontSet: { add: vi.fn(), delete: del },
+    });
+    await fiber;
+    expect(del).not.toHaveBeenCalled();
+    await fiber.dispose();
+    expect(del.mock.calls).toEqual([[faces[0]], [faces[1]]]);
   });
 
   it('`fonts: []` calls no FontFace and does not delay the GET', async () => {

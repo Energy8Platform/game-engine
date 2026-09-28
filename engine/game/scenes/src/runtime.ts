@@ -57,8 +57,8 @@ export interface ScenesConfig {
     url: string,
     descriptors: { weight: string; style: string },
   ) => { load(): Promise<unknown> };
-  /** Tests only; `document.fonts` otherwise. */
-  fontSet?: { add(face: unknown): void };
+  /** Tests only; `document.fonts` otherwise. `delete` (dispose takes the faces back out) is optional for a fake. */
+  fontSet?: { add(face: unknown): void; delete?(face: unknown): unknown };
   /** Tests only; the page's `fetch` otherwise. */
   fetchFn?: typeof fetch;
 }
@@ -79,8 +79,16 @@ export interface ScenesConfig {
  * `Promise.allSettled`, not `Promise.all` — one bad font file must not cost
  * every OTHER font its load, or the boot its mount. A rejection is one
  * diagnostic naming the `src` and keeps going.
+ *
+ * The URL is quoted (a path may hold a space) and root-relative exactly
+ * once — a `src` written `/assets/…` or `./assets/…` must not become
+ * `//assets/…`, a protocol-relative URL to a host named `assets`. The
+ * faces are added synchronously, during `apply`, and taken back out of the
+ * set when the row is disposed: a hot re-apply would otherwise stack
+ * another face per family on every edit.
  */
 async function loadFonts(
+  ctx: Context,
   entries: NonNullable<ScenesConfig['fonts']>,
   config: ScenesConfig,
   report: (d: Diagnostic) => void,
@@ -90,14 +98,19 @@ async function loadFonts(
   const makeFace: NonNullable<ScenesConfig['fontFace']> =
     config.fontFace ?? ((family, url, descriptors) => new GlobalFontFace!(family, url, descriptors));
   const fontSet =
-    config.fontSet ??
-    (globalThis as { document?: { fonts?: { add(face: unknown): void } } }).document?.fonts;
+    config.fontSet ?? (globalThis as { document?: { fonts?: ScenesConfig['fontSet'] } }).document?.fonts;
   if ((!config.fontFace && !GlobalFontFace) || !fontSet) return;
   const faces = entries.map((f) => ({
     entry: f,
-    face: makeFace(f.family, `url(/${f.src})`, { weight: f.weight ?? 'normal', style: f.style ?? 'normal' }),
+    face: makeFace(f.family, `url(${JSON.stringify('/' + f.src.replace(/^\.?\/+/, ''))})`, {
+      weight: f.weight ?? 'normal',
+      style: f.style ?? 'normal',
+    }),
   }));
   for (const { face } of faces) fontSet.add(face);
+  ctx.effect(() => () => {
+    for (const { face } of faces) fontSet.delete?.(face);
+  }, 'scenes:fonts');
   const results = await Promise.allSettled(faces.map(({ face }) => face.load()));
   results.forEach((result, i) => {
     if (result.status !== 'rejected') return;
@@ -372,7 +385,7 @@ export function apply(ctx: Context, config: ScenesConfig): void {
     // path below, which never awaits it, from leaving this promise looking
     // unhandled — same idiom as `scenes.ready.catch` at the end of this
     // function.
-    const fontsLoaded = loadFonts(config.fonts ?? [], config, report);
+    const fontsLoaded = loadFonts(ctx, config.fonts ?? [], config, report);
     fontsLoaded.catch(() => {});
     try {
       const res = await fetchFn('/api/scenes');
