@@ -135,7 +135,10 @@ export function readPreviewState(): PreviewState {
     lang: lang && LANGS.some((l) => l.code === lang) ? lang : d.lang,
     currency: currency && Object.hasOwn(DEV_CURRENCIES, currency) ? currency : d.currency,
     balance: Number.isFinite(n) && isBalanceLevel(n) ? n : d.balance,
-    wallet: Number.isInteger(stored.wallet) && (stored.wallet as number) >= 0 ? (stored.wallet as number) : d.wallet,
+    wallet:
+      Number.isSafeInteger(stored.wallet) && (stored.wallet as number) >= 0
+        ? (stored.wallet as number)
+        : d.wallet,
     social: typeof stored.social === 'boolean' ? stored.social : d.social,
   };
 }

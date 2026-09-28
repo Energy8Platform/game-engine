@@ -160,19 +160,25 @@ describe('readPreviewState', () => {
     }
   });
 
-  it('a stored balance level as a string loads as a number', () => {
+  it('a stored balance level as a string loads as a number (old e8.preview shape: no wallet stored, so wallet defaults to 0)', () => {
     localStorage.setItem('e8.preview', JSON.stringify({ balance: '1000' }));
-    expect(readPreviewState().balance).toBe(1000);
+    const state = readPreviewState();
+    expect(state.balance).toBe(1000);
+    expect(state.wallet).toBe(0);
   });
 
-  it('a stored balance that is not one of the levels falls back to the default', () => {
+  it('a stored balance that is not one of the levels falls back to the default (old shape: wallet defaults to 0)', () => {
     localStorage.setItem('e8.preview', JSON.stringify({ balance: '250' }));
-    expect(readPreviewState().balance).toBe(10_000);
+    const state = readPreviewState();
+    expect(state.balance).toBe(10_000);
+    expect(state.wallet).toBe(0);
   });
 
-  it('a stored empty-string balance falls back to the default', () => {
+  it('a stored empty-string balance falls back to the default (old shape: wallet defaults to 0)', () => {
     localStorage.setItem('e8.preview', JSON.stringify({ balance: '' }));
-    expect(readPreviewState().balance).toBe(10_000);
+    const state = readPreviewState();
+    expect(state.balance).toBe(10_000);
+    expect(state.wallet).toBe(0);
   });
 
   it('a stored balance already a number loads as-is', () => {
@@ -185,7 +191,7 @@ describe('readPreviewState', () => {
     expect(readPreviewState().wallet).toBe(5);
   });
 
-  it.each([-1, 1.5, 'x'])('a stored wallet of %p falls back to 0', (wallet) => {
+  it.each([-1, 1.5, 'x', 1e21])('a stored wallet of %p falls back to 0', (wallet) => {
     localStorage.setItem('e8.preview', JSON.stringify({ wallet }));
     expect(readPreviewState().wallet).toBe(0);
   });
