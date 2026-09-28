@@ -866,6 +866,64 @@ describe('reels mode: lab actions', () => {
   });
 });
 
+describe('the mode comes from the page address', () => {
+  it('reels: present (even empty) means true', () => {
+    expect(plugin.pageMode({}, '?reels=', '').reels).toBe(true);
+  });
+
+  it('symbol: present-but-empty means "picked nothing yet", not scene mode', () => {
+    expect(plugin.pageMode({}, '?symbol=', '').symbol).toBe('');
+  });
+
+  it('symbol: a value carries through', () => {
+    expect(plugin.pageMode({}, '?symbol=a', '').symbol).toBe('a');
+  });
+
+  it('scene: read off the address when nothing else is set; symbol/reels default off', () => {
+    const mode = plugin.pageMode({}, '?scene=s', '');
+    expect(mode).toMatchObject({ scene: 's', symbol: undefined, reels: false });
+  });
+
+  it('Review Focus 3: a config that explicitly carries scene: \'\' / symbol: undefined still reads reels off the address', () => {
+    expect(plugin.pageMode({ scene: '', symbol: undefined }, '?reels=', '').reels).toBe(true);
+  });
+
+  it('a passed value wins over the address, whatever the address says', () => {
+    expect(plugin.pageMode({ reels: false }, '?reels=', '').reels).toBe(false);
+    expect(plugin.pageMode({ scene: 'a' }, '?scene=b', '').scene).toBe('a');
+    expect(plugin.pageMode({ symbol: 'x' }, '?symbol=y', '').symbol).toBe('x');
+  });
+
+  it('parentOrigin: the referrer\'s origin, "*" with no referrer, a passed value wins', () => {
+    expect(plugin.pageMode({}, '', 'http://127.0.0.1:5680/#/doc/reels').parentOrigin).toBe('http://127.0.0.1:5680');
+    expect(plugin.pageMode({}, '', '').parentOrigin).toBe('*');
+    expect(plugin.pageMode({ parentOrigin: 'http://ide' }, '', 'http://elsewhere').parentOrigin).toBe('http://ide');
+  });
+
+  it('through apply: booting with only `search` (no `reels`, no `scene` in config) enters reels mode', async () => {
+    const ctx = new Context();
+    const app = { stage: new Container(), ticker: { add: vi.fn(), remove: vi.fn() }, canvas: document.createElement('canvas'), screen: { width: 480, height: 288 } };
+    ctx.provide('renderer', { app });
+    const nodeTypes = createNodeTypes();
+    ctx.provide('nodeTypes', nodeTypes);
+    const scenes = createScenes({ root: app.stage, design: { width: 960, height: 576 }, nodeTypes, loader, ctx });
+    ctx.provide('scenes', scenes);
+    const posted: Frame[] = [];
+    let listener: ((e: { data: unknown; origin: string }) => void) | undefined;
+    ctx.plugin(plugin, {
+      search: '?reels=',
+      post: (msg: unknown) => posted.push(msg as Frame),
+      listen: (fn) => { listener = fn; return () => { listener = undefined; }; },
+    });
+    await vi.waitFor(() => expect(posted.some((m) => m.type === 'e8:ide:evt' && m.event === 'ready')).toBe(true));
+    const reqId = 1;
+    listener?.({ data: { type: 'e8:ide:req', id: reqId, method: 'snapshot', params: {} }, origin: 'http://ide' });
+    await vi.waitFor(() => expect(posted.some((m) => m.type === 'e8:ide:res' && m.id === reqId)).toBe(true));
+    const res = posted.find((m) => m.type === 'e8:ide:res' && m.id === reqId)!;
+    expect((res.result as { mode: string }).mode).toBe('reels');
+  });
+});
+
 describe('scene-edit plugin', () => {
   it('provides `sceneEdit` — what the scenes runtime reads to swallow its own ui.tap here', async () => {
     const { ctx, fiber } = boot();

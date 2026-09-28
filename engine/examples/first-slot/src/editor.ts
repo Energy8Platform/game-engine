@@ -26,14 +26,6 @@ const game = await createGame({
 (window as unknown as { __e8editor: unknown }).__e8editor = {
   hasShell: () => !!game.ctx.reflect.get('shell', false),
 };
-const parentOrigin = document.referrer ? new URL(document.referrer).origin : '*';
-await game.ctx.plugin(sceneEdit, {
-  scene: params.get('scene') ?? '',
-  // `undefined` (the key left out) means scene mode; `has` vs `get` matters
-  // here because `?symbol=` (no chip picked yet) must still enter symbol
-  // mode with `''`, not fall through to scene mode with `scene: ''`.
-  symbol: params.has('symbol') ? params.get('symbol')! : undefined,
-  // The Reels document's canvas: `editor.html?reels=` shows the project's board alone.
-  reels: params.has('reels'),
-  parentOrigin,
-});
+// scene-edit reads `?scene=`/`?symbol=`/`?reels=` and the parent's origin
+// from this page itself (slice 43) — a project's editor.ts passes nothing.
+await game.ctx.plugin(sceneEdit, {});

@@ -3,11 +3,12 @@
  * a project's own composition (spec §4). Shows one scene, picks and
  * transforms its top-level nodes with the gizmo, draws a grid, and talks
  * to the IDE over the `e8:ide:*` postMessage wire. It never writes a
- * file — the parent is the one writer. With `config.symbol !== undefined`
- * (an id, or `''` for none picked yet) it shows one `symbols.yml` state
- * instead — no scene, no gizmo/grid/keyboard/drop. With `config.reels ===
- * true` it shows the project's reel board alone instead, the same
- * no-scene shape, fitted to the screen.
+ * file — the parent is the one writer. Which mode: `config` first, the
+ * page's own address for whatever `config` leaves out (`pageMode`, slice
+ * 43). With `symbol !== undefined` (an id, or `''` for none picked yet) it
+ * shows one `symbols.yml` state instead — no scene, no
+ * gizmo/grid/keyboard/drop. With `reels === true` it shows the project's
+ * reel board alone instead, the same no-scene shape, fitted to the screen.
  */
 import type { Context } from 'cordis';
 import {
@@ -39,9 +40,18 @@ export const name = 'scene-edit';
 export const inject = ['scenes', 'nodeTypes', 'renderer'];
 
 export interface SceneEditConfig {
-  scene: string;
-  /** Where events go, and the only origin requests are taken from (`'*'` for any). */
-  parentOrigin: string;
+  /**
+   * Scene mode: which document to show. Left out (and `symbol`/`reels` left
+   * out too), read off the page's own `?scene=` (slice 43) — a project's
+   * `editor.ts` need not parse the address at all.
+   */
+  scene?: string;
+  /**
+   * Where events go, and the only origin requests are taken from (`'*'` for
+   * any). Left out, read off the page's own `document.referrer` origin
+   * (`'*'` with no referrer).
+   */
+  parentOrigin?: string;
   /** Tests: the transport; `window.parent.postMessage` / `window`'s `message` otherwise. */
   post?: WireOptions['post'];
   listen?: WireOptions['listen'];
@@ -53,8 +63,10 @@ export interface SceneEditConfig {
    * skipped whenever this is anything other than `undefined` — `''`
    * included, which means "symbol mode, nothing picked yet" (the Symbols
    * document's canvas before any chip is selected) and boots to the
-   * frame only, waiting for the first `symbol` call. `undefined` (the
-   * key left out entirely) is the only value that means scene mode.
+   * frame only, waiting for the first `symbol` call. Left out here, read
+   * off the page's own `?symbol=` (`has` vs `get` — present-but-empty is
+   * still symbol mode); `undefined` from both is the only value that means
+   * scene mode.
    */
   symbol?: string;
   /**
@@ -62,9 +74,29 @@ export interface SceneEditConfig {
    * `scene`, the gizmo, the grid, the keyboard and the drop handler are all
    * skipped, same as symbol mode. Checked BEFORE `symbol` in `apply`
    * (`editor.html?reels=` sets it — the Reels document's canvas; unlike
-   * symbol mode there is no id to pick, one project has one board).
+   * symbol mode there is no id to pick, one project has one board). Left
+   * out here, read off the page's own `?reels=`.
    */
   reels?: boolean;
+  /** Tests only; the page's own `location.search` otherwise. */
+  search?: string;
+  /** Tests only; the page's own `document.referrer` otherwise. */
+  referrer?: string;
+}
+
+/** What the page asks for — the project's config first, the page's own address for whatever it left out (slice 43). */
+export function pageMode(
+  config: Pick<SceneEditConfig, 'scene' | 'symbol' | 'reels' | 'parentOrigin'>,
+  search: string,
+  referrer: string,
+): { scene: string; symbol: string | undefined; reels: boolean; parentOrigin: string } {
+  const p = new URLSearchParams(search);
+  return {
+    scene: config.scene || (p.get('scene') ?? ''),
+    symbol: config.symbol !== undefined ? config.symbol : p.has('symbol') ? p.get('symbol')! : undefined,
+    reels: config.reels !== undefined ? config.reels : p.has('reels'),
+    parentOrigin: config.parentOrigin ?? (referrer ? new URL(referrer).origin : '*'),
+  };
 }
 
 export interface Bounds { x: number; y: number; w: number; h: number }
@@ -167,11 +199,13 @@ export function apply(ctx: Context, config: SceneEditConfig): void {
   // page composes the project's whole bundle, flow row included, so a
   // click to select a node must not advance a `wait { event: ui.tap }`.
   ctx.provide('sceneEdit', true);
-  const { scene } = config;
+  const g = globalThis as { location?: { search?: string }; document?: { referrer?: string } };
+  const mode = pageMode(config, config.search ?? g.location?.search ?? '', config.referrer ?? g.document?.referrer ?? '');
+  const { scene } = mode;
   const { scenes } = ctx;
   const app = ctx.renderer.app;
   const wire = createWire({
-    parentOrigin: config.parentOrigin,
+    parentOrigin: mode.parentOrigin,
     post: config.post ?? ((msg, origin) => window.parent.postMessage(msg, origin)),
     listen: config.listen ?? ((fn) => {
       const on = (e: MessageEvent) => fn(e);
@@ -194,7 +228,7 @@ export function apply(ctx: Context, config: SceneEditConfig): void {
   // Reels mode: the project's board alone, no scene/gizmo/grid/keyboard/drop.
   // Checked before `symbol` — a page never sets both, but the board is the
   // one this canvas exists to show if it somehow did.
-  if (config.reels === true) {
+  if (mode.reels === true) {
     bootReels();
     return;
   }
@@ -205,8 +239,8 @@ export function apply(ctx: Context, config: SceneEditConfig): void {
   // `editor.html?symbol=` (the selection arrives as a `symbol` call), so it
   // must boot symbol mode (frame only, waiting for that first call), not
   // fall through to scene mode with `scene: ''`.
-  if (config.symbol !== undefined) {
-    bootSymbol(config.symbol);
+  if (mode.symbol !== undefined) {
+    bootSymbol(mode.symbol);
     return;
   }
 
@@ -259,7 +293,7 @@ export function apply(ctx: Context, config: SceneEditConfig): void {
   );
 
   /**
-   * `config.symbol` set: no scene document, no gizmo/grid/keyboard/drop — just
+   * `mode.symbol` set: no scene document, no gizmo/grid/keyboard/drop — just
    * one `symbols.yml` state on a checkerboard, framed by the board's own idle
    * cell frame (`@energy8engine/reel-core`'s `SymbolCell` style; 96×96 /
    * `DEFAULT_CELL_FRAME_STYLE` when there is no reel board), centred on the
@@ -434,7 +468,7 @@ export function apply(ctx: Context, config: SceneEditConfig): void {
   }
 
   /**
-   * `config.reels === true`: the project's reel board alone, fitted to the
+   * `mode.reels === true`: the project's reel board alone, fitted to the
    * screen with a margin — same idle-canvas shape as `bootSymbol` (composed
    * game hidden, checkerboard backdrop), but nothing to pick: what shows is
    * whatever the `board` service (the `reels1` row's `ReelsBoard`)
