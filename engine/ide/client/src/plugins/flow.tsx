@@ -35,13 +35,10 @@ import { FlowProperties } from '../shell/FlowProperties';
  * queues while a run is live).
  *
  * `select` is state only: unlike `scenes`, there is no iframe canvas to
- * tell — the canvas reads `selected()` straight off this service.
- *
- * The two inspectors share the right sidebar, so the selections are
- * mutually exclusive: selecting a flow node clears `scenes`' selection,
- * and a `scenes` selection landing while a flow node is selected clears
- * this one. Each side only ever clears the OTHER, and only when its own
- * selection is non-null, so the two never ping-pong.
+ * tell — the canvas reads `selected()` straight off this service. A node
+ * selected is what the Flow tab's right sidebar (`sideRight: 'flow'`)
+ * has to show; it is independent of the `scenes` and `symbols` ones,
+ * each shown beside its own tab.
  */
 declare module 'cordis' {
   interface Context {
@@ -69,7 +66,8 @@ export interface FlowConfig extends ConnectionConfig {
 }
 
 export const name = 'flow';
-// `files` is the inspector's (`FlowProperties`): an `asset` field offers the project's files.
+// `scenes` and `files` are the inspector's (`FlowProperties`): a `scene`
+// field offers the scene ids, an `asset` field the project's files.
 export const inject = ['slots', 'connection', 'shell', 'scenes', 'files'];
 
 /** Entries kept in the trace, most-recent run only. */
@@ -142,7 +140,6 @@ export function apply(ctx: Context, config: FlowConfig) {
       if (id === selected) return;
       selected = id;
       notify();
-      if (id !== null) ctx.scenes.select(null);
     },
     async update(next) {
       let res: Response;
@@ -220,7 +217,7 @@ export function apply(ctx: Context, config: FlowConfig) {
   ctx.effect(
     () =>
       ctx.slots.register(
-        { name: 'shell.document', key: 'flow', title: 'Flow', closable: false },
+        { name: 'shell.document', key: 'flow', title: 'Flow', closable: false, sideRight: 'flow' },
         FlowDocument,
       ),
     'flow:document',
@@ -238,21 +235,8 @@ export function apply(ctx: Context, config: FlowConfig) {
   );
 
   ctx.effect(
-    () =>
-      service.subscribe(() => {
-        const shown = ctx.shell.sideRight() === 'flow';
-        if (selected !== null && !shown) ctx.shell.showSideRight('flow');
-        else if (selected === null && shown) ctx.shell.hideSideRight();
-      }),
+    () => service.subscribe(() => ctx.shell.setSideRight('flow', selected !== null)),
     'flow:side-right-shown',
-  );
-
-  ctx.effect(
-    () =>
-      ctx.scenes.subscribe(() => {
-        if (selected !== null && ctx.scenes.selected() !== null) service.select(null);
-      }),
-    'flow:scenes-deselect',
   );
 
   ctx.provide('flow', service);

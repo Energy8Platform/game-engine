@@ -290,8 +290,11 @@ describe('App', () => {
     location.hash = '#/doc/flow';
     const { ctx } = await harness(undefined, OPEN_PROJECT);
     render(<App ctx={ctx} />);
-    await waitFor(() => expect(ctx.shell.sidebar()).toBe('explorer'));
+    await waitFor(() => expect(ctx.workspace.state()).not.toBeNull());
     expect(ctx.shell.active()?.key).toBe('flow');
+    // No Explorer default laid over the tab the address named: the left
+    // sidebar is that tab's own.
+    expect(ctx.shell.sidebar()).toBe(ctx.shell.active()?.sidebar);
     // The document the address named, and the Preview behind it — never
     // the composition, which only a fresh load with nothing named opens.
     expect(ctx.shell.documents().map((d) => d.key)).toEqual(['flow', 'preview']);
@@ -383,8 +386,9 @@ describe('App', () => {
     location.hash = '#/doc/preview';
     const { ctx } = await harness(undefined, OPEN_PROJECT);
     render(<App ctx={ctx} />);
-    await waitFor(() => expect(ctx.shell.sidebar()).toBe('explorer'));
+    await waitFor(() => expect(ctx.workspace.state()).not.toBeNull());
     expect(ctx.shell.active()?.key).toBe('preview');
+    expect(ctx.shell.sidebar()).toBeUndefined();
     expect(ctx.shell.documents().map((d) => d.key)).toEqual(['preview']);
   });
 

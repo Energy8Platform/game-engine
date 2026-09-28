@@ -23,11 +23,16 @@ export interface ActivityMeta {
 export interface SidebarMeta {
   key: string;
   title: string;
+  /** The `shell.sideRight` key that goes with this view while it shows over a tab. */
+  sideRight?: string;
 }
 export interface DocumentMeta {
   key: string;
   title: string;
   closable?: boolean;
+  /** The tab's own sidebars — `OpenDocument`'s, copied onto the tab. */
+  sidebar?: string;
+  sideRight?: string;
 }
 export interface PanelMeta {
   key: string;
@@ -47,6 +52,14 @@ export interface OpenDocument {
   component: ComponentType<{ ctx: Context }>;
   closable: boolean;
   dirty: boolean;
+  /**
+   * The keys of the `shell.sidebar` / `shell.sideRight` entries shown
+   * while this tab is active, declared by whatever opened it (a
+   * `shell.document` entry, a file viewer). None: that side collapses,
+   * unless an activity view is picked over it.
+   */
+  sidebar?: string;
+  sideRight?: string;
 }
 
 declare module 'cordis' {
@@ -119,7 +132,18 @@ export interface ShellService {
   /** For `beforeunload`: a shell-level fact, not a per-tab guard question. */
   hasDirtyDocuments(): boolean;
 
-  sidebar(): string | undefined; // active sidebar key, or collapsed
+  /**
+   * The `shell.sidebar` key shown on the left, or `undefined` — collapsed:
+   * the activity view picked over the tab while it stands, else the active
+   * tab's own `sidebar`. The picked view yields when the active tab
+   * changes to one that declares a `sidebar` of its own; a tab that
+   * declares none leaves it showing.
+   */
+  sidebar(): string | undefined;
+  /**
+   * Picks an activity view to show over the tab's own. The view already
+   * picked, or `undefined`, clears the pick — back to the tab's sidebar.
+   */
   showSidebar(key: string | undefined): void;
   panelCollapsed(): boolean;
   togglePanel(): void;
@@ -155,12 +179,20 @@ export interface ShellService {
   /** The badge currently set for `key`, or `undefined` — nothing to show. */
   panelBadge(key: string): number | string | undefined;
 
-  /** The `shell.sideRight` key currently shown, or `undefined` — collapsed. */
+  /**
+   * The `shell.sideRight` key shown, or `undefined` — collapsed. The key
+   * comes from what the left shows: the picked activity view's
+   * `sideRight`, else the active tab's; it shows only while its plugin
+   * has said it has something to show (`setSideRight`).
+   */
   sideRight(): string | undefined;
-  /** Shows the right sidebar's `shell.sideRight` contribution registered under `key`. */
-  showSideRight(key: string): void;
-  /** Collapses the right sidebar. */
-  hideSideRight(): void;
+  /**
+   * Whether the `shell.sideRight` entry `key` has something to show — a
+   * plugin's selection, say. Each key keeps its own flag, so it holds
+   * while another tab is active and shows again when its tab is back.
+   * Notifies only on a change.
+   */
+  setSideRight(key: string, on: boolean): void;
 
   /**
    * Called by the app once every registration effect has run. Until then
@@ -248,8 +280,13 @@ export function apply(ctx: Context) {
   // ordering trick `slots` leans on.
   const documents = new Map<string, OpenDocument>();
   const listeners = new Set<() => void>();
-  let sidebarKey: string | undefined;
-  let sideRightKey: string | undefined;
+  // The activity view picked over the tab's own sidebar. It yields to a
+  // tab that declares its own `sidebar`: `activeSeen` is the tab key the
+  // pick was last checked against.
+  let override: string | undefined;
+  let activeSeen: string | undefined;
+  // `setSideRight`'s flags, by `shell.sideRight` key.
+  const rightOn = new Map<string, boolean>();
   let panelCollapsed = false;
   // The selected `shell.panel` tab, read once at apply time — a fresh
   // load's `localStorage`, or `undefined` on a private window/first run,
@@ -335,6 +372,8 @@ export function apply(ctx: Context) {
         title: found.title ?? found.key,
         component: found.component,
         closable: found.closable ?? false,
+        sidebar: found.sidebar,
+        sideRight: found.sideRight,
       },
       replace,
     );
@@ -475,6 +514,16 @@ export function apply(ctx: Context) {
     notify();
   }
 
+  /** `sidebar()`: the pick, lapsed first if the active tab changed to one with its own. */
+  function effectiveLeft(): string | undefined {
+    const active = service.active();
+    if (active?.key !== activeSeen) {
+      activeSeen = active?.key;
+      if (active?.sidebar !== undefined) override = undefined;
+    }
+    return override ?? active?.sidebar;
+  }
+
   /** The loader settled: whatever is still pending is not coming. */
   function onModulesChange() {
     if (pending !== undefined && modules()?.settled()) giveUp(pending);
@@ -516,6 +565,8 @@ export function apply(ctx: Context) {
           title: found.title ?? found.key,
           component: found.component,
           closable: found.closable ?? false,
+          sidebar: found.sidebar,
+          sideRight: found.sideRight,
           dirty: false,
         });
         notify();
@@ -585,11 +636,12 @@ export function apply(ctx: Context) {
     },
 
     sidebar() {
-      return sidebarKey;
+      return effectiveLeft();
     },
 
     showSidebar(key) {
-      sidebarKey = sidebarKey === key ? undefined : key;
+      activeSeen = service.active()?.key;
+      override = key === undefined || override === key ? undefined : key;
       notify();
     },
 
@@ -627,16 +679,22 @@ export function apply(ctx: Context) {
     },
 
     sideRight() {
-      return sideRightKey;
+      // The left first, so a pick the active tab has overtaken is gone
+      // before its `sideRight` is looked up.
+      effectiveLeft();
+      const picked =
+        override === undefined
+          ? undefined
+          : ctx.slots
+              .list<SlotMeta & SidebarMeta>(SLOT_NAMES.sidebar)
+              .find((entry) => entry.key === override);
+      const key = picked?.sideRight ?? service.active()?.sideRight;
+      return key !== undefined && rightOn.get(key) ? key : undefined;
     },
 
-    showSideRight(key) {
-      sideRightKey = key;
-      notify();
-    },
-
-    hideSideRight() {
-      sideRightKey = undefined;
+    setSideRight(key, on) {
+      if ((rightOn.get(key) ?? false) === on) return;
+      rightOn.set(key, on);
       notify();
     },
 

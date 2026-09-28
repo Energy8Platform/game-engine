@@ -179,6 +179,7 @@ describe('symbols service', () => {
     const before = calls.length;
     const listener = vi.fn();
     ctx.symbols.subscribe(listener);
+    ctx.shell.openContributed('symbols');
     expect(ctx.shell.sideRight()).toBeUndefined();
 
     ctx.symbols.select({ id: '1', state: 'win' });
@@ -198,35 +199,25 @@ describe('symbols service', () => {
     expect(calls).toHaveLength(before);
   });
 
-  it('selecting a symbol clears scenes and flow; a scenes or flow selection clears the symbol; no ping-pong', async () => {
+  it('the symbols, scenes and flow selections are independent; each shows beside its own tab', async () => {
     const { ctx } = await harness(
       { 'GET /api/symbols': boot() },
       { scenes: [{ id: 'base_game', nodes: [] }] },
     );
     await vi.waitFor(() => expect(ctx.symbols.doc()).toEqual(TWO));
     ctx.scenes.select({ scene: 'base_game', node: null });
-    ctx.shell.showSideRight('scenes');
     ctx.symbols.select({ id: '2', state: 'static' });
-    expect(ctx.scenes.selected()).toBeNull();
-    expect(ctx.shell.sideRight()).toBe('symbols');
-
     ctx.flow.select('start');
-    expect(ctx.symbols.selected()).toBeNull();
-    expect(ctx.flow.selected()).toBe('start');
-    expect(ctx.shell.sideRight()).toBe('flow');
-    ctx.symbols.select({ id: '2', state: 'static' });
-    expect(ctx.flow.selected()).toBeNull();
-
-    ctx.scenes.select({ scene: 'base_game', node: null });
-    expect(ctx.symbols.selected()).toBeNull();
     expect(ctx.scenes.selected()).toEqual({ scene: 'base_game', node: null });
-    // Clearing one side never touches another.
-    ctx.scenes.select(null);
-    ctx.symbols.select({ id: '1', state: 'idle' });
-    ctx.symbols.select(null);
-    ctx.scenes.select({ scene: 'base_game', node: 'x' });
-    expect(ctx.scenes.selected()).toEqual({ scene: 'base_game', node: 'x' });
-    expect(ctx.symbols.selected()).toBeNull();
+    expect(ctx.symbols.selected()).toEqual({ id: '2', state: 'static' });
+    expect(ctx.flow.selected()).toBe('start');
+
+    ctx.shell.openContributed('symbols');
+    expect(ctx.shell.sideRight()).toBe('symbols');
+    ctx.shell.openContributed('flow');
+    expect(ctx.shell.sideRight()).toBe('flow');
+    ctx.shell.activate('symbols');
+    expect(ctx.shell.sideRight()).toBe('symbols');
   });
 
   it('accepts a PUT through update while the doc is null (no symbols.yml yet)', async () => {

@@ -22,6 +22,9 @@ export interface ViewerDef {
   id: string;
   match(path: string, entry?: FileEntry): boolean;
   component: ComponentType<ViewerProps>;
+  /** The opened tab's own sidebars — see `OpenDocument`'s. */
+  sidebar?: string;
+  sideRight?: string;
 }
 
 declare module 'cordis' {

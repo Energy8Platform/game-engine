@@ -17,11 +17,11 @@ import type { SceneSelection, ScenesService } from '../src/plugins/scenes';
  * The one symbols test harness, shared by the service, document and
  * Properties tests — `flow-harness.tsx`'s shape: the `symbols` service
  * booted on a real `Context` with the real `connection` (fake socket),
- * `slots`, `shell`, `files`, `assetNodeTypes` and `flow` (the mutual
- * deselect is tested against the real one; its boot GET answers empty
- * unless routed), plus a stub `scenes` holding a selection, a doc list
- * and the node types (what the deselect, the pickers, the drop and the
- * type select read). Every `accept`-ing type is registered as a
+ * `slots`, `shell`, `files`, `assetNodeTypes` and `flow` (the
+ * selections' independence is tested against the real one; its boot GET
+ * answers empty unless routed), plus a stub `scenes` holding a selection,
+ * a doc list and the node types (what the pickers, the drop and the type
+ * select read). Every `accept`-ing type is registered as a
  * `derived:<type>` asset node type, the way the real `scenes` does.
  */
 export class FakeSocket implements WebSocketLike {

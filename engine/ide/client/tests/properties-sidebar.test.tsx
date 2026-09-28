@@ -125,8 +125,14 @@ function renderSide(ctx: Context) {
 }
 
 describe('PropertiesSidebar', () => {
-  it('shows on select and hides on select(null)', async () => {
+  it('shows on select and hides on select(null), beside the Scenes list or a scene tab', async () => {
     const { ctx } = await harness();
+    // Both declare it: the scene viewer (a scene tab) and the Scenes list (an activity view).
+    expect(ctx.viewers.pick('scenes/base_game.scene.yml')?.sideRight).toBe('scenes');
+    expect(ctx.slots.list('shell.sidebar')).toContainEqual(
+      expect.objectContaining({ key: 'scenes', sideRight: 'scenes' }),
+    );
+    ctx.shell.showSidebar('scenes');
     expect(ctx.shell.sideRight()).toBeUndefined();
     ctx.scenes.select({ scene: 'base_game', node: null });
     expect(ctx.shell.sideRight()).toBe('scenes');

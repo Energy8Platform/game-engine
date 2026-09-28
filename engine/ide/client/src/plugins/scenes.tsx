@@ -39,9 +39,8 @@ import { PropertiesSidebar } from '../shell/PropertiesSidebar';
  * alone.
  *
  * The sidebar, the viewer (`scenes/<id>.scene.yml` as a tab — the canvas,
- * `SceneDocument`) and the inspector (`shell.sideRight`, shown while
- * something is selected and hidden when the selection clears) register
- * here too.
+ * `SceneDocument`) and the inspector (`shell.sideRight`, beside a scene
+ * tab or the Scenes list while something is selected) register here too.
  *
  * Every node type the game reports with `accept` becomes one
  * `ctx.assetNodeTypes` registration (`derived:<type>`: its extensions,
@@ -315,7 +314,7 @@ export function apply(ctx: Context, config: ScenesConfig) {
   ctx.effect(
     () =>
       ctx.slots.register(
-        { name: 'shell.sidebar', key: 'scenes', title: 'Scenes' },
+        { name: 'shell.sidebar', key: 'scenes', title: 'Scenes', sideRight: 'scenes' },
         function ScenesView() {
           return <ScenesSidebar ctx={ctx} />;
         },
@@ -329,6 +328,7 @@ export function apply(ctx: Context, config: ScenesConfig) {
         id: 'scene',
         match: (p) => /^scenes\/[a-z0-9_]+\.scene\.yml$/.test(p),
         component: SceneDocument,
+        sideRight: 'scenes',
       }),
     'scenes:viewer',
   );
@@ -345,12 +345,7 @@ export function apply(ctx: Context, config: ScenesConfig) {
   );
 
   ctx.effect(
-    () =>
-      service.subscribe(() => {
-        const shown = ctx.shell.sideRight() === 'scenes';
-        if (selected && !shown) ctx.shell.showSideRight('scenes');
-        else if (!selected && shown) ctx.shell.hideSideRight();
-      }),
+    () => service.subscribe(() => ctx.shell.setSideRight('scenes', !!selected)),
     'scenes:side-right-shown',
   );
 

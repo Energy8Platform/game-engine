@@ -15,7 +15,8 @@ import type { SceneSelection, ScenesService } from '../src/plugins/scenes';
  * `flow-document.test.tsx`: the `flow` service booted on a real `Context`
  * with the real `connection` (fake socket), `slots` and `shell` — the
  * plugins it injects — plus a stub `scenes` that holds a selection and
- * a doc list (what the mutual deselect and the `scene` picker read;
+ * a doc list (what the `scene` picker reads, and a selection the flow's
+ * own is independent of;
  * composing the real plugin here would drag in its own
  * `workspace`/`gameComposition`/`assetNodeTypes` chain for nothing else
  * this plugin reads) and the real `files` (the inspector's `asset`

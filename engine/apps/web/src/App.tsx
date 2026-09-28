@@ -241,6 +241,15 @@ export function App({ ctx }: { ctx: Context }) {
     const decide = () => {
       const state = ctx.workspace.state();
       if (state === null) return;
+      // Ahead of the composition: the default is an activity view picked
+      // over a tab, laid only while no document is active — a deep link
+      // to a tab with its own sidebar keeps that sidebar.
+      if (!sidebarDecided) {
+        sidebarDecided = true;
+        if (ctx.shell.sidebar() === undefined && ctx.shell.active() === undefined) {
+          ctx.shell.showSidebar(state.active === null ? 'workspace' : 'explorer');
+        }
+      }
       if (
         previousActive === null &&
         state.active !== null &&
@@ -251,12 +260,6 @@ export function App({ ctx }: { ctx: Context }) {
       }
       if (state.active !== null) ctx.shell.openContributed('preview', { background: true });
       previousActive = state.active;
-      if (!sidebarDecided) {
-        sidebarDecided = true;
-        if (ctx.shell.sidebar() === undefined) {
-          ctx.shell.showSidebar(state.active === null ? 'workspace' : 'explorer');
-        }
-      }
     };
     decide();
     return ctx.workspace.subscribe(decide);

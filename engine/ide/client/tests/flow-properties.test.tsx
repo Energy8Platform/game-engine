@@ -107,34 +107,30 @@ async function booted(routes: Parameters<typeof harness>[0] = {}, doc: FlowDoc =
 }
 
 describe('FlowProperties', () => {
-  it('shows on select and hides on select(null); selecting a flow node takes the side over from scenes and clears their selection', async () => {
+  it('shows on select and hides on select(null) while the Flow tab is active; another tab takes it away, not the selection', async () => {
     const { ctx } = await booted();
+    ctx.shell.openContributed('flow');
     expect(ctx.shell.sideRight()).toBeUndefined();
     ctx.flow.select('spin');
     expect(ctx.shell.sideRight()).toBe('flow');
     ctx.flow.select(null);
     expect(ctx.shell.sideRight()).toBeUndefined();
 
-    // The scenes canvas had a node picked and its inspector up.
-    ctx.scenes.select({ scene: 'base_game', node: 'logo' });
-    ctx.shell.showSideRight('scenes');
     ctx.flow.select('spin');
-    expect(ctx.scenes.selected()).toBeNull();
+    ctx.shell.open({ key: 'other', title: 'Other', component: () => null, closable: true });
+    expect(ctx.shell.sideRight()).toBeUndefined();
+    expect(ctx.flow.selected()).toBe('spin');
+    ctx.shell.activate('flow');
     expect(ctx.shell.sideRight()).toBe('flow');
   });
 
-  it('selecting a scene node clears the flow selection; clearing one side never touches the other', async () => {
+  it('the flow and scenes selections are independent: neither clears the other', async () => {
     const { ctx } = await booted();
+    ctx.scenes.select({ scene: 'base_game', node: 'logo' });
     ctx.flow.select('spin');
-    ctx.scenes.select({ scene: 'base_game', node: null });
-    expect(ctx.flow.selected()).toBeNull();
-    expect(ctx.scenes.selected()).toEqual({ scene: 'base_game', node: null });
-    // No ping-pong: the flow clearing itself did not clear scenes.
-    ctx.scenes.select(null);
-    expect(ctx.flow.selected()).toBeNull();
-    ctx.flow.select('draw');
-    ctx.flow.select(null);
+    expect(ctx.scenes.selected()).toEqual({ scene: 'base_game', node: 'logo' });
     ctx.scenes.select({ scene: 'bonus', node: null });
+    expect(ctx.flow.selected()).toBe('spin');
     expect(ctx.scenes.selected()).toEqual({ scene: 'bonus', node: null });
   });
 

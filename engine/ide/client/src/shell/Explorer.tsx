@@ -110,6 +110,8 @@ export function openPath(ctx: Context, path: string, entry?: FileEntry): void {
         ? ({ ctx: c }) => <EditorDocument ctx={c} path={path} />
         : ({ ctx: c }) => <ViewerDocument ctx={c} path={path} entry={entry} />,
     closable: true,
+    sidebar: viewer?.sidebar,
+    sideRight: viewer?.sideRight,
   });
 }
 

@@ -8,6 +8,8 @@ import * as shellPlugin from '../src/plugins/shell';
 import { createIdeClient } from '../src/context';
 import { Shell } from '../src/shell/Shell';
 import { DirtyStatus } from '../src/shell/StatusItems';
+import * as viewersPlugin from '../src/plugins/viewers';
+import { openPath } from '../src/shell/Explorer';
 
 const Dummy = () => <div>x</div>;
 /** Contributes nothing visible — for `shell.activity` registrations, whose own `component` is never rendered. */
@@ -1339,6 +1341,118 @@ describe('Shell', () => {
   });
 });
 
+describe('sidebars follow the active tab', () => {
+  /** A contributed document declaring `meta`'s sidebars, opened (and so active). */
+  function doc(ctx: Context, key: string, meta: { sidebar?: string; sideRight?: string } = {}) {
+    ctx.slots.register({ name: 'shell.document', key, title: key, ...meta }, Dummy);
+    ctx.shell.openContributed(key);
+  }
+
+  it("the active document's declared sidebar shows; its right one only while that key's flag is on", () => {
+    const ctx = harness();
+    doc(ctx, 'd', { sidebar: 'a', sideRight: 'r' });
+    expect(ctx.shell.sidebar()).toBe('a');
+    expect(ctx.shell.sideRight()).toBeUndefined();
+    ctx.shell.setSideRight('r', true);
+    expect(ctx.shell.sideRight()).toBe('r');
+    ctx.shell.setSideRight('r', false);
+    expect(ctx.shell.sideRight()).toBeUndefined();
+  });
+
+  it('a document declaring nothing collapses both', () => {
+    const ctx = harness();
+    ctx.shell.setSideRight('r', true);
+    doc(ctx, 'plain');
+    expect(ctx.shell.sidebar()).toBeUndefined();
+    expect(ctx.shell.sideRight()).toBeUndefined();
+  });
+
+  it('a background-opened document carries its declared sidebars to the tab', () => {
+    const ctx = harness();
+    ctx.slots.register({ name: 'shell.document', key: 'bg', sidebar: 'a', sideRight: 'r' }, Dummy);
+    ctx.shell.openContributed('bg', { background: true });
+    expect(ctx.shell.documents()).toEqual([
+      expect.objectContaining({ key: 'bg', sidebar: 'a', sideRight: 'r' }),
+    ]);
+    ctx.shell.activate('bg');
+    expect(ctx.shell.sidebar()).toBe('a');
+  });
+
+  it('an activity view shows over tabs with no sidebar, yields to one with its own, and a second press gives it back', () => {
+    const ctx = harness();
+    doc(ctx, 'code1');
+    ctx.shell.showSidebar('explorer');
+    expect(ctx.shell.sidebar()).toBe('explorer');
+    doc(ctx, 'code2');
+    expect(ctx.shell.sidebar()).toBe('explorer');
+    doc(ctx, 'sym', { sidebar: 'a' });
+    expect(ctx.shell.sidebar()).toBe('a');
+    ctx.shell.showSidebar('explorer');
+    expect(ctx.shell.sidebar()).toBe('explorer');
+    ctx.shell.showSidebar('explorer');
+    expect(ctx.shell.sidebar()).toBe('a');
+  });
+
+  it("the activity view's own sideRight wins over the tab's; one without leaves the tab's", () => {
+    const ctx = harness();
+    ctx.slots.register({ name: 'shell.sidebar', key: 'scenes', title: 'S', sideRight: 's' }, Dummy);
+    ctx.slots.register({ name: 'shell.sidebar', key: 'explorer', title: 'E' }, Dummy);
+    doc(ctx, 'd', { sideRight: 'r' });
+    ctx.shell.setSideRight('s', true);
+    ctx.shell.setSideRight('r', true);
+    expect(ctx.shell.sideRight()).toBe('r');
+    ctx.shell.showSidebar('scenes');
+    expect(ctx.shell.sideRight()).toBe('s');
+    // The view's key is chosen first, then its flag read: off is collapsed, not the tab's.
+    ctx.shell.setSideRight('s', false);
+    expect(ctx.shell.sideRight()).toBeUndefined();
+    ctx.shell.showSidebar('explorer');
+    expect(ctx.shell.sideRight()).toBe('r');
+  });
+
+  it('the right sidebar leaves with its tab and comes back with it, the flag untouched', () => {
+    const ctx = harness();
+    doc(ctx, 'flow', { sideRight: 'flow' });
+    ctx.shell.setSideRight('flow', true);
+    expect(ctx.shell.sideRight()).toBe('flow');
+    doc(ctx, 'preview');
+    expect(ctx.shell.sideRight()).toBeUndefined();
+    ctx.shell.activate('flow');
+    expect(ctx.shell.sideRight()).toBe('flow');
+  });
+
+  it("a file opened through a viewer carries the viewer's declared sidebars", () => {
+    const ctx = harness();
+    viewersPlugin.apply(ctx);
+    ctx.viewers.register({
+      id: 'v',
+      match: (path) => path.endsWith('.scene.yml'),
+      component: Dummy,
+      sidebar: 'a',
+      sideRight: 'r',
+    });
+    openPath(ctx, 'scenes/x.scene.yml');
+    expect(ctx.shell.active()).toEqual(
+      expect.objectContaining({ key: 'f:scenes/x.scene.yml', sidebar: 'a', sideRight: 'r' }),
+    );
+    expect(ctx.shell.sidebar()).toBe('a');
+  });
+
+  it('setSideRight notifies only on a change', () => {
+    const ctx = harness();
+    const listener = vi.fn();
+    ctx.shell.subscribe(listener);
+    ctx.shell.setSideRight('r', true);
+    ctx.shell.setSideRight('r', true);
+    expect(listener).toHaveBeenCalledTimes(1);
+    ctx.shell.setSideRight('r', false);
+    expect(listener).toHaveBeenCalledTimes(2);
+    // Never on is already off.
+    ctx.shell.setSideRight('other', false);
+    expect(listener).toHaveBeenCalledTimes(2);
+  });
+});
+
 describe('right sidebar', () => {
   it('is collapsed with nothing registered', () => {
     const ctx = harness();
@@ -1347,29 +1461,29 @@ describe('right sidebar', () => {
     expect(screen.getByTestId('shell').className).toContain('e8-side-right-collapsed');
   });
 
-  it('shows a registered contribution on showSideRight, hides on hideSideRight', () => {
+  it("shows the active tab's contribution while its flag is on, and hides when it goes off", () => {
     const ctx = harness();
-    ctx.shell.open({ key: 'a', title: 'A', component: Dummy, closable: true });
+    ctx.shell.open({ key: 'a', title: 'A', component: Dummy, closable: true, sideRight: 'props' });
     render(<Shell ctx={ctx} />);
     ctx.slots.register({ name: 'shell.sideRight', key: 'props', title: 'Properties' }, () => (
       <p>props here</p>
     ));
-    act(() => ctx.shell.showSideRight('props'));
+    act(() => ctx.shell.setSideRight('props', true));
     expect(screen.getByTestId('side-right-props')).toHaveTextContent('props here');
     expect(screen.getByTestId('shell').className).not.toContain('e8-side-right-collapsed');
-    act(() => ctx.shell.hideSideRight());
+    act(() => ctx.shell.setSideRight('props', false));
     expect(screen.queryByTestId('side-right-props')).toBeNull();
   });
 
   it('a retracted contribution collapses the region even while its key is shown', () => {
     const ctx = harness();
-    ctx.shell.open({ key: 'a', title: 'A', component: Dummy, closable: true });
+    ctx.shell.open({ key: 'a', title: 'A', component: Dummy, closable: true, sideRight: 'props' });
     render(<Shell ctx={ctx} />);
     const off = ctx.slots.register(
       { name: 'shell.sideRight', key: 'props', title: 'Properties' },
       () => <p>x</p>,
     );
-    act(() => ctx.shell.showSideRight('props'));
+    act(() => ctx.shell.setSideRight('props', true));
     act(() => off());
     expect(screen.getByTestId('shell').className).toContain('e8-side-right-collapsed');
   });

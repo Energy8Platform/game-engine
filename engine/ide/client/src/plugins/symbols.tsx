@@ -33,14 +33,10 @@ import { SymbolsProperties } from '../shell/SymbolsProperties';
  * has already made stale.
  *
  * `select` is state only, as flow's: the document's canvas reads
- * `selected()` off this service. The three inspectors share the right
- * sidebar, so the selections are mutually exclusive — same rule as flow
- * vs scenes, and placed the same way: this plugin (the newest) clears the
- * other two when it selects, and clears itself when either of them
- * selects. Each side only ever clears the OTHER, and only when its own
- * selection is non-null, so nothing ping-pongs. (Neither `flow` nor
- * `scenes` learns of `symbols`: this plugin injects both, and an inject
- * the other way would never resolve.)
+ * `selected()` off this service. A symbol or state selected is what the
+ * Symbols tab's right sidebar (`sideRight: 'symbols'`) has to show; it is
+ * independent of the `scenes` and `flow` selections, each shown beside
+ * its own tab.
  */
 declare module 'cordis' {
   interface Context {
@@ -80,10 +76,10 @@ export interface SymbolsConfig extends ConnectionConfig {
 }
 
 export const name = 'symbols';
-// `scenes`: the deselect, the node types (state types, `hasLoop`) and the
-// `scene`/`node` pickers; `flow`: the deselect; `files`/`assetNodeTypes`:
-// the document's drop and the inspector's `asset` picker.
-export const inject = ['slots', 'connection', 'shell', 'scenes', 'flow', 'files', 'assetNodeTypes'];
+// `scenes`: the node types (state types, `hasLoop`) and the `scene`/`node`
+// pickers; `files`/`assetNodeTypes`: the document's drop and the
+// inspector's `asset` picker.
+export const inject = ['slots', 'connection', 'shell', 'scenes', 'files', 'assetNodeTypes'];
 
 function ownDiagnostic(where: string, message: string): Diagnostic {
   return diagnostic(
@@ -217,10 +213,6 @@ export function apply(ctx: Context, config: SymbolsConfig) {
       if (same(sel, selected)) return;
       selected = sel;
       notify();
-      if (sel !== null) {
-        ctx.scenes.select(null);
-        ctx.flow.select(null);
-      }
     },
     update: queuedUpdate,
     subscribe(listener) {
@@ -274,7 +266,13 @@ export function apply(ctx: Context, config: SymbolsConfig) {
   ctx.effect(
     () =>
       ctx.slots.register(
-        { name: 'shell.document', key: 'symbols', title: 'Symbols', closable: false },
+        {
+          name: 'shell.document',
+          key: 'symbols',
+          title: 'Symbols',
+          closable: false,
+          sideRight: 'symbols',
+        },
         SymbolsDocument,
       ),
     'symbols:document',
@@ -292,29 +290,8 @@ export function apply(ctx: Context, config: SymbolsConfig) {
   );
 
   ctx.effect(
-    () =>
-      service.subscribe(() => {
-        const shown = ctx.shell.sideRight() === 'symbols';
-        if (selected !== null && !shown) ctx.shell.showSideRight('symbols');
-        else if (selected === null && shown) ctx.shell.hideSideRight();
-      }),
+    () => service.subscribe(() => ctx.shell.setSideRight('symbols', selected !== null)),
     'symbols:side-right-shown',
-  );
-
-  ctx.effect(
-    () =>
-      ctx.scenes.subscribe(() => {
-        if (selected !== null && ctx.scenes.selected() !== null) service.select(null);
-      }),
-    'symbols:scenes-deselect',
-  );
-
-  ctx.effect(
-    () =>
-      ctx.flow.subscribe(() => {
-        if (selected !== null && ctx.flow.selected() !== null) service.select(null);
-      }),
-    'symbols:flow-deselect',
   );
 
   ctx.provide('symbols', service);
