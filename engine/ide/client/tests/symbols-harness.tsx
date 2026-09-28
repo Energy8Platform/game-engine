@@ -273,6 +273,12 @@ export function renderDocument(ctx: Context) {
   return render(<entry.component ctx={ctx} />);
 }
 
+export function renderSidebar(ctx: Context) {
+  const entry = ctx.slots.list('shell.sidebar').find((e) => e.key === 'symbols');
+  if (!entry) throw new Error('symbols did not register a shell.sidebar entry');
+  return render(<entry.component ctx={ctx} />);
+}
+
 export function renderSide(ctx: Context) {
   const entry = ctx.slots.list('shell.sideRight').find((e) => e.key === 'symbols');
   if (!entry) throw new Error('no shell.sideRight registration for "symbols"');

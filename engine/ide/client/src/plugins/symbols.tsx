@@ -10,6 +10,7 @@ import {
 import type { ConnectionConfig } from './connection';
 import { EMPTY } from '../shell/symbols-doc';
 import { SymbolsDocument } from '../shell/SymbolsDocument';
+import { SymbolsList } from '../shell/SymbolsList';
 import { SymbolsProperties } from '../shell/SymbolsProperties';
 
 /**
@@ -271,11 +272,23 @@ export function apply(ctx: Context, config: SymbolsConfig) {
           key: 'symbols',
           title: 'Symbols',
           closable: false,
+          sidebar: 'symbols',
           sideRight: 'symbols',
         },
         SymbolsDocument,
       ),
     'symbols:document',
+  );
+
+  ctx.effect(
+    () =>
+      ctx.slots.register(
+        { name: 'shell.sidebar', key: 'symbols', title: 'Symbols' },
+        function SymbolsListView() {
+          return <SymbolsList ctx={ctx} />;
+        },
+      ),
+    'symbols:sidebar',
   );
 
   ctx.effect(

@@ -1575,31 +1575,30 @@ input[type='radio'] {
   padding-right: 10px;
 }
 
-/* Symbols document: the list (the Explorer's rows — id, name, then one
-   chip per state, a `+` on an empty one, the picked one on the accent;
-   the ghosts muted; the add input; the drop area filling what is left of
-   the column) down the left, the canvas filling the rest — a toolbar
-   (the picked symbol, the board's cell size, zoom, Play) over a stage
-   that fills the pane, a help panel or the missing-state line laid OVER
-   the stage (the iframe stays mounted underneath) when there's nothing to
-   show — and the status line under both. A diagnostic paints the row or
-   chip with its colour in the margin, as the tree's own rows do. */
+/* Symbols document: the canvas filling the pane — a toolbar (the picked
+   symbol, the board's cell size, zoom, Play) over a stage that fills the
+   pane, a help panel or the missing-state line laid OVER the stage (the
+   iframe stays mounted underneath) when there's nothing to show — and the
+   canvas' own status line under it. The list (the Explorer's rows — id,
+   name, then one chip per state, a `+` on an empty one, the picked one on
+   the accent; the ghosts muted; the add input; the drop area filling what
+   is left) is `SymbolsList`, the tab's left sidebar, styled with the same
+   rules below. A diagnostic paints the row or chip with its colour in the
+   margin, as the tree's own rows do. */
 .e8-doc-pane:has(> .e8-symbols-doc) {
   padding: 0;
   overflow: hidden;
 }
 .e8-symbols-doc {
-  display: grid;
-  grid-template-columns: 300px minmax(0, 1fr);
-  grid-template-rows: minmax(0, 1fr) auto;
+  display: flex;
+  flex-direction: column;
   height: 100%;
 }
 .e8-symbols-list {
   display: flex;
   flex-direction: column;
   min-height: 0;
-  border-right: 1px solid var(--e8-border);
-  overflow: auto;
+  height: 100%;
 }
 .e8-symbols-drop-new {
   flex: 1 1 auto;
@@ -1655,6 +1654,7 @@ input[type='radio'] {
 .e8-symbols-canvas {
   display: flex;
   flex-direction: column;
+  flex: 1 1 auto;
   min-height: 0;
 }
 .e8-symbols-toolbar {
@@ -1754,7 +1754,6 @@ input[type='radio'] {
   text-align: center;
 }
 .e8-symbols-status {
-  grid-column: 1 / -1;
   margin: 0;
   padding: 4px 12px;
   border-top: 1px solid var(--e8-border);
