@@ -53,7 +53,7 @@
 import type { Context } from 'cordis';
 import Schema from 'schemastery';
 import { Container } from 'pixi.js';
-import { diagnostic } from '@energy8engine/contracts';
+import { cellData, diagnostic, type BoardCell } from '@energy8engine/contracts';
 import type { DiagnosticsService } from '@energy8engine/diagnostics';
 import { createReelsBoard, type ReelsBoard } from './index';
 import type {
@@ -84,12 +84,29 @@ declare module 'cordis' {
 export interface ReelsRowConfig {
   grid?: DeepPartial<GridConfig>;
   win?: DeepPartial<WinConfig>;
-  /** Initial board, board[col][row]; empty cells by default. */
-  board?: CellData[][];
+  /**
+   * Initial board, board[col][row]; empty cells by default. The step
+   * vocabulary's `Board` leaves (an id, a number, a `{ symbol, … }` record —
+   * what the IDE's board painter writes) or `null` for an empty cell;
+   * converted to reel-core's `CellData` on the way in (`startBoard`).
+   */
+  board?: (number | string | BoardCell | null)[][];
   resolve?: SymbolResolver;
 }
 
 export const name = 'reels';
+
+/**
+ * `config.board` through the same `cellData()` every `Board` step cell goes
+ * through (`./index`'s `toCellBoard`), a `null`/absent cell read as empty —
+ * `setGrid` reads `.symbol` off each cell, so a bare `'4'` seated nothing.
+ */
+function startBoard(board: ReelsRowConfig['board']): CellData[][] | undefined {
+  if (!Array.isArray(board)) return undefined;
+  return board.map((col) =>
+    Array.from(col, (cell) => (cell == null ? { symbol: null } : (cellData(cell) as CellData))),
+  );
+}
 
 /** `config` is flat — `{ grid, win, board }` — see the module doc on where `resolve` comes from. */
 export function apply(ctx: Context, config: ReelsRowConfig): void {
@@ -106,7 +123,7 @@ export function apply(ctx: Context, config: ReelsRowConfig): void {
     resolve,
     grid: config?.grid,
     win: config?.win,
-    board: config?.board,
+    board: startBoard(config?.board),
     // Read per report, not captured: a `diagnostics` row may come and go around this one.
     report: (severity, message) =>
       (ctx.reflect.get('diagnostics', false) as DiagnosticsService | undefined)?.report(

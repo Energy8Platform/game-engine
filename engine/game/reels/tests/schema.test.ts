@@ -2,7 +2,7 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import Schema from 'schemastery';
-import { DEFAULT_REEL_CONFIG } from '@energy8engine/reel-core';
+import { DEFAULT_CELL_FRAME_STYLE, DEFAULT_REEL_CONFIG } from '@energy8engine/reel-core';
 import { Config } from '@energy8engine/reels/schema';
 
 /** `null` → absent on both sides: schemastery drops a `null` default from its output. */
@@ -30,6 +30,13 @@ describe('@energy8engine/reels/schema', () => {
   it('the frame colour carries role: color, surviving JSON', () => {
     const node = new Schema(JSON.parse(JSON.stringify(Config))) as Schema;
     expect(node.dict!.grid.dict!.frameStyle.dict!.idle.dict!.color.meta.role).toBe('color');
+  });
+
+  // Final review I6: `frameStyle`'s colours had no default, so the IDE's
+  // colour widget showed `#000000` for a frame that actually draws
+  // `0x223047`. `SymbolCell`'s own built-in style is what they pin to.
+  it('frameStyle defaults are the built-in cell frame style', () => {
+    expect(Config({}).grid.frameStyle).toEqual(DEFAULT_CELL_FRAME_STYLE);
   });
 
   it('a nested `config` key (the old row shape) still validates, but is not read', () => {

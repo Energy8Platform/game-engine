@@ -5,8 +5,9 @@
  * `pixi.js` through `createReelsBoard`, and would not load there. That is
  * why every field of `@energy8engine/reel-core`'s `GridConfig`/`WinConfig`
  * is listed by hand and every default below is a literal —
- * `tests/schema.test.ts` checks them against `DEFAULT_REEL_CONFIG`, so they
- * cannot drift. Not even a TYPE import from reel-core: schemastery's
+ * `tests/schema.test.ts` checks them against `DEFAULT_REEL_CONFIG` (and
+ * `frameStyle`'s against `DEFAULT_CELL_FRAME_STYLE`), so they cannot
+ * drift. Not even a TYPE import from reel-core: schemastery's
  * `Schema.object<X>` infers `X` rather than constraining it, so a type would
  * not check these literals — that equality test is the guard.
  *
@@ -20,10 +21,12 @@
  */
 import Schema from 'schemastery';
 
-const FrameState = Schema.object({
-  color: Schema.number().role('color').description('frame colour, 0xRRGGBB'),
-  alpha: Schema.number().description('frame opacity, 0–1'),
-});
+/** One frame state, defaulting to reel-core's `DEFAULT_CELL_FRAME_STYLE` entry for it (pinned in `tests/schema.test.ts`). */
+const frameState = (color: number, alpha: number) =>
+  Schema.object({
+    color: Schema.number().role('color').default(color).description('frame colour, 0xRRGGBB'),
+    alpha: Schema.number().default(alpha).description('frame opacity, 0–1'),
+  });
 
 const PerAxisGap = Schema.union([Schema.number(), Schema.array(Schema.number())]);
 
@@ -60,11 +63,11 @@ export const GridSchema = Schema.object({
     .description('Megaways top horizontal reel (renders above the grid, adds to ways).'),
   mask: Schema.boolean().default(true).description('Clip the symbols to the reel window.'),
   frameStyle: Schema.object({
-    radius: Schema.number().description('corner radius of the cell frame, px'),
-    idle: FrameState.description('a cell at rest'),
-    winning: FrameState.description('a cell in a win'),
-    removed: FrameState.description('a cell removed by a tumble'),
-    fresh: FrameState.description('a cell just dropped in'),
+    radius: Schema.number().default(8).description('corner radius of the cell frame, px'),
+    idle: frameState(0x223047, 0.34).description('a cell at rest'),
+    winning: frameState(0x00d4ff, 0.95).description('a cell in a win'),
+    removed: frameState(0x223047, 0.12).description('a cell removed by a tumble'),
+    fresh: frameState(0xffffff, 0.6).description('a cell just dropped in'),
   }).description('Cell frame look per state; an absent field keeps the built-in one.'),
   decoration: Schema.object({
     padding: Schema.number().default(0).description('px between the reel window and its decoration'),

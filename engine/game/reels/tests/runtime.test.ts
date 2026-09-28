@@ -53,6 +53,27 @@ describe('reels runtime half', () => {
     await ctx.fiber.dispose();
   });
 
+  // The IDE's board painter writes `board` as plain ids (`'4'`, `null`) — the
+  // step vocabulary's `Board` — not reel-core's `{ symbol }` records; a raw
+  // id used to reach `setGrid` as-is and seat an empty cell.
+  it('seats a start board of plain ids, numbers, nulls and records', async () => {
+    const ctx = new Context();
+    await ctx.plugin(assetsService);
+    await ctx.plugin(runtime, {
+      grid: { cols: 2, rows: 2 },
+      board: [['4', 7], [null, { symbol: 'wild', multiplier: 2 }]],
+    } as never);
+
+    const at = (col: number, row: number) =>
+      ctx.board.grid.getCell(col, row) as unknown as { data: { symbol: string | null; multiplier?: number }; view: { __symbol?: string } | null };
+    expect([at(0, 0).data.symbol, at(0, 1).data.symbol, at(1, 0).data.symbol, at(1, 1).data.symbol]).toEqual(['4', '7', null, 'wild']);
+    expect(at(0, 0).view?.__symbol).toBe('4');
+    expect(at(1, 0).view).toBeNull();
+    expect(at(1, 1).data.multiplier).toBe(2);
+
+    await ctx.fiber.dispose();
+  });
+
   it('never registers, and never throws, when nodeTypes does not appear at all', async () => {
     const ctx = new Context();
     await ctx.plugin(assetsService);
