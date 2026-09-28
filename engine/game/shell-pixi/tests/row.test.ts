@@ -29,6 +29,10 @@ interface FakeShell {
   actions: Record<string, () => void>;
   setBalance: ReturnType<typeof vi.fn>;
   setBusy: ReturnType<typeof vi.fn>;
+  setVisible: ReturnType<typeof vi.fn>;
+  /** Plain mutable fields (not getters) — a test flips these directly to stand in for a layout change. */
+  barHeight: number;
+  safeArea: { top: number; right: number; bottom: number; left: number };
   destroy: ReturnType<typeof vi.fn>;
 }
 
@@ -50,6 +54,9 @@ function fakeShell(): FakeShell {
     actions: { spin: vi.fn() },
     setBalance: vi.fn(),
     setBusy: vi.fn(),
+    setVisible: vi.fn(),
+    barHeight: 64,
+    safeArea: { top: 0, right: 0, bottom: 64, left: 0 },
     destroy: vi.fn(async () => {}),
   };
   return shell;
@@ -187,10 +194,61 @@ describe('shell-pixi — the Pixi shell as a row', () => {
     }
   });
 
-  it('provides `shell` — the very handle createPixiShell returned', async () => {
+  it('provides `shell` — a handle whose state/actions/setters reach the real Pixi shell', async () => {
     const { ctx } = await boot();
-    expect(ctx.get('shell')).toBe(captured.shell);
+    const handle = ctx.get('shell')!;
+    expect(handle.state).toBe(captured.shell!.state);
+    expect(handle.actions).toBe(captured.shell!.actions);
+    handle.setBalance(50);
+    expect(captured.shell!.setBalance).toHaveBeenCalledWith(50);
     await ctx.fiber.dispose();
+  });
+
+  describe('F20 — setVisible hides the bar and gives its height back', () => {
+    it('setVisible(false) zeroes barHeight/safeArea.bottom and calls the real shell', async () => {
+      const { ctx } = await boot();
+      const handle = ctx.get('shell')!;
+
+      handle.setVisible(false);
+
+      expect(captured.shell!.setVisible).toHaveBeenCalledWith(false);
+      expect(handle.barHeight).toBe(0);
+      expect(handle.safeArea).toEqual({ top: 0, right: 0, bottom: 0, left: 0 });
+
+      await ctx.fiber.dispose();
+    });
+
+    it("setVisible(true) answers the real shell's current values again", async () => {
+      const { ctx } = await boot();
+      const handle = ctx.get('shell')!;
+
+      handle.setVisible(false);
+      handle.setVisible(true);
+
+      expect(captured.shell!.setVisible).toHaveBeenLastCalledWith(true);
+      expect(handle.barHeight).toBe(64);
+      expect(handle.safeArea).toEqual({ top: 0, right: 0, bottom: 64, left: 0 });
+
+      await ctx.fiber.dispose();
+    });
+
+    it("Review Focus 5 — while hidden, the real shell's bar height moving still answers 0; shown again answers the NEW height", async () => {
+      const { ctx } = await boot();
+      const handle = ctx.get('shell')!;
+
+      handle.setVisible(false);
+      // The real shell re-laid out (a resize) while the bar is hidden.
+      captured.shell!.barHeight = 40;
+      captured.shell!.safeArea = { top: 0, right: 0, bottom: 40, left: 0 };
+      expect(handle.barHeight).toBe(0);
+      expect(handle.safeArea.bottom).toBe(0);
+
+      handle.setVisible(true);
+      expect(handle.barHeight).toBe(40);
+      expect(handle.safeArea).toEqual({ top: 0, right: 0, bottom: 40, left: 0 });
+
+      await ctx.fiber.dispose();
+    });
   });
 
   it('re-emits every ShellEvents entry on the flow bus as shell.<name> with an object payload', async () => {

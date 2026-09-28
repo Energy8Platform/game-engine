@@ -80,7 +80,7 @@ import type { Context } from 'cordis';
 import { Container } from 'pixi.js';
 import type { SessionService, SymbolsDoc } from '@energy8engine/contracts';
 import type { PixiRenderer } from '@energy8engine/renderer-pixi';
-import { createPixiShell, removePixiShell, type Shell } from '@energy8platform/shell/pixi';
+import { createPixiShell, removePixiShell, type SafeArea, type Shell } from '@energy8platform/shell/pixi';
 import { toShellConfig } from './config';
 import { paytableFrom } from './paytable';
 import { relay } from './relay';
@@ -90,9 +90,60 @@ declare module 'cordis' {
   interface Context {
     renderer: PixiRenderer;
     session: SessionService;
-    /** The Pixi shell handle — `state`, the setters, `actions`, `safeArea`. */
+    /**
+     * The Pixi shell handle — `state`, the setters, `actions`, `safeArea`.
+     * F20: `setVisible(false)` hides the bar AND makes `barHeight`/
+     * `safeArea.bottom` answer 0 (read live) so `scenes1` gives the space
+     * back; see `wrapShell` below.
+     */
     shell: Shell;
   }
+}
+
+/**
+ * Wraps the real Pixi shell for F20: `setVisible(false)` hides the bar
+ * (forwarded to the real shell) AND makes `barHeight`/`safeArea.bottom`
+ * answer 0 — read live off the real shell on every access, not cached —
+ * so `scenes1`'s per-tick insets check (`runtime.ts`'s `scenes:insets`)
+ * gives the bar's space back on its own, no `refit()` needed. Shown again,
+ * both answer the real shell's current values.
+ *
+ * `Object.create(shell)` inherits everything else — `state`, `actions`,
+ * every setter, `on`/`off` — unchanged: `ShellController` has no `#`-private
+ * fields (its `private` is TS-only, erased at runtime), and its methods
+ * only ever mutate through `this.state`/`this.renderer`, both inherited off
+ * the real shell, so they keep working with the wrapper as `this`. Only
+ * `setVisible`/`barHeight`/`safeArea` are own properties here, so they
+ * don't rely on that inheritance at all.
+ */
+function wrapShell(shell: Shell): Shell {
+  let hidden = false;
+  // Reused, not reallocated: `scenes1` reads `safeArea` every ticker frame while hidden.
+  const hiddenSafeArea: SafeArea = { top: 0, right: 0, bottom: 0, left: 0 };
+  return Object.create(shell, {
+    setVisible: {
+      value: (v: boolean) => {
+        hidden = !v;
+        shell.setVisible(v);
+      },
+      enumerable: true,
+    },
+    barHeight: {
+      get: () => (hidden ? 0 : shell.barHeight),
+      enumerable: true,
+    },
+    safeArea: {
+      get: () => {
+        if (!hidden) return shell.safeArea;
+        const { top, right, left } = shell.safeArea;
+        hiddenSafeArea.top = top;
+        hiddenSafeArea.right = right;
+        hiddenSafeArea.left = left;
+        return hiddenSafeArea;
+      },
+      enumerable: true,
+    },
+  }) as Shell;
 }
 
 /** The flow bus, as much of it as this row uses. Not cordis's own `ctx.events`. */
@@ -147,7 +198,7 @@ export async function apply(ctx: Context, config: Parameters<typeof Config>[0] =
     'shell-pixi:relay',
   );
 
-  ctx.provide('shell', shell);
+  ctx.provide('shell', wrapShell(shell));
 
   ctx.inject(['flow'], (c) => {
     c.effect(

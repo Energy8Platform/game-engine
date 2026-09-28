@@ -646,6 +646,8 @@ interface ShellLike {
   setFreeSpins(fs: { current?: number | null; total: number; totalWin: number }): void;
   setBonus(b: { label: string; value: string; totalWin: number }): void;
   setAutoplay(a: { active: boolean; remaining: number }): void;
+  /** F20 — hides/shows the bar; the `shell-pixi` handle also zeroes `barHeight`/`safeArea.bottom` while hidden. */
+  setVisible(v: boolean): void;
 }
 
 type ShellFlag = '' | 'true' | 'false';
@@ -663,6 +665,7 @@ interface ShellProps {
   bonus: string;
   bonusTotalWin: string;
   autoplay: string;
+  visible: ShellFlag;
 }
 
 const SHELL_MODES = ['base', 'bonus', 'freeSpins', 'replay'];
@@ -722,6 +725,9 @@ const shell: FlowNodeKind<ShellProps> = {
     autoplay: Schema.string()
       .default('')
       .description("'tick' (one autoplay spin done), 'stop', or a count (a number: a literal, `$expr`, or a `{…}` template)"),
+    visible: Schema.union(['', 'true', 'false'])
+      .default('')
+      .description('F20 — whether the bar shows; hidden, the scenes get its height back'),
   }),
   outs: ['next'],
   async run(p, { ctx, vars, report }) {
@@ -835,6 +841,7 @@ const shell: FlowNodeKind<ShellProps> = {
       if (Number.isNaN(n)) bad('autoplay', autoplay, "a number, 'tick' or 'stop'");
       else apply('autoplay', () => shell.setAutoplay({ active: n > 0, remaining: n }));
     }
+    flag('visible', (b) => shell.setVisible(b));
     return { out: 'next' };
   },
 };

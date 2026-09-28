@@ -772,6 +772,7 @@ describe('built-in kinds', () => {
         setAutoplay: vi.fn((a: { active: boolean; remaining: number }) => {
           state.autoplay = a;
         }),
+        setVisible: vi.fn(),
       };
     }
     /** Schema-filled props, the way the interpreter always calls `run`. */
@@ -784,7 +785,7 @@ describe('built-in kinds', () => {
     it("every prop defaults to '' (untouched); the enumerated ones refuse a literal outside their union at the schema", () => {
       expect(shellProps()).toEqual({
         balance: '', win: '', bet: '', mode: '', busy: '', turbo: '', buyBonusEnabled: '', freeSpins: '',
-        freeSpinsCurrent: '', freeSpinsTotalWin: '', bonus: '', bonusTotalWin: '', autoplay: '',
+        freeSpinsCurrent: '', freeSpinsTotalWin: '', bonus: '', bonusTotalWin: '', autoplay: '', visible: '',
       });
       expect(shellProps({ mode: 'bonus', busy: 'true', buyBonusEnabled: 'false' })).toMatchObject({
         mode: 'bonus', busy: 'true', buyBonusEnabled: 'false',
@@ -994,6 +995,27 @@ describe('built-in kinds', () => {
       expect(shell.setAutoplay).toHaveBeenCalledWith({ active: true, remaining: 4 });
       const order = [shell.setWin, shell.setBet, shell.setTurbo, shell.setAutoplay].map((f) => f.mock.invocationCallOrder[0]);
       expect([...order].sort((a, b) => a - b)).toEqual(order);
+    });
+
+    it("F20: visible 'false'/'true' call setVisible; '' leaves it untouched; a bad literal is refused at the schema", async () => {
+      const shell = fakeShell();
+      const { rc } = runCtx({ shell });
+      await kind('shell').run!(shellProps({ visible: 'false' }), rc);
+      expect(shell.setVisible).toHaveBeenCalledWith(false);
+      await kind('shell').run!(shellProps({ visible: 'true' }), rc);
+      expect(shell.setVisible).toHaveBeenCalledWith(true);
+      await kind('shell').run!(shellProps(), rc);
+      expect(shell.setVisible).toHaveBeenCalledTimes(2);
+      expect(() => shellProps({ visible: 'maybe' })).toThrow();
+      expect(rc.report).not.toHaveBeenCalled();
+    });
+
+    it('a `$path` visible that resolves to neither true/false/"true"/"false" reports a bad boolean', async () => {
+      const shell = fakeShell();
+      const { rc } = runCtx({ shell }, { flag: 'maybe' });
+      await kind('shell').run!({ ...shellProps(), visible: '$flag' } as never, rc);
+      expect(rc.report).toHaveBeenCalledWith('shell: visible "maybe" (from "$flag") is not a boolean');
+      expect(shell.setVisible).not.toHaveBeenCalled();
     });
   });
 
