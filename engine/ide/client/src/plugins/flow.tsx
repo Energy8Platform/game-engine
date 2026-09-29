@@ -207,8 +207,9 @@ export function apply(ctx: Context, config: FlowConfig) {
               label: 'flow',
               before,
               after: next,
-              // `undefined` while another write is in flight — see `pending`'s own comment.
-              read: () => (pending > 0 ? undefined : (doc ?? undefined)),
+              read: () => doc ?? undefined,
+              // `true` while another write is in flight — see `pending`'s own comment.
+              pending: () => pending > 0,
               write: async (value) => ({
                 error: (await service.update(value))[0]?.message ?? null,
               }),

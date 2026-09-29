@@ -2,6 +2,7 @@ import { screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
 import type { Diagnostic, FlowDoc, FlowKindInfo, FlowTraceEntry } from '@energy8engine/contracts';
+import { BUSY } from '../src/plugins/history';
 import { harness, renderDocument, type Answer } from './flow-harness';
 
 /** The service's own tests; the harness is shared with `flow-document.test.tsx`. */
@@ -156,7 +157,7 @@ describe('flow service', () => {
     expect(ctx.flow.doc()).toEqual(DOC);
   });
 
-  it('an undo pressed while a write is in flight refuses instead of racing it; the next write settling makes undo work again', async () => {
+  it('an undo pressed while a write is in flight answers BUSY and keeps the step; once the write settles, undo takes the NEW step, then the kept earlier one', async () => {
     const v0: FlowDoc = {
       version: 1,
       nodes: [{ id: 'start', kind: 'boot', ui: { x: 0, y: 0 } }],
@@ -170,35 +171,40 @@ describe('flow service', () => {
     let puts = 0;
     const { ctx, calls } = await harness({
       'GET /api/flow': boot(),
-      'PUT /api/flow': () => {
+      'PUT /api/flow': (body) => {
         puts += 1;
-        // The first write (setting up a step to try to undo) answers at
-        // once; the second — the one "in flight" when undo is pressed —
-        // is held until the test releases it.
-        return puts === 1 ? { body: { doc: v0, diagnostics: [], kinds: [] } } : pendingPut;
+        // The second PUT — the one "in flight" when undo is pressed — is
+        // held until the test releases it; every other one (the setup
+        // write, and later the undos' own writes) echoes back what it sent.
+        return puts === 2 ? pendingPut : { body: { doc: body, diagnostics: [], kinds: [] } };
       },
     });
     await vi.waitFor(() => expect(ctx.flow.doc()).toEqual(DOC));
 
+    // The step a BUSY undo must not lose: DOC -> v0.
     expect(await ctx.flow.update(v0)).toEqual([]);
 
     const inFlight = ctx.flow.update(v1);
     const callsBeforeUndo = calls.length;
 
-    expect(await ctx.history.undo(['flow'])).toEqual({
-      kind: 'undo',
-      ok: false,
-      reason: "changed elsewhere since — can't undo",
-    });
+    expect(await ctx.history.undo(['flow'])).toEqual({ kind: 'undo', ok: false, reason: BUSY });
     // Refused before ever writing — no PUT went out for the undo attempt.
     expect(calls).toHaveLength(callsBeforeUndo);
 
     resolvePut({ body: { doc: v1, diagnostics: [], kinds: [] } });
     expect(await inFlight).toEqual([]);
 
-    // The write that just settled recorded its OWN step; undo now targets that one.
+    // The write that just settled recorded its OWN step; undo takes that
+    // one first (v1 -> v0) — the BUSY attempt did not consume it.
     expect(await ctx.history.undo(['flow'])).toEqual({ kind: 'undo', ok: true, label: 'flow' });
     expect(calls.at(-1)).toEqual({ method: 'PUT', url: '/api/flow', body: v0 });
+    expect(ctx.flow.doc()).toEqual(v0);
+
+    // The EARLIER step — the one the BUSY undo was refused on — is still
+    // there: not lost, takes its turn next (v0 -> DOC).
+    expect(await ctx.history.undo(['flow'])).toEqual({ kind: 'undo', ok: true, label: 'flow' });
+    expect(calls.at(-1)).toEqual({ method: 'PUT', url: '/api/flow', body: DOC });
+    expect(ctx.flow.doc()).toEqual(DOC);
   });
 
   it('a refused update records nothing', async () => {
@@ -251,7 +257,7 @@ describe('flow service', () => {
     expect(ctx.connection.diagnostics).toEqual(answer);
   });
 
-  it('flow-trace entries append, cap at 500, and a different run drops the previous run\'s entries', async () => {
+  it("flow-trace entries append, cap at 500, and a different run drops the previous run's entries", async () => {
     const { ctx, socket } = await harness({ 'GET /api/flow': boot() });
     await vi.waitFor(() => expect(ctx.flow.doc()).toEqual(DOC));
 
@@ -292,7 +298,7 @@ describe('flow service', () => {
     expect(ctx.flow.trace()[0]).toEqual(entry(2, 'n1', 11));
   });
 
-  it('run 3, then run 1 (the counter reset by a replace): the trace holds run 1\'s entries', async () => {
+  it("run 3, then run 1 (the counter reset by a replace): the trace holds run 1's entries", async () => {
     const { ctx, socket } = await harness({ 'GET /api/flow': boot() });
     await vi.waitFor(() => expect(ctx.flow.doc()).toEqual(DOC));
 
@@ -309,7 +315,7 @@ describe('flow service', () => {
     expect(ctx.flow.trace()).toEqual([entry(1, 'start', 2), entry(1, 'base', 3)]);
   });
 
-  it('one flow-trace frame carrying two runs keeps only the later run\'s entries', async () => {
+  it("one flow-trace frame carrying two runs keeps only the later run's entries", async () => {
     const { ctx, socket } = await harness({ 'GET /api/flow': boot() });
     await vi.waitFor(() => expect(ctx.flow.doc()).toEqual(DOC));
 
@@ -380,9 +386,7 @@ describe('flow service', () => {
     });
     renderDocument(ctx);
     expect(await screen.findByTestId('flow-canvas')).toBeTruthy();
-    expect(screen.getByTestId('flow-diagnostics')).toHaveTextContent(
-      'error: flow.yml — bad node',
-    );
+    expect(screen.getByTestId('flow-diagnostics')).toHaveTextContent('error: flow.yml — bad node');
     expect(screen.queryByTestId('flow-empty')).toBeNull();
   });
 });

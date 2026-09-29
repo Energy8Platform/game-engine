@@ -30,6 +30,16 @@ export type HistoryResult =
   | { kind: 'undo' | 'redo'; ok: true; label: string }
   | { kind: 'undo' | 'redo'; ok: false; reason: string };
 
+/**
+ * The one refusal reason `move()` treats specially: the step it was about
+ * to apply stays exactly where it was (same `seq`, same stack) rather than
+ * being dropped, so a later undo/redo can still take it once the write it
+ * collided with has settled. Every other refusal (a step genuinely
+ * diverged, or refused its own way) drops the step, same as always — the
+ * data really did change elsewhere and there is nothing to retry.
+ */
+export const BUSY = 'a save is still in flight — try again';
+
 export interface HistoryService {
   /** Adds a step under `key` (no-op for a write the history itself is making — see `replay`). */
   record(key: string, step: HistoryStep): void;
@@ -128,6 +138,11 @@ export function apply(ctx: Context): void {
       if (reason === null) {
         bucket[to].push({ seq: ++seq, step: bestEntry.step });
         result = { kind, ok: true, label: bestEntry.step.label };
+      } else if (reason === BUSY) {
+        // Put it back exactly as it was — a write still in flight is not
+        // "changed elsewhere", it is "ask again in a moment".
+        bucket[from].push(bestEntry);
+        result = { kind, ok: false, reason: BUSY };
       } else {
         result = { kind, ok: false, reason };
       }
@@ -204,7 +219,16 @@ function stableStringify(value: unknown): string | undefined {
   return JSON.stringify(value);
 }
 
-/** A step over a whole value: compares the current value (JSON, key order ignored) before applying; writes through `write`. */
+/**
+ * A step over a whole value: compares the current value (JSON, key order
+ * ignored) before applying; writes through `write`.
+ *
+ * `pending`, when given, is checked BEFORE the comparison: a service whose
+ * write is still in flight answers `true` from it rather than making
+ * `read()` lie about the current value — `BUSY` distinguishes "ask again in
+ * a moment" from "changed elsewhere", and `move()` keeps a `BUSY` step
+ * instead of dropping it (see `BUSY`'s own doc comment).
+ */
 export function valueStep<T>(opts: {
   label: string;
   before: T;
@@ -212,10 +236,12 @@ export function valueStep<T>(opts: {
   read(): T | undefined;
   write(value: T): Promise<{ error: string | null }>;
   history: HistoryService;
+  pending?(): boolean;
 }): HistoryStep {
-  const { label, before, after, read, write, history: historyService } = opts;
+  const { label, before, after, read, write, history: historyService, pending } = opts;
 
   async function apply(target: T, expected: T, verb: 'undo' | 'redo'): Promise<string | null> {
+    if (pending?.()) return BUSY;
     if (stableStringify(read()) !== stableStringify(expected)) {
       return `changed elsewhere since — can't ${verb}`;
     }

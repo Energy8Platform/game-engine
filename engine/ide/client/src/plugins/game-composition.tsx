@@ -261,9 +261,9 @@ export function apply(ctx: Context, config: GameCompositionConfig) {
                 label: `${id} settings`,
                 before,
                 after: nextConfig,
-                // `undefined` while another write is in flight — see `pending`'s own comment.
-                read: () =>
-                  pending > 0 ? undefined : service.rows?.find((row) => row.id === id)?.config,
+                read: () => service.rows?.find((row) => row.id === id)?.config,
+                // `true` while another write is in flight — see `pending`'s own comment.
+                pending: () => pending > 0,
                 write: async (value) => {
                   const result = await service.update(id, value);
                   return { error: result.diagnostics[0]?.message ?? null };

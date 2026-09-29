@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { Diagnostic, SymbolsDoc } from '@energy8engine/contracts';
 import { addSymbol, EMPTY } from '../src/shell/symbols-doc';
+import { BUSY } from '../src/plugins/history';
 import { accept, boot, harness, KNOWN, TWO, type Answer } from './symbols-harness';
 
 /** The service's own tests; the harness is shared with the document and Properties tests. */
@@ -267,7 +268,7 @@ describe('symbols service', () => {
     });
   });
 
-  it('an undo pressed while a write is in flight refuses instead of racing it; once the write settles, undo works again', async () => {
+  it('an undo pressed while a write is in flight answers BUSY and keeps the step; once the write settles, undo takes the NEW step, then the kept earlier one', async () => {
     let resolvePut!: (answer: Answer) => void;
     const pendingPut = new Promise<Answer>((resolve) => {
       resolvePut = resolve;
@@ -302,7 +303,7 @@ describe('symbols service', () => {
     expect(await ctx.history.undo(['symbols'])).toEqual({
       kind: 'undo',
       ok: false,
-      reason: "changed elsewhere since — can't undo",
+      reason: BUSY,
     });
     // Refused before ever writing — no new PUT went out for the undo attempt.
     expect(calls).toHaveLength(callsBeforeUndo);
@@ -310,13 +311,23 @@ describe('symbols service', () => {
     resolvePut({ body: { doc: withTwo, known: KNOWN, diagnostics: [] } });
     expect(await inFlight).toEqual([]);
 
-    // The write that just settled recorded its OWN step; undo now targets that one.
+    // The write that just settled recorded its OWN step; undo takes that
+    // one first (withTwo -> withOne) — the BUSY attempt did not consume it.
     expect(await ctx.history.undo(['symbols'])).toEqual({
       kind: 'undo',
       ok: true,
       label: 'symbols',
     });
     expect(ctx.symbols.doc()).toEqual(withOne);
+
+    // The EARLIER step — the one the BUSY undo was refused on — is still
+    // there: not lost, takes its turn next (withOne -> EMPTY).
+    expect(await ctx.history.undo(['symbols'])).toEqual({
+      kind: 'undo',
+      ok: true,
+      label: 'symbols',
+    });
+    expect(ctx.symbols.doc()).toEqual(EMPTY);
   });
 
   it('the symbols tab scope is exactly "symbols"', async () => {

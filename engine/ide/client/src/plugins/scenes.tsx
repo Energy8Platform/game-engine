@@ -274,11 +274,13 @@ export function apply(ctx: Context, config: ScenesConfig) {
               label: `scene ${doc.id}`,
               before,
               after: doc,
-              // `undefined` while another write is in flight: this write's
-              // OWN completion already dropped `pending` back to 0 by the
-              // time anyone can call this, so a nonzero count here means an
-              // UNRELATED write is racing this undo/redo.
-              read: () => (pending > 0 ? undefined : docs.find((d) => d.id === doc.id)),
+              read: () => docs.find((d) => d.id === doc.id),
+              // `true` while another write is in flight: this write's OWN
+              // completion already dropped `pending` back to 0 by the time
+              // anyone can call this, so a nonzero count here means an
+              // UNRELATED write is racing this undo/redo — BUSY, not
+              // diverged, so the step it would refuse stays undoable.
+              pending: () => pending > 0,
               write: async (value) => ({
                 error: (await service.update(value))[0]?.message ?? null,
               }),

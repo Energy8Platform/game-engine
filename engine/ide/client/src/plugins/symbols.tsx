@@ -214,8 +214,9 @@ export function apply(ctx: Context, config: SymbolsConfig) {
             label: 'symbols',
             before,
             after: next,
-            // `undefined` while another write is in flight — see `pending`'s own comment.
-            read: () => (pending > 0 ? undefined : (doc ?? EMPTY)),
+            read: () => doc ?? EMPTY,
+            // `true` while another write is in flight — see `pending`'s own comment.
+            pending: () => pending > 0,
             write: async (value) => ({
               error: (await service.update(value))[0]?.message ?? null,
             }),

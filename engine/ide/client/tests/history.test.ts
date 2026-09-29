@@ -124,6 +124,29 @@ describe('history', () => {
     });
   });
 
+  it('a step whose undo answers BUSY is KEPT, not dropped: the same step is still there for a later undo', async () => {
+    const ctx = await boot();
+    ctx.history.record('a', makeStep('first'));
+    let busy = true;
+    const undoFn = vi.fn(async () => (busy ? history.BUSY : null));
+    ctx.history.record('a', { label: 'second', undo: undoFn, redo: async () => null });
+
+    const result = await ctx.history.undo(['a']);
+    expect(result).toEqual({ kind: 'undo', ok: false, reason: history.BUSY });
+    expect(ctx.history.last()?.result).toEqual(result);
+
+    // Kept: the SAME step ('second') is still on top, not 'first'.
+    busy = false;
+    expect(await ctx.history.undo(['a'])).toEqual({ kind: 'undo', ok: true, label: 'second' });
+    expect(undoFn).toHaveBeenCalledTimes(2);
+    expect(await ctx.history.undo(['a'])).toEqual({ kind: 'undo', ok: true, label: 'first' });
+    expect(await ctx.history.undo(['a'])).toEqual({
+      kind: 'undo',
+      ok: false,
+      reason: 'nothing to undo',
+    });
+  });
+
   it('a step whose undo() throws is dropped like a refusal, its message becomes the reason', async () => {
     const ctx = await boot();
     ctx.history.record('a', {
@@ -215,6 +238,25 @@ describe('history', () => {
       expect(write).not.toHaveBeenCalled();
     });
 
+    it('a `pending` that answers true is checked before `read()` — BUSY, not diverged, and neither read nor write runs', async () => {
+      const ctx = await boot();
+      const read = vi.fn(() => 'AFTER');
+      const write = vi.fn(async () => ({ error: null }));
+      const s = valueStep({
+        label: 'set title',
+        before: 'BEFORE',
+        after: 'AFTER',
+        read,
+        write,
+        pending: () => true,
+        history: ctx.history,
+      });
+
+      expect(await s.undo()).toBe(history.BUSY);
+      expect(read).not.toHaveBeenCalled();
+      expect(write).not.toHaveBeenCalled();
+    });
+
     it("redo is symmetric: read() equal to 'before' writes 'after'; a diverged read refuses as can't redo", async () => {
       const ctx = await boot();
       let current = 'BEFORE';
@@ -244,7 +286,7 @@ describe('history', () => {
       expect(await diverged.redo()).toBe("changed elsewhere since — can't redo");
     });
 
-    it("a write answering { error } is the reason", async () => {
+    it('a write answering { error } is the reason', async () => {
       const ctx = await boot();
       const write = vi.fn(async () => ({ error: 'host refused' }));
       const s = valueStep({
