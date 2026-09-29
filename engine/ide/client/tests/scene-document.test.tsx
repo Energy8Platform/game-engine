@@ -12,6 +12,7 @@ import * as viewers from '../src/plugins/viewers';
 import * as scenes from '../src/plugins/scenes';
 import * as assetNodeTypes from '../src/plugins/asset-node-types';
 import * as files from '../src/plugins/files';
+import * as history from '../src/plugins/history';
 import {
   SAFE_BOTTOM,
   addNode,
@@ -156,6 +157,7 @@ async function harness(extra: Record<string, Route> = {}, previewUrl: string | n
     subscribe: nothing,
     update: async () => ({ reload: false, diagnostics: [] }),
   });
+  await ctx.plugin(history);
   await ctx.plugin(scenes, { url: 'ws://x/ide', fetchFn });
   await vi.waitFor(() => expect(ctx.scenes.docs()).toEqual([BASE, BONUS]));
   const puts = () => calls.filter((c) => c.method === 'PUT').map((c) => c.body as SceneDoc);

@@ -8,6 +8,7 @@ import {
   type ScenesResponse,
 } from '@energy8engine/contracts';
 import type { ConnectionConfig } from './connection';
+import { valueStep } from './history';
 import { ScenesSidebar } from '../shell/ScenesSidebar';
 import { SceneDocument } from '../shell/SceneDocument';
 import { PropertiesSidebar } from '../shell/PropertiesSidebar';
@@ -112,6 +113,7 @@ export const inject = [
   'gameComposition',
   'assetNodeTypes',
   'files',
+  'history',
 ];
 
 function ownDiagnostic(where: string, message: string): Diagnostic {
@@ -129,6 +131,7 @@ function reason(error: unknown): string {
 }
 
 const tabKey = (id: string) => `f:scenes/${id}.scene.yml`;
+const SCENE_TAB = /^f:scenes\/([a-z0-9_]+)\.scene\.yml$/;
 
 export function apply(ctx: Context, config: ScenesConfig) {
   const listeners = new Set<() => void>();
@@ -244,7 +247,29 @@ export function apply(ctx: Context, config: ScenesConfig) {
     },
     create: (id) => send('POST', '/api/scenes', { id }),
     remove: (id) => send('DELETE', `/api/scenes/${encodeURIComponent(id)}`),
-    update: (doc) => send('PUT', `/api/scenes/${encodeURIComponent(doc.id)}`, doc),
+    async update(doc) {
+      // Captured before the PUT: the docs the host resolves and applies
+      // arrive INSIDE `send`, so `docs` is already the new set by the time
+      // this `await` returns.
+      const before = docs.find((d) => d.id === doc.id);
+      const diagnostics = await send('PUT', `/api/scenes/${encodeURIComponent(doc.id)}`, doc);
+      // A scene this write CREATED has no "before" to go back to — undoing
+      // it would need a delete, out of scope (design doc §3).
+      if (diagnostics.length === 0 && before !== undefined && !ctx.history.replaying()) {
+        ctx.history.record(
+          `scene:${doc.id}`,
+          valueStep({
+            label: `scene ${doc.id}`,
+            before,
+            after: doc,
+            read: () => docs.find((d) => d.id === doc.id),
+            write: async (value) => ({ error: (await service.update(value))[0]?.message ?? null }),
+            history: ctx.history,
+          }),
+        );
+      }
+      return diagnostics;
+    },
     preview: (id) => send('POST', '/api/scenes/preview', { scene: id }),
     open: (id) => ctx.shell.openPath(`scenes/${id}.scene.yml`),
     variant: (scene) => variants.get(scene) ?? null,
@@ -331,6 +356,15 @@ export function apply(ctx: Context, config: ScenesConfig) {
         sideRight: 'scenes',
       }),
     'scenes:viewer',
+  );
+
+  ctx.effect(
+    () =>
+      ctx.history.scope((key) => {
+        const match = SCENE_TAB.exec(key);
+        return match ? [`scene:${match[1]}`] : undefined;
+      }),
+    'scenes:history-scope',
   );
 
   ctx.effect(

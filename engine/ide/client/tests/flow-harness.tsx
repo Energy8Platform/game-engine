@@ -8,6 +8,7 @@ import * as slots from '../src/plugins/slots';
 import * as shell from '../src/plugins/shell';
 import * as flow from '../src/plugins/flow';
 import * as files from '../src/plugins/files';
+import * as history from '../src/plugins/history';
 import type { SceneSelection, ScenesService } from '../src/plugins/scenes';
 
 /**
@@ -141,6 +142,7 @@ export async function harness(
   await ctx.plugin(shell);
   ctx.provide('scenes', scenesStub(sceneIds));
   await ctx.plugin(files, { fetchFn });
+  await ctx.plugin(history);
   await ctx.plugin(flow, { url: 'ws://x/ide', fetchFn });
   return { ctx, socket, calls, fetchFn };
 }

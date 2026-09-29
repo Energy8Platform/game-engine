@@ -26,10 +26,20 @@ export const name = 'reels';
 // symbol ids off `ctx.symbols` (`useSymbols`) — a sibling plugin's own
 // service, so cordis refuses the bare read without it declared here, the
 // same rule `flow.tsx` already follows for its own read of `ctx.scenes`.
-export const inject = ['gameComposition', 'slots', 'shell', 'symbols'];
+// `history`: the scope registered alongside the tab below.
+export const inject = ['gameComposition', 'slots', 'shell', 'symbols', 'history'];
 
 const hasReels1 = (ctx: Context) =>
   (ctx.gameComposition.rows ?? []).some((row) => row.id === 'reels1');
+
+/** The rows `ReelsSettings` splits its sections across (design doc §3) — fixed, not read off `rows`: the Reels tab undoes these five regardless of which of them a project actually uses. */
+const REEL_ROW_KEYS = [
+  'row:reels1',
+  'row:motion1',
+  'row:anticipation1',
+  'row:cascade1',
+  'row:features1',
+];
 
 export function apply(ctx: Context) {
   let dispose: (() => void) | null = null;
@@ -67,10 +77,12 @@ export function apply(ctx: Context) {
           return <ReelsSettings ctx={ctx} />;
         },
       );
+      const offHistory = ctx.history.scope((key) => (key === 'reels' ? REEL_ROW_KEYS : undefined));
       dispose = () => {
         offActivity();
         offDocument();
         offSideRight();
+        offHistory();
       };
     } else {
       dispose?.();

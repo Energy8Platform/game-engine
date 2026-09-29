@@ -42,6 +42,23 @@ describe('reels plugin — presence', () => {
     expect(ctx.slots.list('shell.sideRight').find((e) => e.key === 'reels')).toBeUndefined();
   });
 
+  it('registers the history scope with reels1 present (the five reel row keys), and drops it when reels1 goes', async () => {
+    const { ctx, setRows } = await harness([]);
+    expect(ctx.history.keysFor('reels')).toEqual([]);
+
+    setRows([row('reels1')]);
+    expect(ctx.history.keysFor('reels')).toEqual([
+      'row:reels1',
+      'row:motion1',
+      'row:anticipation1',
+      'row:cascade1',
+      'row:features1',
+    ]);
+
+    setRows([]);
+    expect(ctx.history.keysFor('reels')).toEqual([]);
+  });
+
   it('setSideRight("reels", …) follows the reels1 rows presence, shown once the Reels tab is active', async () => {
     const { ctx, setRows } = await harness([row('reels1')]);
     ctx.shell.openContributed('reels');

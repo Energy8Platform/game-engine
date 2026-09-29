@@ -9,6 +9,7 @@ import * as viewers from '../src/plugins/viewers';
 import * as scenes from '../src/plugins/scenes';
 import * as assetNodeTypes from '../src/plugins/asset-node-types';
 import * as files from '../src/plugins/files';
+import * as history from '../src/plugins/history';
 
 /**
  * The `scenes` service booted on a real `Context` with the real
@@ -30,7 +31,7 @@ class FakeSocket implements WebSocketLike {
   }
 }
 
-type Route = (body: unknown) => { status?: number; body: unknown } | Promise<never>;
+type Route = (body: unknown) => { status?: number; body: unknown } | Promise<{ status?: number; body: unknown }>;
 
 const A: SceneDoc = { id: 'a', nodes: [{ id: 'n', type: 'sprite', props: {} }] };
 const B: SceneDoc = { id: 'b', nodes: [] };
@@ -66,6 +67,7 @@ async function harness(routes: Record<string, Route>) {
   // The canvas (`SceneDocument`, not rendered here) is why `scenes` injects these four.
   ctx.provide('workspace', { state: () => null, subscribe: () => () => {} });
   ctx.provide('gameComposition', { rows: null, reloads: 0, subscribe: () => () => {} });
+  await ctx.plugin(history);
   await ctx.plugin(assetNodeTypes);
   await ctx.plugin(files, { fetchFn });
   await ctx.plugin(scenes, { url: 'ws://x/ide', fetchFn });
@@ -139,6 +141,88 @@ describe('scenes service', () => {
     expect(await ctx.scenes.remove('a')).toEqual([]);
     expect(calls[2]).toEqual({ method: 'DELETE', url: '/api/scenes/a', body: undefined });
     expect(ctx.scenes.docs()).toEqual([]);
+  });
+
+  it('an accepted update records a step under "scene:<id>"; undo PUTs the before doc and is not re-recorded; redo PUTs the after doc', async () => {
+    const after: SceneDoc = { id: 'a', nodes: [] };
+    const { ctx, calls } = await harness({
+      'GET /api/scenes': boot(),
+      // Echoes back whatever was PUT — the same route serves the person's
+      // edit, the undo's write and the redo's write.
+      'PUT /api/scenes/a': (body) => ({ body: { scenes: [body], diagnostics: [], nodeTypes: [] } }),
+    });
+    await vi.waitFor(() => expect(ctx.scenes.docs()).toEqual([A]));
+
+    expect(await ctx.scenes.update(after)).toEqual([]);
+    expect(calls).toHaveLength(2);
+
+    expect(await ctx.history.undo(['scene:a'])).toEqual({
+      kind: 'undo',
+      ok: true,
+      label: 'scene a',
+    });
+    expect(calls.at(-1)).toEqual({ method: 'PUT', url: '/api/scenes/a', body: A });
+    expect(ctx.scenes.docs()).toEqual([A]);
+    // The undo's own write is not recorded as a fresh step.
+    expect(await ctx.history.undo(['scene:a'])).toEqual({
+      kind: 'undo',
+      ok: false,
+      reason: 'nothing to undo',
+    });
+
+    expect(await ctx.history.redo(['scene:a'])).toEqual({
+      kind: 'redo',
+      ok: true,
+      label: 'scene a',
+    });
+    expect(calls.at(-1)).toEqual({ method: 'PUT', url: '/api/scenes/a', body: after });
+  });
+
+  it('a refused update records nothing', async () => {
+    const { ctx } = await harness({
+      'GET /api/scenes': boot(),
+      'PUT /api/scenes/a': () => ({ status: 400, body: { diagnostics: [refusal] } }),
+    });
+    await vi.waitFor(() => expect(ctx.scenes.docs()).toEqual([A]));
+
+    expect(await ctx.scenes.update({ id: 'a', nodes: [] })).toEqual([refusal]);
+    expect(await ctx.history.undo(['scene:a'])).toEqual({
+      kind: 'undo',
+      ok: false,
+      reason: 'nothing to undo',
+    });
+  });
+
+  it("an echo frame that lands before the PUT's own answer does not stop an immediate undo", async () => {
+    let resolvePut!: (answer: { body: unknown }) => void;
+    const pending = new Promise<{ body: unknown }>((resolve) => {
+      resolvePut = resolve;
+    });
+    const after: SceneDoc = { id: 'a', nodes: [] };
+    const { ctx, socket } = await harness({
+      'GET /api/scenes': boot(),
+      'PUT /api/scenes/a': () => pending,
+    });
+    await vi.waitFor(() => expect(ctx.scenes.docs()).toEqual([A]));
+
+    const write = ctx.scenes.update(after);
+    // The host broadcasts the accepted write to every socket, the writer's
+    // included — often before that socket's own PUT response arrives.
+    socket.receive({ type: 'scenes', scenes: [after], diagnostics: [] });
+    resolvePut({ body: { scenes: [after], diagnostics: [], nodeTypes: [] } });
+    expect(await write).toEqual([]);
+
+    expect(await ctx.history.undo(['scene:a'])).toEqual({
+      kind: 'undo',
+      ok: true,
+      label: 'scene a',
+    });
+  });
+
+  it('the scene tab scope maps "f:scenes/<id>.scene.yml" to "scene:<id>"', async () => {
+    const { ctx } = await harness({ 'GET /api/scenes': boot() });
+    expect(ctx.history.keysFor('f:scenes/intro.scene.yml')).toEqual(['scene:intro']);
+    expect(ctx.history.keysFor('flow')).toEqual([]);
   });
 
   it('a transport failure is one diagnostic of its own, returned and reported', async () => {

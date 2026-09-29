@@ -5,6 +5,7 @@ import { afterEach, vi } from 'vitest';
 import type { GameCompositionRow, SymbolsDoc } from '@energy8engine/contracts';
 import * as slots from '../src/plugins/slots';
 import * as shell from '../src/plugins/shell';
+import * as history from '../src/plugins/history';
 import * as reels from '../src/plugins/reels';
 
 /**
@@ -104,6 +105,7 @@ export async function harness(
   built.push(ctx);
   await ctx.plugin(slots);
   await ctx.plugin(shell);
+  await ctx.plugin(history);
   let workspace = {
     projects: [],
     templates: [],

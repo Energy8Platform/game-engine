@@ -103,6 +103,69 @@ describe('flow service', () => {
     expect(ctx.flow.doc()).toEqual(changed);
   });
 
+  it('an accepted update records a step under "flow"; undo PUTs the before doc and is not re-recorded; redo PUTs the after doc', async () => {
+    const after: FlowDoc = { version: 1, nodes: [], edges: [] };
+    const { ctx, calls } = await harness({
+      'GET /api/flow': boot(),
+      // Echoes back whatever was PUT — the person's edit, the undo's
+      // write and the redo's write all go through this same route.
+      'PUT /api/flow': (body) => ({ body: { doc: body, diagnostics: [], kinds: KINDS } }),
+    });
+    await vi.waitFor(() => expect(ctx.flow.doc()).toEqual(DOC));
+
+    expect(await ctx.flow.update(after)).toEqual([]);
+    expect(calls).toHaveLength(2);
+
+    expect(await ctx.history.undo(['flow'])).toEqual({ kind: 'undo', ok: true, label: 'flow' });
+    expect(calls.at(-1)).toEqual({ method: 'PUT', url: '/api/flow', body: DOC });
+    expect(ctx.flow.doc()).toEqual(DOC);
+    // The undo's own write is not recorded as a fresh step.
+    expect(await ctx.history.undo(['flow'])).toEqual({
+      kind: 'undo',
+      ok: false,
+      reason: 'nothing to undo',
+    });
+
+    expect(await ctx.history.redo(['flow'])).toEqual({ kind: 'redo', ok: true, label: 'flow' });
+    expect(calls.at(-1)).toEqual({ method: 'PUT', url: '/api/flow', body: after });
+  });
+
+  it('a refused update records nothing', async () => {
+    const { ctx } = await harness({
+      'GET /api/flow': boot(),
+      'PUT /api/flow': () => ({ status: 400, body: { diagnostics: [refusal] } }),
+    });
+    await vi.waitFor(() => expect(ctx.flow.doc()).toEqual(DOC));
+
+    expect(await ctx.flow.update({ version: 1, nodes: [], edges: [] })).toEqual([refusal]);
+    expect(await ctx.history.undo(['flow'])).toEqual({
+      kind: 'undo',
+      ok: false,
+      reason: 'nothing to undo',
+    });
+  });
+
+  it('the write that creates flow.yml (doc was null) records nothing — undo would need a delete', async () => {
+    const { ctx, calls } = await harness({
+      'GET /api/flow': boot({ doc: null, diagnostics: [], kinds: [] }),
+      'PUT /api/flow': () => ({ body: { doc: DOC, diagnostics: [], kinds: [] } }),
+    });
+    await vi.waitFor(() => expect(calls).toHaveLength(1));
+
+    expect(await ctx.flow.update(DOC)).toEqual([]);
+    expect(await ctx.history.undo(['flow'])).toEqual({
+      kind: 'undo',
+      ok: false,
+      reason: 'nothing to undo',
+    });
+  });
+
+  it('the flow tab scope is exactly "flow"', async () => {
+    const { ctx } = await harness({ 'GET /api/flow': boot() });
+    expect(ctx.history.keysFor('flow')).toEqual(['flow']);
+    expect(ctx.history.keysFor('scene:a')).toEqual([]);
+  });
+
   it('a transport failure on update is one diagnostic of its own, returned and reported', async () => {
     const { ctx } = await harness({
       'GET /api/flow': boot(),

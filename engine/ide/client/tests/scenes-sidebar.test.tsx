@@ -11,6 +11,7 @@ import * as viewers from '../src/plugins/viewers';
 import * as scenes from '../src/plugins/scenes';
 import * as assetNodeTypes from '../src/plugins/asset-node-types';
 import * as files from '../src/plugins/files';
+import * as history from '../src/plugins/history';
 
 /**
  * `ScenesSidebar`, rendered through the plugin's OWN `shell.sidebar`
@@ -66,6 +67,7 @@ async function harness(routes: Record<string, Route>) {
   // The canvas (`SceneDocument`, not rendered here) is why `scenes` injects these four.
   ctx.provide('workspace', { state: () => null, subscribe: () => () => {} });
   ctx.provide('gameComposition', { rows: null, reloads: 0, subscribe: () => () => {} });
+  await ctx.plugin(history);
   await ctx.plugin(assetNodeTypes);
   await ctx.plugin(files, { fetchFn });
   await ctx.plugin(scenes, { url: 'ws://x/ide', fetchFn });

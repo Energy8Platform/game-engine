@@ -11,6 +11,7 @@ import * as flow from '../src/plugins/flow';
 import * as files from '../src/plugins/files';
 import * as assetNodeTypes from '../src/plugins/asset-node-types';
 import * as symbols from '../src/plugins/symbols';
+import * as history from '../src/plugins/history';
 import type { SceneSelection, ScenesService } from '../src/plugins/scenes';
 
 /**
@@ -199,6 +200,7 @@ export async function harness(
     },
     update: async () => ({ reload: false, diagnostics: [] }),
   });
+  await ctx.plugin(history);
   await ctx.plugin(symbols, { url: 'ws://x/ide', fetchFn });
   const puts = () =>
     calls.filter((c) => c.method === 'PUT' && c.url === '/api/symbols').map((c) => c.body);

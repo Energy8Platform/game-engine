@@ -11,6 +11,7 @@ import {
   type GameTransitionsMessage,
 } from '@energy8engine/contracts';
 import type { ConnectionConfig, WebSocketLike } from './connection';
+import { valueStep } from './history';
 
 /**
  * The feeder for the GAME half of the composition screen.
@@ -124,7 +125,7 @@ export interface GameCompositionConfig extends ConnectionConfig {
 }
 
 export const name = 'game-composition';
-export const inject = ['connection'];
+export const inject = ['connection', 'history'];
 
 /** The diagnostics this plugin authors itself: the composition could not be read, or an edit could not be delivered. */
 function ownDiagnostic(where: string, message: string): Diagnostic {
@@ -211,6 +212,10 @@ export function apply(ctx: Context, config: GameCompositionConfig) {
       return () => listeners.delete(listener);
     },
     async update(id, nextConfig) {
+      // Captured before the PUT: `undefined` for a row that does not exist
+      // yet (nothing here creates one — a row not existing before is a
+      // programmer error, not a state undo has to reverse either way).
+      const before = service.rows?.find((row) => row.id === id)?.config;
       const where = `/api/composition/rows/${encodeURIComponent(id)}`;
       let res: Response;
       let body: unknown;
@@ -235,6 +240,22 @@ export function apply(ctx: Context, config: GameCompositionConfig) {
         service.diagnostics = Array.isArray(answer.diagnostics)
           ? (answer.diagnostics as Diagnostic[])
           : [];
+        if (before !== undefined && !ctx.history.replaying()) {
+          ctx.history.record(
+            `row:${id}`,
+            valueStep({
+              label: `${id} settings`,
+              before,
+              after: nextConfig,
+              read: () => service.rows?.find((row) => row.id === id)?.config,
+              write: async (value) => {
+                const result = await service.update(id, value);
+                return { error: result.diagnostics[0]?.message ?? null };
+              },
+              history: ctx.history,
+            }),
+          );
+        }
         notify();
         return { reload: answer.reload === true, diagnostics: [] };
       }

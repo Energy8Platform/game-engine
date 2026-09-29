@@ -139,6 +139,18 @@ export function App({ ctx }: { ctx: Context }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [ctx]);
 
+  // The Composition tab undoes every row currently on screen — read live,
+  // not fixed at registration time, so a row a bundle/patch edit adds or
+  // drops later is covered (or dropped) without re-registering the scope.
+  useEffect(() => {
+    return ctx.history.scope((key) =>
+      key === 'composition'
+        ? (ctx.gameComposition.rows ?? []).map((row) => `row:${row.id}`)
+        : undefined,
+    );
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ctx]);
+
   useEffect(() => {
     return ctx.slots.register({
       name: 'shell.activity',

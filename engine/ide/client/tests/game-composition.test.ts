@@ -317,6 +317,59 @@ describe('game composition feeder — frames and edits', () => {
     expect(ctx.connection.diagnostics).toEqual(refused);
     // The rows the host last resolved stay: a refused write changed nothing.
     expect(ctx.gameComposition.rows?.[1].config).toEqual({});
+    // Nothing to undo either — a refused write records no step.
+    expect(await ctx.history.undo(['row:reels1'])).toEqual({
+      kind: 'undo',
+      ok: false,
+      reason: 'nothing to undo',
+    });
+  });
+
+  it('an accepted update records a step under "row:<id>"; undo PUTs the before config and is not re-recorded; redo PUTs the after config', async () => {
+    const puts: { url: string; config: unknown }[] = [];
+    const { ctx } = await harness((async (url: string, init?: RequestInit) => {
+      if (String(url).includes('/api/workspace')) return new Promise<Response>(() => {});
+      if (init?.method === 'PUT') {
+        const { config } = JSON.parse(String(init.body)) as { config: Record<string, unknown> };
+        puts.push({ url: String(url), config });
+        const id = String(url).split('/').pop();
+        const nextRows = ROWS.map((r) => (r.id === id ? { ...r, config } : r));
+        return new Response(JSON.stringify({ rows: nextRows, reload: false, diagnostics: [] }), {
+          headers: { 'content-type': 'application/json' },
+        });
+      }
+      return new Response(JSON.stringify({ rows: ROWS, diagnostics: [] }), {
+        headers: { 'content-type': 'application/json' },
+      });
+    }) as unknown as typeof fetch);
+    await vi.waitFor(() => expect(ctx.gameComposition.rows).toHaveLength(2));
+
+    expect(await ctx.gameComposition.update('reels1', { grid: 4 })).toEqual({
+      reload: false,
+      diagnostics: [],
+    });
+    expect(puts).toEqual([{ url: '/api/composition/rows/reels1', config: { grid: 4 } }]);
+
+    expect(await ctx.history.undo(['row:reels1'])).toEqual({
+      kind: 'undo',
+      ok: true,
+      label: 'reels1 settings',
+    });
+    expect(puts.at(-1)).toEqual({ url: '/api/composition/rows/reels1', config: {} });
+    expect(ctx.gameComposition.rows?.[1].config).toEqual({});
+    // The undo's own write is not recorded as a fresh step.
+    expect(await ctx.history.undo(['row:reels1'])).toEqual({
+      kind: 'undo',
+      ok: false,
+      reason: 'nothing to undo',
+    });
+
+    expect(await ctx.history.redo(['row:reels1'])).toEqual({
+      kind: 'redo',
+      ok: true,
+      label: 'reels1 settings',
+    });
+    expect(puts.at(-1)).toEqual({ url: '/api/composition/rows/reels1', config: { grid: 4 } });
   });
 
   it('a 400 that carries only an error string becomes one diagnostic naming it', async () => {

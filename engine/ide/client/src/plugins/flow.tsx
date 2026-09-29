@@ -9,6 +9,7 @@ import {
   type FlowTraceEntry,
 } from '@energy8engine/contracts';
 import type { ConnectionConfig } from './connection';
+import { valueStep } from './history';
 import { FlowDocument } from '../shell/FlowDocument';
 import { FlowPalette } from '../shell/FlowPalette';
 import { FlowProperties } from '../shell/FlowProperties';
@@ -81,7 +82,7 @@ export interface FlowConfig extends ConnectionConfig {
 export const name = 'flow';
 // `scenes` and `files` are the inspector's (`FlowProperties`): a `scene`
 // field offers the scene ids, an `asset` field the project's files.
-export const inject = ['slots', 'connection', 'shell', 'scenes', 'files'];
+export const inject = ['slots', 'connection', 'shell', 'scenes', 'files', 'history'];
 
 /** Entries kept in the trace, most-recent run only. */
 const TRACE_CAP = 500;
@@ -157,6 +158,10 @@ export function apply(ctx: Context, config: FlowConfig) {
       notify();
     },
     async update(next) {
+      // Captured before the PUT — `null` until a project has a flow.yml at
+      // all, so a write that CREATES it has no "before" to go back to
+      // (undoing it would need a delete, out of scope, design doc §3).
+      const before = doc;
       let res: Response;
       let answer: Partial<FlowResponse> & { diagnostics?: unknown };
       try {
@@ -180,6 +185,19 @@ export function apply(ctx: Context, config: FlowConfig) {
       }
       applyFlow(answer.doc ?? null, host);
       if (Array.isArray(answer.kinds)) applyKinds(answer.kinds);
+      if (host.length === 0 && before !== null && !ctx.history.replaying()) {
+        ctx.history.record(
+          'flow',
+          valueStep({
+            label: 'flow',
+            before,
+            after: next,
+            read: () => doc ?? undefined,
+            write: async (value) => ({ error: (await service.update(value))[0]?.message ?? null }),
+            history: ctx.history,
+          }),
+        );
+      }
       notify();
       return [];
     },
@@ -252,6 +270,11 @@ export function apply(ctx: Context, config: FlowConfig) {
         FlowDocument,
       ),
     'flow:document',
+  );
+
+  ctx.effect(
+    () => ctx.history.scope((key) => (key === 'flow' ? ['flow'] : undefined)),
+    'flow:history-scope',
   );
 
   ctx.effect(

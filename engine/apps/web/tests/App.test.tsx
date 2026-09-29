@@ -530,6 +530,98 @@ describe('App', () => {
     expect(ctx.shell.active()?.key).toBe('composition');
   });
 
+  it('the Composition tab\'s history scope covers every row currently on the composition', async () => {
+    const rows = [
+      { id: 'boot1', name: '@energy8engine/boot', config: {}, from: 'bundle:e8-base' },
+      { id: 'reels1', name: '@energy8engine/reels', config: {}, from: 'bundle:e8-base' },
+    ];
+    const socket = fakeSocket();
+    const ctx = await createIdeClient({
+      url: 'ws://x/ide',
+      socketFactory: () => socket,
+      fetchFn: (async (input: unknown) => {
+        const url = String(input);
+        if (url === '/api/composition') {
+          return new Response(JSON.stringify({ rows, diagnostics: [] }), {
+            headers: { 'content-type': 'application/json' },
+          });
+        }
+        return new Response(
+          JSON.stringify(
+            url === '/api/files'
+              ? { entries: [], diagnostics: [] }
+              : url === '/api/workspace'
+                ? { projects: [], templates: [], active: null, previewUrl: null, diagnostics: [] }
+                : { rows: [], diagnostics: [] },
+          ),
+          { headers: { 'content-type': 'application/json' } },
+        );
+      }) as unknown as typeof fetch,
+    });
+    render(<App ctx={ctx} />);
+    await waitFor(() => expect(ctx.gameComposition.rows).toHaveLength(2));
+    expect(ctx.history.keysFor('composition')).toEqual(['row:boot1', 'row:reels1']);
+    expect(ctx.history.keysFor('nope')).toEqual([]);
+  });
+
+  it('a reels1 write: undo from the Composition tab undoes it, redo from the Reels tab redoes it', async () => {
+    let rows = [
+      { id: 'boot1', name: '@energy8engine/boot', config: {}, from: 'bundle:e8-base' },
+      { id: 'reels1', name: '@energy8engine/reels', config: {}, from: 'bundle:e8-base' },
+    ];
+    const puts: { id: string; config: Record<string, unknown> }[] = [];
+    const socket = fakeSocket();
+    const ctx = await createIdeClient({
+      url: 'ws://x/ide',
+      socketFactory: () => socket,
+      fetchFn: (async (input: unknown, init?: RequestInit) => {
+        const url = String(input);
+        const method = init?.method ?? 'GET';
+        if (url === '/api/composition' && method === 'GET') {
+          return new Response(JSON.stringify({ rows, diagnostics: [] }), {
+            headers: { 'content-type': 'application/json' },
+          });
+        }
+        if (url.startsWith('/api/composition/rows/') && method === 'PUT') {
+          const id = decodeURIComponent(url.slice('/api/composition/rows/'.length));
+          const { config } = JSON.parse(String(init!.body)) as { config: Record<string, unknown> };
+          puts.push({ id, config });
+          rows = rows.map((r) => (r.id === id ? { ...r, config } : r));
+          return new Response(JSON.stringify({ rows, reload: false, diagnostics: [] }), {
+            headers: { 'content-type': 'application/json' },
+          });
+        }
+        return new Response(
+          JSON.stringify(
+            url === '/api/files'
+              ? { entries: [], diagnostics: [] }
+              : url === '/api/workspace'
+                ? { projects: [], templates: [], active: null, previewUrl: null, diagnostics: [] }
+                : { rows: [], diagnostics: [] },
+          ),
+          { headers: { 'content-type': 'application/json' } },
+        );
+      }) as unknown as typeof fetch,
+    });
+    render(<App ctx={ctx} />);
+    await waitFor(() => expect(ctx.gameComposition.rows).toHaveLength(2));
+
+    expect(await ctx.gameComposition.update('reels1', { cols: 6 })).toEqual({
+      reload: false,
+      diagnostics: [],
+    });
+    expect(ctx.gameComposition.rows?.find((r) => r.id === 'reels1')?.config).toEqual({ cols: 6 });
+
+    const undone = await ctx.history.undo(ctx.history.keysFor('composition'));
+    expect(undone).toEqual({ kind: 'undo', ok: true, label: 'reels1 settings' });
+    expect(puts.at(-1)).toEqual({ id: 'reels1', config: {} });
+    expect(ctx.gameComposition.rows?.find((r) => r.id === 'reels1')?.config).toEqual({});
+
+    const redone = await ctx.history.redo(ctx.history.keysFor('reels'));
+    expect(redone).toEqual({ kind: 'redo', ok: true, label: 'reels1 settings' });
+    expect(puts.at(-1)).toEqual({ id: 'reels1', config: { cols: 6 } });
+  });
+
   it('the demo plugin brings an activity button AND a document', async () => {
     // Through `modules`, the real loader: a fake snapshot names the
     // plugin's client half, and `importModule` hands back its real source.

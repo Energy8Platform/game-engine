@@ -8,6 +8,7 @@ import {
   type SymbolsResponse,
 } from '@energy8engine/contracts';
 import type { ConnectionConfig } from './connection';
+import { valueStep } from './history';
 import { EMPTY } from '../shell/symbols-doc';
 import { SymbolsDocument } from '../shell/SymbolsDocument';
 import { SymbolsList } from '../shell/SymbolsList';
@@ -80,7 +81,7 @@ export const name = 'symbols';
 // `scenes`: the node types (state types, `hasLoop`) and the `scene`/`node`
 // pickers; `files`/`assetNodeTypes`: the document's drop and the
 // inspector's `asset` picker.
-export const inject = ['slots', 'connection', 'shell', 'scenes', 'files', 'assetNodeTypes'];
+export const inject = ['slots', 'connection', 'shell', 'scenes', 'files', 'assetNodeTypes', 'history'];
 
 function ownDiagnostic(where: string, message: string): Diagnostic {
   return diagnostic(
@@ -183,6 +184,30 @@ export function apply(ctx: Context, config: SymbolsConfig) {
     return [];
   }
 
+  /**
+   * Runs `putDoc(next)` and, on an accepted write, records `before`/`next`
+   * under the `symbols` key — `before` is whatever the doc was when THIS
+   * write's turn in the queue came, which for a reducer is the doc it was
+   * actually run against, not the doc at the moment `update` was called.
+   */
+  async function recordedPut(before: SymbolsDoc, next: SymbolsDoc): Promise<Diagnostic[]> {
+    const diagnostics = await putDoc(next);
+    if (diagnostics.length === 0 && !ctx.history.replaying()) {
+      ctx.history.record(
+        'symbols',
+        valueStep({
+          label: 'symbols',
+          before,
+          after: next,
+          read: () => doc ?? EMPTY,
+          write: async (value) => ({ error: (await service.update(value))[0]?.message ?? null }),
+          history: ctx.history,
+        }),
+      );
+    }
+    return diagnostics;
+  }
+
   // The write queue, moved in from `SymbolsDocument`'s own `commit`: one
   // PUT at a time, so a reducer always reduces the doc as it stands when
   // its turn comes rather than the one its caller last saw. `SymbolsProperties`
@@ -195,10 +220,10 @@ export function apply(ctx: Context, config: SymbolsConfig) {
     arg: SymbolsDoc | ((doc: SymbolsDoc) => SymbolsDoc),
   ): Promise<Diagnostic[]> {
     const run = chain.then(() => {
-      if (typeof arg !== 'function') return putDoc(arg);
       const current = doc ?? EMPTY;
+      if (typeof arg !== 'function') return recordedPut(current, arg);
       const next = arg(current);
-      return next === current ? [] : putDoc(next);
+      return next === current ? [] : recordedPut(current, next);
     });
     // A reducer that throws must not jam the queue for every write after it.
     chain = run.catch(() => {});
@@ -278,6 +303,11 @@ export function apply(ctx: Context, config: SymbolsConfig) {
         SymbolsDocument,
       ),
     'symbols:document',
+  );
+
+  ctx.effect(
+    () => ctx.history.scope((key) => (key === 'symbols' ? ['symbols'] : undefined)),
+    'symbols:history-scope',
   );
 
   ctx.effect(

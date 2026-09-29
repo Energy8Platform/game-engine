@@ -160,6 +160,81 @@ describe('symbols service', () => {
     expect(ctx.symbols.doc()).toEqual(changed);
   });
 
+  it('an accepted update records a step under "symbols"; undo PUTs the before doc and is not re-recorded; redo PUTs the after doc', async () => {
+    const after: SymbolsDoc = { version: 1, symbols: [TWO.symbols[0]] };
+    const { ctx, puts } = await harness({ 'GET /api/symbols': boot(), 'PUT /api/symbols': accept });
+    await vi.waitFor(() => expect(ctx.symbols.doc()).toEqual(TWO));
+
+    expect(await ctx.symbols.update(after)).toEqual([]);
+    expect(puts()).toEqual([{ doc: after }]);
+
+    expect(await ctx.history.undo(['symbols'])).toEqual({
+      kind: 'undo',
+      ok: true,
+      label: 'symbols',
+    });
+    expect(puts().at(-1)).toEqual({ doc: TWO });
+    expect(ctx.symbols.doc()).toEqual(TWO);
+    // The undo's own write is not recorded as a fresh step.
+    expect(await ctx.history.undo(['symbols'])).toEqual({
+      kind: 'undo',
+      ok: false,
+      reason: 'nothing to undo',
+    });
+
+    expect(await ctx.history.redo(['symbols'])).toEqual({
+      kind: 'redo',
+      ok: true,
+      label: 'symbols',
+    });
+    expect(puts().at(-1)).toEqual({ doc: after });
+  });
+
+  it('a refused update records nothing', async () => {
+    const { ctx } = await harness({
+      'GET /api/symbols': boot(),
+      'PUT /api/symbols': () => ({ status: 400, body: { diagnostics: [refusal] } }),
+    });
+    await vi.waitFor(() => expect(ctx.symbols.doc()).toEqual(TWO));
+
+    expect(await ctx.symbols.update(TWO)).toEqual([refusal]);
+    expect(await ctx.history.undo(['symbols'])).toEqual({
+      kind: 'undo',
+      ok: false,
+      reason: 'nothing to undo',
+    });
+  });
+
+  it('a reducer write records the doc it produced; before is the doc the queue ran it on', async () => {
+    const { ctx, puts } = await harness({
+      'GET /api/symbols': boot({ doc: EMPTY, known: KNOWN, diagnostics: [] }),
+      'PUT /api/symbols': accept,
+    });
+    await vi.waitFor(() => expect(ctx.symbols.doc()).toEqual(EMPTY));
+
+    expect(await ctx.symbols.update((d) => addSymbol(d, '1', 'cherry'))).toEqual([]);
+    expect(ctx.symbols.doc()!.symbols.map((s) => s.id)).toEqual(['1']);
+
+    expect(await ctx.history.undo(['symbols'])).toEqual({
+      kind: 'undo',
+      ok: true,
+      label: 'symbols',
+    });
+    expect(puts().at(-1)).toEqual({ doc: EMPTY });
+    expect(ctx.symbols.doc()).toEqual(EMPTY);
+    expect(await ctx.history.undo(['symbols'])).toEqual({
+      kind: 'undo',
+      ok: false,
+      reason: 'nothing to undo',
+    });
+  });
+
+  it('the symbols tab scope is exactly "symbols"', async () => {
+    const { ctx } = await harness({ 'GET /api/symbols': boot() });
+    expect(ctx.history.keysFor('symbols')).toEqual(['symbols']);
+    expect(ctx.history.keysFor('nope')).toEqual([]);
+  });
+
   it('a transport failure on update is one diagnostic of its own, returned and reported', async () => {
     const { ctx } = await harness({
       'GET /api/symbols': boot(),
