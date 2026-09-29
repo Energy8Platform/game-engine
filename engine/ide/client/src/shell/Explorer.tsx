@@ -6,6 +6,7 @@ import { activateOnKey } from './activate';
 import { EditorDocument } from './EditorDocument';
 import {
   REMOVE_OVER_CAP_MESSAGE,
+  REMOVE_UNREADABLE_MESSAGE,
   createStep,
   mkdirStep,
   moveStep,
@@ -67,12 +68,14 @@ const DRAG_TYPE = 'text/x-e8-path';
  * irreversible actions, same shape `AssetsScreen` used. A delete's
  * `snapshot` is what undo would need to bring it back — asked for the
  * moment the question comes up (`askDelete`), so it is usually ready by
- * the time "yes" is clicked; `null` while still being read, in which
- * case a click that lands first is simply not undoable (same as over the
- * cap — see `confirm`).
+ * the time "yes" is clicked; `null` while still being read. `read` is
+ * that same in-flight read, kept so `confirm` can await the very read
+ * already underway instead of either racing ahead of it (removing
+ * something a moment before its own undo data was known) or starting a
+ * second one.
  */
 type Pending =
-  | { kind: 'delete'; path: string; snapshot: RemoveSnapshot | null }
+  | { kind: 'delete'; path: string; snapshot: RemoveSnapshot | null; read: Promise<RemoveSnapshot> }
   | { kind: 'overwrite'; path: string; bytes: Uint8Array; also: Diagnostic[] };
 
 /** Which inline input is up: a new entry inside `dir`, or a new name for `path`. */
@@ -329,15 +332,20 @@ export function Explorer({ ctx }: { ctx: Context }): JSX.Element {
   /**
    * The confirm shows at once, `snapshot: null` — a remove is common and
    * usually small; there is no reason to make every one of them wait on
-   * a read. The bytes (or, over the cap, just the fact of it) land
-   * moments later, patched into the SAME pending row once read — but
-   * only while it is still the row this delete asked about; a `cancel`,
-   * or a different row's own delete, in the meantime drops the answer.
+   * a read before even asking. `read` is the same promise kept on the
+   * pending row (see `Pending`'s own comment): `confirm` awaits it before
+   * removing anything, so "yes" can never race ahead of knowing whether
+   * this remove will be undoable. The resolved snapshot is also patched
+   * into the SAME pending row as soon as it lands, for the confirm text —
+   * but only while it is still the row this delete asked about; a
+   * `cancel`, or a different row's own delete, in the meantime drops the
+   * answer.
    */
   function askDelete(path: string) {
     setActionDiagnostics([]); // an older refusal shouldn't linger over a new question
-    setPending({ kind: 'delete', path, snapshot: null });
-    void snapshotForRemove(ctx.files, path, entries ?? []).then((snapshot) => {
+    const read = snapshotForRemove(ctx.files, path, entries ?? []);
+    setPending({ kind: 'delete', path, snapshot: null, read });
+    read.then((snapshot) => {
       setPending((prev) => (prev?.kind === 'delete' && prev.path === path ? { ...prev, snapshot } : prev));
     });
   }
@@ -346,7 +354,7 @@ export function Explorer({ ctx }: { ctx: Context }): JSX.Element {
     setPending(null);
   }
 
-  function confirm(asked: Pending) {
+  async function confirm(asked: Pending) {
     setPending(null);
     if (asked.kind === 'overwrite') {
       // The bytes this path holds right now, read just before they are
@@ -356,18 +364,19 @@ export function Explorer({ ctx }: { ctx: Context }): JSX.Element {
       });
       return;
     }
+    // Already resolved (the common case — a read is fast, "yes" is not
+    // usually instant), this is free; still in flight, this is the one
+    // wait in the whole view: nothing else here calls `ctx.files.remove`
+    // before knowing what the remove would take with it.
+    const snapshot = asked.snapshot ?? (await asked.read);
     ctx.files.remove(asked.path).then(({ diagnostics }) => {
       finish(diagnostics);
       if (diagnostics.length === 0) {
-        // Over the cap, `snapshotForRemove` gave up before reading
-        // everything — and with no snapshot yet at all (a fast click,
-        // still loading), there is nothing to undo with either way, so
-        // no step (design doc §4).
-        if (asked.snapshot && !asked.snapshot.overCap) {
-          ctx.history.record(
-            'files',
-            removeStep(stepDeps, asked.path, asked.snapshot.dirs, asked.snapshot.files),
-          );
+        // Over the cap, or a file under the path could not be read —
+        // either way there is nothing (or not everything) to undo with,
+        // so no step (design doc §4).
+        if (!snapshot.overCap && !snapshot.unreadable) {
+          ctx.history.record('files', removeStep(stepDeps, asked.path, snapshot.dirs, snapshot.files));
         }
         // A gone entry can't stay the target for "new file"/"new folder".
         setSelected((prev) =>
@@ -595,16 +604,17 @@ export function Explorer({ ctx }: { ctx: Context }): JSX.Element {
     );
   }
 
-  /** What the delete confirm asks: a directory's count is everything under it, the directory itself excluded; over the cap, it also says the remove won't be undoable (design doc §4). */
+  /** What the delete confirm asks: a directory's count is everything under it, the directory itself excluded; over the cap, or with an unreadable file under it, it also says the remove won't be undoable (design doc §4). */
   function confirmText(entry: FileEntry): string {
     if (pending?.kind === 'overwrite') return `replace "${entry.path}"?`;
     const question =
       entry.kind === 'file'
         ? `delete "${entry.path}"?`
         : `delete folder "${entry.path}" and ${(entries ?? []).filter((e) => e.path.startsWith(`${entry.path}/`)).length} entries?`;
-    return pending?.kind === 'delete' && pending.snapshot?.overCap
-      ? `${question} ${REMOVE_OVER_CAP_MESSAGE}`
-      : question;
+    if (pending?.kind !== 'delete' || !pending.snapshot) return question;
+    if (pending.snapshot.overCap) return `${question} ${REMOVE_OVER_CAP_MESSAGE}`;
+    if (pending.snapshot.unreadable) return `${question} ${REMOVE_UNREADABLE_MESSAGE}`;
+    return question;
   }
 
   return (

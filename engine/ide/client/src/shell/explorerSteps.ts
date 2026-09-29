@@ -89,21 +89,27 @@ export function moveStep(deps: ExplorerStepDeps, from: string, to: string): Hist
 /** The brief's own cap, verbatim: past this many bytes under a removed path, the remove is not undoable. */
 export const REMOVE_UNDO_CAP_BYTES = 20 * 1024 * 1024;
 export const REMOVE_OVER_CAP_MESSAGE = "This can't be undone (over 20 MB).";
+/** A file `tree()` listed that `read()` could not produce — restoring every OTHER file would still lose that one, so the whole remove is refused as undoable rather than partially restorable. */
+export const REMOVE_UNREADABLE_MESSAGE = "This can't be undone (a file could not be read).";
 
 export interface RemoveSnapshot {
   /** Every directory at or under the removed path — sorted, so undo's `mkdir`s land parent before child (a path is always a lexicographic prefix of its own children's). */
   dirs: string[];
   files: [string, Uint8Array][];
   overCap: boolean;
+  /** A file under the path could not be read — see `REMOVE_UNREADABLE_MESSAGE`. Mutually exclusive with `overCap` in practice: reading stops the moment either becomes true. */
+  unreadable: boolean;
 }
 
 /**
  * Reads what a remove of `path` would take with it, while it is still
- * there to read: the confirm needs `overCap` before the remove even
- * happens, and `removeStep`'s undo needs the bytes to hand back. Stops
- * reading once the running total is already over the cap — past that
- * point the remove won't be undoable, so no later file's bytes matter
- * either.
+ * there to read: the confirm needs `overCap`/`unreadable` before the
+ * remove even happens (`Explorer.tsx`'s `confirm` now awaits this before
+ * calling `ctx.files.remove` at all, so "yes" never races past knowing
+ * whether the remove will be undoable), and `removeStep`'s undo needs the
+ * bytes to hand back. Stops reading the moment either becomes true —
+ * past that point the remove won't be undoable regardless of what any
+ * later file holds.
  */
 export async function snapshotForRemove(
   files: FilesService,
@@ -127,19 +133,17 @@ export async function snapshotForRemove(
   const collected: [string, Uint8Array][] = [];
   let total = 0;
   for (const filePath of filePaths) {
-    if (total > REMOVE_UNDO_CAP_BYTES) return { dirs, files: collected, overCap: true };
+    if (total > REMOVE_UNDO_CAP_BYTES) {
+      return { dirs, files: collected, overCap: true, unreadable: false };
+    }
     const { bytes, diagnostics } = await files.read(filePath);
-    // ponytail: a file `tree()` just listed but `read()` can't produce is
-    // skipped rather than making the whole remove non-undoable — a real
-    // host only ever lists what it can also read, so this path isn't
-    // expected to fire. Upgrade path if it ever does: treat it as
-    // `overCap` instead, since an incomplete restore may be worse than
-    // none.
-    if (diagnostics.length > 0 || bytes === undefined) continue;
+    if (diagnostics.length > 0 || bytes === undefined) {
+      return { dirs, files: collected, overCap: false, unreadable: true };
+    }
     collected.push([filePath, bytes]);
     total += bytes.length;
   }
-  return { dirs, files: collected, overCap: total > REMOVE_UNDO_CAP_BYTES };
+  return { dirs, files: collected, overCap: total > REMOVE_UNDO_CAP_BYTES, unreadable: false };
 }
 
 /** `remove <path>` — undo recreates every directory (parent first), then writes every file's bytes back, then refreshes once; redo removes it again. */

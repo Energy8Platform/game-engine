@@ -504,7 +504,15 @@ describe('Explorer — verbs', () => {
   });
 
   it('deleting a folder asks with the count of what is inside, then removes', async () => {
-    const ctx = await harness(tree(['game/spec.json', 'game/script.spin', 'game/sub/x.txt']));
+    // Contents for all three files: an unreadable one would make the
+    // confirm add its own "can't be undone" sentence (`explorer-history
+    // .test.tsx`'s own test covers that) — this test is only about the
+    // count and the remove itself.
+    const ctx = await harness(tree(['game/spec.json', 'game/script.spin', 'game/sub/x.txt']), {
+      'game/spec.json': '{}',
+      'game/script.spin': '',
+      'game/sub/x.txt': 'x',
+    });
     render(<Explorer ctx={ctx} />);
     fireEvent.contextMenu(await screen.findByTestId('explorer-game'));
     await userEvent.click(screen.getByRole('menuitem', { name: 'Delete' }));

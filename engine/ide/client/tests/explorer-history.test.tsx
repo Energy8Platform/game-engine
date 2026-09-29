@@ -4,7 +4,11 @@ import type { Context } from 'cordis';
 import { describe, expect, it } from 'vitest';
 import { Explorer } from '../src/index';
 import type { HistoryResult } from '../src/plugins/history';
-import { REMOVE_OVER_CAP_MESSAGE, REMOVE_UNDO_CAP_BYTES } from '../src/shell/explorerSteps';
+import {
+  REMOVE_OVER_CAP_MESSAGE,
+  REMOVE_UNDO_CAP_BYTES,
+  REMOVE_UNREADABLE_MESSAGE,
+} from '../src/shell/explorerSteps';
 import { bytes, harness, tree } from './explorer-harness';
 
 /**
@@ -242,6 +246,54 @@ describe('Explorer — undo/redo', () => {
     const undo = await undoFiles(ctx);
     expect(undo).toEqual({ kind: 'undo', ok: false, reason: 'nothing to undo' });
   }, 20000);
+
+  it('remove: a file that cannot be read makes the whole remove not undoable', async () => {
+    const ctx = await harness(tree(['game', 'game/ok.txt', 'game/bad.bin']), {
+      'game/ok.txt': 'hi',
+      // 'game/bad.bin' deliberately has no fixture here — `read()` 404s.
+    });
+    render(<Explorer ctx={ctx} />);
+    fireEvent.contextMenu(await screen.findByTestId('explorer-game'));
+    await userEvent.click(screen.getByRole('menuitem', { name: 'Delete' }));
+    await screen.findByText(`delete folder "game" and 2 entries? ${REMOVE_UNREADABLE_MESSAGE}`);
+
+    ctx.files.nextTree(tree([]));
+    await userEvent.click(screen.getByTestId('confirm-yes'));
+    await waitFor(() => expect(ctx.files.removed).toEqual(['game']));
+
+    const undo = await undoFiles(ctx);
+    expect(undo).toEqual({ kind: 'undo', ok: false, reason: 'nothing to undo' });
+  });
+
+  it('remove: "yes" clicked while the read is still pending waits for it before removing, then records a step', async () => {
+    const ctx = await harness(tree(['big.bin']), { 'big.bin': new Uint8Array([1, 2, 3]) });
+    // Gates every `read()` behind a promise this test releases by hand —
+    // `askDelete`'s own snapshot read (and, since `confirm` awaits that
+    // SAME read rather than starting a second one, "yes") both hang on it
+    // until `release()` is called below.
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const realRead = ctx.files.read.bind(ctx.files);
+    ctx.files.read = (path: string) => gate.then(() => realRead(path));
+
+    render(<Explorer ctx={ctx} />);
+    await userEvent.click(await screen.findByTestId('explorer-delete-big.bin'));
+    await screen.findByTestId('confirm-yes');
+    await userEvent.click(screen.getByTestId('confirm-yes'));
+
+    // The read this remove's undo data depends on has not settled — the
+    // remove itself must not have happened yet either.
+    expect(ctx.files.removed).toEqual([]);
+
+    release();
+    await waitFor(() => expect(ctx.files.removed).toEqual(['big.bin']));
+
+    const undo = await undoFiles(ctx);
+    expect(undo).toEqual({ kind: 'undo', ok: true, label: 'remove big.bin' });
+    expect(ctx.files.written).toEqual([['big.bin', [1, 2, 3]]]);
+  });
 
   it('upload over an existing file: undo restores the previous bytes, redo writes the upload again', async () => {
     const ctx = await harness(tree(['logo.png']), { 'logo.png': 'old' });
