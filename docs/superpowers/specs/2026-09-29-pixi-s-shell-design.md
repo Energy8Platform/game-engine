@@ -30,7 +30,7 @@ Not in this slice:
 
 ```
 packages/shell/
-├── fonts/montserrat-extrabold.woff2      ← new (OFL), + fonts/OFL-montserrat.txt
+├── fonts/montserrat-{latin,cyrillic}-800.woff2  ← new (OFL), + fonts/OFL-montserrat.txt
 ├── scripts/build-s-fonts.mjs             ← new: woff2 → src/ui/pixi-s/fonts.ts (base64)
 └── src/ui/pixi-s/
     ├── index.ts        ← createPixiSShell / removePixiSShell (+ the same public types as pixi-hb)
@@ -114,16 +114,17 @@ Like HB, the palette is fixed: `theme.scheme` and `theme.accent` are ignored.
 
 ### The slab (`slab.ts`)
 
-One function draws every bar element:
+One class draws every bar element:
 
 ```ts
-slab(g: Graphics, w: number, h: number, opts: {
+new Slab(w: number, h: number, opts: {
   face: string;                 // S.plate or S.yellow or S.red
   dots?: string;                // halftone colour; omitted = no texture
+  fade?: boolean;               // dots thin toward the top-right (default true; SPIN passes false)
   corners?: Corners;            // per-corner offsets in px (the "torn" skew)
-  sawtooth?: boolean;           // zig-zag bottom edge (SPIN only)
+  sawtooth?: boolean;           // zig-zag bottom edge (SPIN / FS counter)
   shadow?: boolean;             // offset darker copy behind the face (default true)
-}): Graphics
+})                              // + setFace(color) for hover
 ```
 
 - **Shape.** A quadrilateral whose four corners are shifted from the `w × h` box by fixed
@@ -131,24 +132,25 @@ slab(g: Graphics, w: number, h: number, opts: {
   bottom edge rising 4px). The offsets are constants, not random, so the bar looks the same on
   every render and in every test.
 - **Shadow.** The same quad offset by `(3, 3)` in `S.shadow`, drawn first.
-- **Halftone.** A dot grid (spacing 6px, dot radius 1.1px) clipped to the quad. Dot density rises
-  toward the bottom-left, as in the reference: a dot is drawn when `rowFraction + colFraction`
-  passes a fixed threshold pattern. Implementation: a `Graphics` of circles masked by the quad.
-  If that proves too slow on rebuild, cache the pattern as a texture.
+- **Halftone.** A dot grid (spacing 6px, dot radius 1.1px). A dot is kept only when it lies
+  wholly inside the quad (point-in-polygon on its four extreme points), so no mask is needed. On
+  black plates the dot radius fades from full at the bottom-left to nothing toward the top-right.
+  On SPIN the dots are uniform. The dots of one slab are one `GraphicsContext`, cached by size,
+  corners, colour and fade, and shared, so a bar rebuild re-tessellates nothing.
 - **Sawtooth.** SPIN's bottom edge is a zig-zag: teeth 8px wide and 5px deep.
 
 ### Elements
 
 | element | slab | content |
 |---|---|---|
-| menu | black, small (≈56×40) | white `menu` glyph |
-| WIN / BALANCE | black, wide (≈250×50) | yellow caps label (`t('Win')` / `t('Balance')`), white value |
+| menu | black, 64×44 | white `menu` glyph |
+| WIN / BALANCE | black, 280×54 (label 15, value 26) | yellow caps label (`t('Win')` / `t('Balance')`), white value |
 | TOTAL WIN (FS) | as WIN | label `t('Total win')` |
-| BET | black (≈260×40) | yellow `minus` · white caps `t('Bet')` · white value · yellow `plus` |
-| BUY | yellow tab (≈80×44 desktop) | black `mask` glyph; feature active: red face, white `close` |
-| SPIN | yellow, sawtooth (≈230×120 desktop) | black `spin` glyph; busy: glyph spins (HB behaviour) |
+| BET | black, 290×46 (label 14, value 24) | yellow `minus` · white caps `t('Bet')` · white value · yellow `plus` |
+| BUY | yellow tab, 96×52 | black `mask` glyph; feature active: red face, white `close` |
+| SPIN | yellow, sawtooth, 260×136 | black `spin` glyph; busy: glyph spins (HB behaviour) |
 | FS counter (replaces SPIN) | yellow, sawtooth | black label `t('Free spins')` + value `3 / 10` (or `state.bonus` label/value) |
-| autoplay tab | black (≈44×36), overlaps SPIN's left edge | white `play`; running: yellow face, black `stop` |
+| autoplay tab | black, 52×40, tucked 12px under SPIN's left edge | white `play`; running: yellow face, black `stop` |
 | turbo tab | black, under the autoplay tab | `bolt`: L0 white; L1 yellow glyph; L2 yellow face, black glyph |
 
 Sizes are desktop design units, before the fit scale (section 5).
@@ -217,13 +219,15 @@ code.
   bottom padding is 8.
 - The left column stacks: menu, (TOTAL WIN in FS), WIN, BALANCE, then BUY. The right column
   stacks: BET, then SPIN with the tabs.
-- **BUY is spin-sized.** On mobile BUY uses SPIN's slab size (without the sawtooth), shows the
-  mask glyph at SPIN-glyph size, and sits bottom-left, level with SPIN. Outside base mode BUY is
-  hidden and the left column keeps its height.
-- Main buttons (SPIN, BUY) are 85% of their desktop design size. Readouts and BET shrink to fit
-  half the width.
-- **Fit scale.** The block is designed at 390 wide and scaled by
-  `clamp((W − 20) / 370, 0.6, 1)`. It is never wider than the screen.
+- **BUY is spin-sized.** On mobile BUY uses SPIN's slab size (150×90, without the sawtooth),
+  shows the mask glyph large (76), and sits bottom-left, level with SPIN. Outside base mode BUY is
+  hidden and both columns stay bottom-anchored.
+- Mobile design sizes: menu 52×38, readouts 172×44 (label 11, value 17), BET 186×40, SPIN and BUY
+  150×90, tabs 42×34. Left column (172) + gap (12) + right column (186) = 370 = 390 − 2·10.
+  Readouts and BET grow when a value does not fit, and the block then scales down.
+- **Fit scale.** The block is designed at 370 wide (390 minus the side padding) and scaled by
+  `min(1, (W − 20) / blockW)`, where `blockW = max(370, left + 12 + right)`. It is never wider than
+  the screen, so it has no lower bound.
 - **Safe area.** `bottom` = screen height − the block's top edge. `left = right = top = 0`.
   `barHeight` equals `bottom`.
 - **Menu anchor.** `menuPlate()` is the whole block, so the popover opens above it.
@@ -233,14 +237,16 @@ The controller already picks the layout (`h > w` gives mobile). SideBar branches
 
 ## 6. Font
 
-- Montserrat ExtraBold (800), OFL 1.1, Latin + Cyrillic subset. The woff2 comes from the
-  Montserrat release (Google Fonts). The licence text goes beside it.
-- `scripts/build-s-fonts.mjs` is a copy of `build-hb-fonts.mjs` that writes `S_FONT_CSS` and
-  `S_FONT_FAMILY` into `src/ui/pixi-s/fonts.ts`.
+- Montserrat ExtraBold (800), OFL 1.1: the Latin and Cyrillic woff2 subsets from
+  `@fontsource/montserrat@5.3.0` (jsDelivr), ~30KB together. The licence text goes beside them.
+  Glyphs outside both subsets (for example ₽) fall back to the shell's Inter.
+- `scripts/build-s-fonts.mjs` is a copy of `build-hb-fonts.mjs`. It writes two `@font-face`
+  rules (family `MontserratS`, weight 800, each with its Google Fonts `unicode-range`) as
+  `S_FONT_CSS`, plus `S_FONT_FAMILY`, into `src/ui/pixi-s/fonts.ts`.
 - `installSFont()` registers the face with `installFontFaces` (FontFace-from-bytes, CSP-safe, as
   HB does) and nudges `document.fonts.load`, swallowing rejections as HB does.
-- The renderer's first `renderBar` already waits on `whenFontReady`. S also waits on its own face
-  before it renders.
+- `createPixiSShell` registers the S face before it creates the renderer. The renderer's first
+  `renderBar` waits on `whenFontReady` (`document.fonts.ready`), which then covers the S face too.
 
 ## 7. Icons
 
@@ -295,9 +301,9 @@ reference by eye.
 
 ## 9. Risks
 
-- **Halftone cost.** A few hundred circles per slab, rebuilt on every `renderBar` (about 20 state
-  changes per spin). If a rebuild takes more than ~2ms in the demo, cache the dot pattern as a
-  texture per slab size.
+- **Halftone cost.** About 2000 circles per bar. The shared dot contexts make each rebuild after
+  the first a cache hit. Readout widths are rounded to whole pixels, so the cache stays bounded by
+  the number of distinct slab sizes.
 - **Safe-area semantics.** Until now `safeArea` was bottom-only. Scaffolded games do not read it,
   so nothing breaks. A game that relies on `barHeight` sees 0 on S desktop. This is intended: the
   columns take the sides, not a bottom strip.
