@@ -150,6 +150,11 @@ export function apply(ctx: Context, config: ScenesConfig) {
   // Whether the selected scene's tab has been seen open since it was
   // selected — the one case its closing clears the selection.
   let hadTab = false;
+  // Writes currently in flight, service-wide — while any is pending, a
+  // recorded step's `read()` answers `undefined` rather than the current
+  // (possibly stale) `docs`, so an undo/redo racing a write it doesn't
+  // know about refuses as diverged instead of overwriting it.
+  let pending = 0;
 
   const notify = () => {
     for (const listener of listeners) listener();
@@ -251,24 +256,40 @@ export function apply(ctx: Context, config: ScenesConfig) {
       // Captured before the PUT: the docs the host resolves and applies
       // arrive INSIDE `send`, so `docs` is already the new set by the time
       // this `await` returns.
+      // ponytail: captured at CALL time, not at this write's own turn the
+      // way `symbols.tsx` captures it — two overlapping writes for the
+      // same scene can both capture the same `before`, so undoing the
+      // later-recorded step reverts both and the next undo then refuses
+      // (diverged). Upgrade path: queue writes per scene id like Symbols.
       const before = docs.find((d) => d.id === doc.id);
-      const diagnostics = await send('PUT', `/api/scenes/${encodeURIComponent(doc.id)}`, doc);
-      // A scene this write CREATED has no "before" to go back to — undoing
-      // it would need a delete, out of scope (design doc §3).
-      if (diagnostics.length === 0 && before !== undefined && !ctx.history.replaying()) {
-        ctx.history.record(
-          `scene:${doc.id}`,
-          valueStep({
-            label: `scene ${doc.id}`,
-            before,
-            after: doc,
-            read: () => docs.find((d) => d.id === doc.id),
-            write: async (value) => ({ error: (await service.update(value))[0]?.message ?? null }),
-            history: ctx.history,
-          }),
-        );
+      pending++;
+      try {
+        const diagnostics = await send('PUT', `/api/scenes/${encodeURIComponent(doc.id)}`, doc);
+        // A scene this write CREATED has no "before" to go back to —
+        // undoing it would need a delete, out of scope (design doc §3).
+        if (diagnostics.length === 0 && before !== undefined) {
+          ctx.history.record(
+            `scene:${doc.id}`,
+            valueStep({
+              label: `scene ${doc.id}`,
+              before,
+              after: doc,
+              // `undefined` while another write is in flight: this write's
+              // OWN completion already dropped `pending` back to 0 by the
+              // time anyone can call this, so a nonzero count here means an
+              // UNRELATED write is racing this undo/redo.
+              read: () => (pending > 0 ? undefined : docs.find((d) => d.id === doc.id)),
+              write: async (value) => ({
+                error: (await service.update(value))[0]?.message ?? null,
+              }),
+              history: ctx.history,
+            }),
+          );
+        }
+        return diagnostics;
+      } finally {
+        pending--;
       }
-      return diagnostics;
     },
     preview: (id) => send('POST', '/api/scenes/preview', { scene: id }),
     open: (id) => ctx.shell.openPath(`scenes/${id}.scene.yml`),

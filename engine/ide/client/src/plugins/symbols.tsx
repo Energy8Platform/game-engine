@@ -81,7 +81,15 @@ export const name = 'symbols';
 // `scenes`: the node types (state types, `hasLoop`) and the `scene`/`node`
 // pickers; `files`/`assetNodeTypes`: the document's drop and the
 // inspector's `asset` picker.
-export const inject = ['slots', 'connection', 'shell', 'scenes', 'files', 'assetNodeTypes', 'history'];
+export const inject = [
+  'slots',
+  'connection',
+  'shell',
+  'scenes',
+  'files',
+  'assetNodeTypes',
+  'history',
+];
 
 function ownDiagnostic(where: string, message: string): Diagnostic {
   return diagnostic(
@@ -116,6 +124,11 @@ export function apply(ctx: Context, config: SymbolsConfig) {
   // GET does not overwrite what is newer than it.
   let docLive = false;
   let knownLive = false;
+  // Writes currently in flight — while any is pending, a recorded step's
+  // `read()` answers `undefined` rather than the current (possibly stale)
+  // `doc`, so an undo/redo racing a write it doesn't know about refuses as
+  // diverged instead of overwriting it.
+  let pending = 0;
 
   const notify = () => {
     for (const listener of listeners) listener();
@@ -191,21 +204,29 @@ export function apply(ctx: Context, config: SymbolsConfig) {
    * actually run against, not the doc at the moment `update` was called.
    */
   async function recordedPut(before: SymbolsDoc, next: SymbolsDoc): Promise<Diagnostic[]> {
-    const diagnostics = await putDoc(next);
-    if (diagnostics.length === 0 && !ctx.history.replaying()) {
-      ctx.history.record(
-        'symbols',
-        valueStep({
-          label: 'symbols',
-          before,
-          after: next,
-          read: () => doc ?? EMPTY,
-          write: async (value) => ({ error: (await service.update(value))[0]?.message ?? null }),
-          history: ctx.history,
-        }),
-      );
+    pending++;
+    try {
+      const diagnostics = await putDoc(next);
+      if (diagnostics.length === 0) {
+        ctx.history.record(
+          'symbols',
+          valueStep({
+            label: 'symbols',
+            before,
+            after: next,
+            // `undefined` while another write is in flight — see `pending`'s own comment.
+            read: () => (pending > 0 ? undefined : (doc ?? EMPTY)),
+            write: async (value) => ({
+              error: (await service.update(value))[0]?.message ?? null,
+            }),
+            history: ctx.history,
+          }),
+        );
+      }
+      return diagnostics;
+    } finally {
+      pending--;
     }
-    return diagnostics;
   }
 
   // The write queue, moved in from `SymbolsDocument`'s own `commit`: one

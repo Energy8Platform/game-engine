@@ -229,6 +229,96 @@ describe('symbols service', () => {
     });
   });
 
+  it('two back-to-back reducer writes each record their own step; undo #1 then #2 both succeed with the right bodies', async () => {
+    const { ctx, puts } = await harness({
+      'GET /api/symbols': boot({ doc: EMPTY, known: KNOWN, diagnostics: [] }),
+      'PUT /api/symbols': accept,
+    });
+    await vi.waitFor(() => expect(ctx.symbols.doc()).toEqual(EMPTY));
+
+    const withOne = addSymbol(EMPTY, '1', 'cherry');
+    const first = ctx.symbols.update((d) => addSymbol(d, '1', 'cherry'));
+    const second = ctx.symbols.update((d) => addSymbol(d, '2', 'lemon'));
+    await Promise.all([first, second]);
+    expect(ctx.symbols.doc()!.symbols.map((s) => s.id)).toEqual(['1', '2']);
+
+    // Undo #1 takes the SECOND reducer's own step back off first.
+    expect(await ctx.history.undo(['symbols'])).toEqual({
+      kind: 'undo',
+      ok: true,
+      label: 'symbols',
+    });
+    expect(puts().at(-1)).toEqual({ doc: withOne });
+    expect(ctx.symbols.doc()!.symbols.map((s) => s.id)).toEqual(['1']);
+
+    // Undo #2 takes the first reducer's step.
+    expect(await ctx.history.undo(['symbols'])).toEqual({
+      kind: 'undo',
+      ok: true,
+      label: 'symbols',
+    });
+    expect(puts().at(-1)).toEqual({ doc: EMPTY });
+    expect(ctx.symbols.doc()).toEqual(EMPTY);
+
+    expect(await ctx.history.undo(['symbols'])).toEqual({
+      kind: 'undo',
+      ok: false,
+      reason: 'nothing to undo',
+    });
+  });
+
+  it('an undo pressed while a write is in flight refuses instead of racing it; once the write settles, undo works again', async () => {
+    let resolvePut!: (answer: Answer) => void;
+    const pendingPut = new Promise<Answer>((resolve) => {
+      resolvePut = resolve;
+    });
+    let puts = 0;
+    const { ctx, calls } = await harness({
+      'GET /api/symbols': boot({ doc: EMPTY, known: KNOWN, diagnostics: [] }),
+      'PUT /api/symbols': (body) => {
+        puts += 1;
+        // The second PUT — the one "in flight" when undo is pressed — is
+        // held until the test releases it; every other one (the setup
+        // write, and later the undo's own write) echoes back what it sent.
+        return puts === 2
+          ? pendingPut
+          : { body: { doc: (body as { doc: SymbolsDoc }).doc, known: KNOWN, diagnostics: [] } };
+      },
+    });
+    await vi.waitFor(() => expect(ctx.symbols.doc()).toEqual(EMPTY));
+
+    const withOne = addSymbol(EMPTY, '1', 'cherry');
+    expect(await ctx.symbols.update(withOne)).toEqual([]);
+
+    const withTwo = addSymbol(withOne, '2', 'lemon');
+    const callsBeforeSecondWrite = calls.length;
+    const inFlight = ctx.symbols.update(withTwo);
+    // The write queue's own turn-taking is a microtask hop — wait for the
+    // second PUT to actually have gone out (so it is truly "in flight")
+    // before pressing undo.
+    await vi.waitFor(() => expect(calls.length).toBeGreaterThan(callsBeforeSecondWrite));
+    const callsBeforeUndo = calls.length;
+
+    expect(await ctx.history.undo(['symbols'])).toEqual({
+      kind: 'undo',
+      ok: false,
+      reason: "changed elsewhere since — can't undo",
+    });
+    // Refused before ever writing — no new PUT went out for the undo attempt.
+    expect(calls).toHaveLength(callsBeforeUndo);
+
+    resolvePut({ body: { doc: withTwo, known: KNOWN, diagnostics: [] } });
+    expect(await inFlight).toEqual([]);
+
+    // The write that just settled recorded its OWN step; undo now targets that one.
+    expect(await ctx.history.undo(['symbols'])).toEqual({
+      kind: 'undo',
+      ok: true,
+      label: 'symbols',
+    });
+    expect(ctx.symbols.doc()).toEqual(withOne);
+  });
+
   it('the symbols tab scope is exactly "symbols"', async () => {
     const { ctx } = await harness({ 'GET /api/symbols': boot() });
     expect(ctx.history.keysFor('symbols')).toEqual(['symbols']);

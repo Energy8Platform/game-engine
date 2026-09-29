@@ -199,7 +199,7 @@ describe('scenes service', () => {
       resolvePut = resolve;
     });
     const after: SceneDoc = { id: 'a', nodes: [] };
-    const { ctx, socket } = await harness({
+    const { ctx, socket, calls } = await harness({
       'GET /api/scenes': boot(),
       'PUT /api/scenes/a': () => pending,
     });
@@ -217,6 +217,7 @@ describe('scenes service', () => {
       ok: true,
       label: 'scene a',
     });
+    expect(calls.at(-1)).toEqual({ method: 'PUT', url: '/api/scenes/a', body: A });
   });
 
   it('the scene tab scope maps "f:scenes/<id>.scene.yml" to "scene:<id>"', async () => {

@@ -196,6 +196,12 @@ export function apply(ctx: Context, config: GameCompositionConfig) {
     for (const listener of listeners) listener();
   };
 
+  // Writes currently in flight, service-wide — while any is pending, a
+  // recorded step's `read()` answers `undefined` rather than the current
+  // (possibly stale) row config, so an undo/redo racing a write it doesn't
+  // know about refuses as diverged instead of overwriting it.
+  let pending = 0;
+
   function reportAll(diagnostics: Diagnostic[]) {
     for (const d of diagnostics) ctx.connection.report(d);
     return { reload: false, diagnostics };
@@ -212,65 +218,78 @@ export function apply(ctx: Context, config: GameCompositionConfig) {
       return () => listeners.delete(listener);
     },
     async update(id, nextConfig) {
-      // Captured before the PUT: `undefined` for a row that does not exist
-      // yet (nothing here creates one — a row not existing before is a
-      // programmer error, not a state undo has to reverse either way).
+      // Captured before the PUT: `undefined` while the boot GET is still in
+      // flight (`rows` is `null`) or for an id with no row — nothing here
+      // creates a row, the host refuses an unknown id itself, and this
+      // write is never written for either case.
+      // ponytail: captured at CALL time, not at this write's own turn the
+      // way `symbols.tsx` captures it — two overlapping writes for the same
+      // row can both capture the same `before`, so undoing the
+      // later-recorded step reverts both and the next undo then refuses
+      // (diverged). Upgrade path: queue writes per row id like Symbols.
       const before = service.rows?.find((row) => row.id === id)?.config;
       const where = `/api/composition/rows/${encodeURIComponent(id)}`;
-      let res: Response;
-      let body: unknown;
+      pending++;
       try {
-        res = await fetchFn(`${origin}${where}`, {
-          method: 'PUT',
-          headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({ config: nextConfig }),
-        });
-        body = await res.json();
-      } catch (error) {
-        return reportAll([ownDiagnostic(where, `could not write the row: ${reason(error)}`)]);
-      }
-      const answer = body as {
-        rows?: unknown;
-        reload?: unknown;
-        diagnostics?: unknown;
-        error?: unknown;
-      };
-      if (res.ok && Array.isArray(answer.rows)) {
-        service.rows = answer.rows as GameCompositionRow[];
-        service.diagnostics = Array.isArray(answer.diagnostics)
-          ? (answer.diagnostics as Diagnostic[])
-          : [];
-        if (before !== undefined && !ctx.history.replaying()) {
-          ctx.history.record(
-            `row:${id}`,
-            valueStep({
-              label: `${id} settings`,
-              before,
-              after: nextConfig,
-              read: () => service.rows?.find((row) => row.id === id)?.config,
-              write: async (value) => {
-                const result = await service.update(id, value);
-                return { error: result.diagnostics[0]?.message ?? null };
-              },
-              history: ctx.history,
-            }),
-          );
+        let res: Response;
+        let body: unknown;
+        try {
+          res = await fetchFn(`${origin}${where}`, {
+            method: 'PUT',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({ config: nextConfig }),
+          });
+          body = await res.json();
+        } catch (error) {
+          return reportAll([ownDiagnostic(where, `could not write the row: ${reason(error)}`)]);
         }
-        notify();
-        return { reload: answer.reload === true, diagnostics: [] };
+        const answer = body as {
+          rows?: unknown;
+          reload?: unknown;
+          diagnostics?: unknown;
+          error?: unknown;
+        };
+        if (res.ok && Array.isArray(answer.rows)) {
+          service.rows = answer.rows as GameCompositionRow[];
+          service.diagnostics = Array.isArray(answer.diagnostics)
+            ? (answer.diagnostics as Diagnostic[])
+            : [];
+          if (before !== undefined) {
+            ctx.history.record(
+              `row:${id}`,
+              valueStep({
+                label: `${id} settings`,
+                before,
+                after: nextConfig,
+                // `undefined` while another write is in flight — see `pending`'s own comment.
+                read: () =>
+                  pending > 0 ? undefined : service.rows?.find((row) => row.id === id)?.config,
+                write: async (value) => {
+                  const result = await service.update(id, value);
+                  return { error: result.diagnostics[0]?.message ?? null };
+                },
+                history: ctx.history,
+              }),
+            );
+          }
+          notify();
+          return { reload: answer.reload === true, diagnostics: [] };
+        }
+        // A 500 carries `{ diagnostics }`; a 400 only `{ error }`; a 200 of
+        // the wrong shape is a failure like any other.
+        return reportAll(
+          Array.isArray(answer.diagnostics)
+            ? (answer.diagnostics as Diagnostic[])
+            : [
+                ownDiagnostic(
+                  where,
+                  `could not write the row: ${typeof answer.error === 'string' ? answer.error : `the host answered ${res.status}`}`,
+                ),
+              ],
+        );
+      } finally {
+        pending--;
       }
-      // A 500 carries `{ diagnostics }`; a 400 only `{ error }`; a 200 of
-      // the wrong shape is a failure like any other.
-      return reportAll(
-        Array.isArray(answer.diagnostics)
-          ? (answer.diagnostics as Diagnostic[])
-          : [
-              ownDiagnostic(
-                where,
-                `could not write the row: ${typeof answer.error === 'string' ? answer.error : `the host answered ${res.status}`}`,
-              ),
-            ],
-      );
     },
   };
 

@@ -118,6 +118,11 @@ export function apply(ctx: Context, config: FlowConfig) {
   let kindsLive = false;
   // The mounted canvas' click-add handler — see the module doc comment.
   let addHandler: ((kind: string) => void) | null = null;
+  // Writes currently in flight — while any is pending, a recorded step's
+  // `read()` answers `undefined` rather than the current (possibly stale)
+  // `doc`, so an undo/redo racing a write it doesn't know about refuses as
+  // diverged instead of overwriting it.
+  let pending = 0;
 
   const notify = () => {
     for (const listener of listeners) listener();
@@ -161,45 +166,61 @@ export function apply(ctx: Context, config: FlowConfig) {
       // Captured before the PUT — `null` until a project has a flow.yml at
       // all, so a write that CREATES it has no "before" to go back to
       // (undoing it would need a delete, out of scope, design doc §3).
+      // ponytail: captured at CALL time, not at this write's own turn the
+      // way `symbols.tsx` captures it — two overlapping writes can both
+      // capture the same `before`, so undoing the later-recorded step
+      // reverts both and the next undo then refuses (diverged). Upgrade
+      // path: queue writes like Symbols.
       const before = doc;
-      let res: Response;
-      let answer: Partial<FlowResponse> & { diagnostics?: unknown };
+      pending++;
       try {
-        res = await fetchFn(`${origin}/api/flow`, {
-          method: 'PUT',
-          headers: { 'content-type': 'application/json' },
-          body: JSON.stringify(next),
-        });
-        answer = await res.json();
-      } catch (error) {
-        const own = ownDiagnostic('/api/flow', `PUT failed: ${reason(error)}`);
-        ctx.connection.report(own);
-        return [own];
+        let res: Response;
+        let answer: Partial<FlowResponse> & { diagnostics?: unknown };
+        try {
+          res = await fetchFn(`${origin}/api/flow`, {
+            method: 'PUT',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify(next),
+          });
+          answer = await res.json();
+        } catch (error) {
+          const own = ownDiagnostic('/api/flow', `PUT failed: ${reason(error)}`);
+          ctx.connection.report(own);
+          return [own];
+        }
+        const host = Array.isArray(answer.diagnostics) ? (answer.diagnostics as Diagnostic[]) : [];
+        if (!res.ok) {
+          if (host.length) return host;
+          const own = ownDiagnostic('/api/flow', `PUT failed: the host answered ${res.status}`);
+          ctx.connection.report(own);
+          return [own];
+        }
+        applyFlow(answer.doc ?? null, host);
+        if (Array.isArray(answer.kinds)) applyKinds(answer.kinds);
+        // Recorded on every ACCEPTED write, warnings included — `host` here
+        // is the host's own diagnostics on a 2xx (e.g. "no incoming edge"),
+        // not a refusal; `!res.ok` above already sent refusals back.
+        if (before !== null) {
+          ctx.history.record(
+            'flow',
+            valueStep({
+              label: 'flow',
+              before,
+              after: next,
+              // `undefined` while another write is in flight — see `pending`'s own comment.
+              read: () => (pending > 0 ? undefined : (doc ?? undefined)),
+              write: async (value) => ({
+                error: (await service.update(value))[0]?.message ?? null,
+              }),
+              history: ctx.history,
+            }),
+          );
+        }
+        notify();
+        return [];
+      } finally {
+        pending--;
       }
-      const host = Array.isArray(answer.diagnostics) ? (answer.diagnostics as Diagnostic[]) : [];
-      if (!res.ok) {
-        if (host.length) return host;
-        const own = ownDiagnostic('/api/flow', `PUT failed: the host answered ${res.status}`);
-        ctx.connection.report(own);
-        return [own];
-      }
-      applyFlow(answer.doc ?? null, host);
-      if (Array.isArray(answer.kinds)) applyKinds(answer.kinds);
-      if (host.length === 0 && before !== null && !ctx.history.replaying()) {
-        ctx.history.record(
-          'flow',
-          valueStep({
-            label: 'flow',
-            before,
-            after: next,
-            read: () => doc ?? undefined,
-            write: async (value) => ({ error: (await service.update(value))[0]?.message ?? null }),
-            history: ctx.history,
-          }),
-        );
-      }
-      notify();
-      return [];
     },
     subscribe(listener) {
       listeners.add(listener);

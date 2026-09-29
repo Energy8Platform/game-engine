@@ -130,6 +130,77 @@ describe('flow service', () => {
     expect(calls.at(-1)).toEqual({ method: 'PUT', url: '/api/flow', body: after });
   });
 
+  it('a PUT answered 200 with a warning still records a step (only a non-2xx is a refusal); undo writes the before doc', async () => {
+    const after: FlowDoc = {
+      version: 1,
+      nodes: [{ id: 'n', kind: 'boot', ui: { x: 0, y: 0 } }],
+      edges: [],
+    };
+    const warning: Diagnostic = {
+      severity: 'warning',
+      plugin: 'flow',
+      where: 'n',
+      message: 'has no incoming edge',
+    };
+    const { ctx, calls } = await harness({
+      'GET /api/flow': boot(),
+      'PUT /api/flow': (body) => ({ body: { doc: body, diagnostics: [warning], kinds: [] } }),
+    });
+    await vi.waitFor(() => expect(ctx.flow.doc()).toEqual(DOC));
+
+    expect(await ctx.flow.update(after)).toEqual([]);
+    expect(ctx.flow.diagnostics()).toEqual([warning]);
+
+    expect(await ctx.history.undo(['flow'])).toEqual({ kind: 'undo', ok: true, label: 'flow' });
+    expect(calls.at(-1)).toEqual({ method: 'PUT', url: '/api/flow', body: DOC });
+    expect(ctx.flow.doc()).toEqual(DOC);
+  });
+
+  it('an undo pressed while a write is in flight refuses instead of racing it; the next write settling makes undo work again', async () => {
+    const v0: FlowDoc = {
+      version: 1,
+      nodes: [{ id: 'start', kind: 'boot', ui: { x: 0, y: 0 } }],
+      edges: [],
+    };
+    const v1: FlowDoc = { version: 1, nodes: [], edges: [] };
+    let resolvePut!: (answer: { body: unknown }) => void;
+    const pendingPut = new Promise<{ body: unknown }>((resolve) => {
+      resolvePut = resolve;
+    });
+    let puts = 0;
+    const { ctx, calls } = await harness({
+      'GET /api/flow': boot(),
+      'PUT /api/flow': () => {
+        puts += 1;
+        // The first write (setting up a step to try to undo) answers at
+        // once; the second — the one "in flight" when undo is pressed —
+        // is held until the test releases it.
+        return puts === 1 ? { body: { doc: v0, diagnostics: [], kinds: [] } } : pendingPut;
+      },
+    });
+    await vi.waitFor(() => expect(ctx.flow.doc()).toEqual(DOC));
+
+    expect(await ctx.flow.update(v0)).toEqual([]);
+
+    const inFlight = ctx.flow.update(v1);
+    const callsBeforeUndo = calls.length;
+
+    expect(await ctx.history.undo(['flow'])).toEqual({
+      kind: 'undo',
+      ok: false,
+      reason: "changed elsewhere since — can't undo",
+    });
+    // Refused before ever writing — no PUT went out for the undo attempt.
+    expect(calls).toHaveLength(callsBeforeUndo);
+
+    resolvePut({ body: { doc: v1, diagnostics: [], kinds: [] } });
+    expect(await inFlight).toEqual([]);
+
+    // The write that just settled recorded its OWN step; undo now targets that one.
+    expect(await ctx.history.undo(['flow'])).toEqual({ kind: 'undo', ok: true, label: 'flow' });
+    expect(calls.at(-1)).toEqual({ method: 'PUT', url: '/api/flow', body: v0 });
+  });
+
   it('a refused update records nothing', async () => {
     const { ctx } = await harness({
       'GET /api/flow': boot(),
