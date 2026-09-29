@@ -44,6 +44,21 @@ describe('S widgets', () => {
     expect(b.measureSize()).toEqual({ w: 64, h: 44 });
   });
 
+  it('SButton with a hover face turns that face on hover and swaps to its hover glyph', () => {
+    const g = sIcon('play', 20, S.fg);
+    const hg = sIcon('play', 20, S.ink);
+    const b = new SButton({ w: 56, h: 34, face: 'plate', corners: SKEW.tab, glyph: g, glyphSize: 20, hoverFace: 'yellow', hoverGlyph: hg, onTap: () => {} });
+    expect(b.slab.face).toBe(S.plate);
+    expect([g.visible, hg.visible]).toEqual([true, false]);
+    b.emit('pointerover', {});
+    expect(b.slab.face).toBe(S.yellow);
+    expect([g.visible, hg.visible]).toEqual([false, true]);
+    expect([hg.x, hg.y]).toEqual([g.x, g.y]);
+    b.emit('pointerout', {});
+    expect(b.slab.face).toBe(S.plate);
+    expect([g.visible, hg.visible]).toEqual([true, false]);
+  });
+
   it('SButton centres its glyph in the part not tucked under a neighbour', () => {
     const g = sIcon('bolt', 20, S.fg);
     new SButton({ w: 52, h: 40, face: 'plate', corners: SKEW.tab, glyph: g, glyphSize: 20, insetRight: 12, onTap: () => {} });

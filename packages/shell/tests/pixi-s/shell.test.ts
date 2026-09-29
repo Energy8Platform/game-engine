@@ -37,12 +37,13 @@ afterEach(() => {
 });
 
 describe('createPixiSShell', () => {
-  it('desktop: the columns reserve the sides, not a bottom strip', () => {
+  it('desktop: the columns reserve the sides, and the WIN row between them a short bottom strip', () => {
     const shell = createPixiSShell(config(fakeApp(1280, 720)));
     expect(shell.safeArea.left).toBeGreaterThan(100);
     expect(shell.safeArea.right).toBeGreaterThan(100);
-    expect(shell.safeArea.bottom).toBe(0);
-    expect(shell.barHeight).toBe(0);
+    expect(shell.safeArea.bottom).toBeGreaterThan(0);
+    expect(shell.safeArea.bottom).toBeLessThan(120); // one readout row, not the columns' height
+    expect(shell.barHeight).toBe(shell.safeArea.bottom);
   });
 
   it('portrait: one bottom block; barHeight is its height', () => {

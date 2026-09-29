@@ -70,37 +70,33 @@ export const M_SIDE = 10;
 export const M_BOTTOM = 8;
 export const M_COL_GAP = 12;
 
-/** Stack `items` top to bottom into `col`, aligned to its left or right edge; returns the column size. */
-function stack(col: Container, items: Sized[], gap: number, align: 'left' | 'right'): { w: number; h: number } {
-  const w = Math.max(0, ...items.map((i) => i.measureSize().w));
-  let y = 0;
-  for (const item of items) {
-    const s = item.measureSize();
-    item.position.set(align === 'left' ? 0 : w - s.w, y);
-    col.addChild(item);
-    y += s.h + gap;
-  }
-  return { w, h: Math.max(0, y - gap) };
-}
-
-/** The S control bar: two side columns instead of a bottom strip. Wide: the left column (menu,
- *  TOTAL WIN in FS, WIN, BALANCE) and the right one (BUY, BET, SPIN with the autoplay / turbo tabs)
- *  sit in the bottom corners and the scene gets side insets. Mobile: the same columns pulled into
- *  one bottom block, BUY SPIN-sized at the bottom-left. Rebuilt on every render(). */
+/** The S control bar: two side columns plus WIN between them, laid out in rows.
+ *  - Button row: BUY (left, SPIN-sized; TOTAL WIN in its slot during free spins) and SPIN or the FS
+ *    counter (right) with the autoplay / turbo tabs tucked under SPIN's left edge. The burger sits
+ *    above BUY.
+ *  - Row right under the buttons: BALANCE (left) and BET (right).
+ *  - WIN: wide — on the bottom line, centred in the gap between the columns; mobile — its own bottom
+ *    row, centred under both.
+ *  Wide: the columns sit in the bottom corners and the scene gets side insets plus the WIN row.
+ *  Mobile: everything in one bottom block. Rebuilt on every render(). */
 export class SideBar extends Container implements HbBar {
   balanceValue?: Text;
   winValue?: Text;
   private host: PixiComponentContext;
   private mobile: boolean;
   private z: Sizes;
-  // wide: both columns sit on the bar, each scaled; mobile: both sit in `block`, scaled together
+  // wide: the columns and `center` (WIN) sit on the bar, each scaled; mobile: all three sit in
+  // `block`, scaled together. Both columns share one row frame: y = 0 is the burger row's top.
   private leftCol = new Container();
   private rightCol = new Container();
+  private center = new Container();
   private block = new Container();
   private leftW = 0;
-  private leftH = 0;
   private rightW = 0;
-  private rightH = 0;
+  /** Row frame: button row top, the row under it, and the total height down to that row's bottom. */
+  private rowB = 0;
+  private rowC = 0;
+  private rowsH = 0;
   private plate: Rect | null = null;
   private safe: SafeArea = { top: 0, right: 0, bottom: 0, left: 0 };
   private menuBtn!: SButton;
@@ -119,13 +115,21 @@ export class SideBar extends Container implements HbBar {
     this.host = host;
     this.mobile = host.layout === 'mobile';
     this.z = this.mobile ? MOBILE : WIDE;
+    const z = this.z;
+    this.rowB = z.menu[1] + z.gap;
+    this.rowC = this.rowB + z.spin[1] + z.gap;
+    this.rowsH = this.rowC + Math.max(z.readout[1], z.bet[1]);
     this.buildLeft();
     this.buildRight();
+    this.win = this.readout('Win', this.host.fmtWin(this.host.state.win));
+    this.winValue = this.win.valueText;
+    this.center.addChild(this.win);
+    const parts = [this.leftCol, this.rightCol, this.center];
     if (this.mobile) {
-      this.block.addChild(this.leftCol, this.rightCol);
+      this.block.addChild(...parts);
       this.addChild(this.block);
     } else {
-      this.addChild(this.leftCol, this.rightCol);
+      this.addChild(...parts);
     }
     this.applyBusy();
   }
@@ -153,12 +157,14 @@ export class SideBar extends Container implements HbBar {
 
   applyFit(): void {
     const { screenW: W, screenH: H } = this.host;
+    const winW = this.win.measureSize().w;
+    const winH = this.win.measureSize().h;
     if (this.mobile) {
-      const blockW = Math.max(M_REF_W, this.leftW + M_COL_GAP + this.rightW);
-      const blockH = Math.max(this.leftH, this.rightH);
-      // both columns bottom-aligned, so BUY and SPIN share one bottom line
-      this.leftCol.position.set(0, blockH - this.leftH);
-      this.rightCol.position.set(blockW - this.rightW, blockH - this.rightH);
+      const blockW = Math.max(M_REF_W, this.leftW + M_COL_GAP + this.rightW, winW);
+      const blockH = this.rowsH + this.z.gap + winH;
+      this.leftCol.position.set(0, 0);
+      this.rightCol.position.set(blockW - this.rightW, 0);
+      this.center.position.set((blockW - winW) / 2, this.rowsH + this.z.gap);
       const s = Math.min(1, (W - 2 * M_SIDE) / blockW);
       const top = H - M_BOTTOM - blockH * s;
       this.block.scale.set(s);
@@ -168,24 +174,24 @@ export class SideBar extends Container implements HbBar {
       return;
     }
     const s = Math.max(WIDE_MIN_SCALE, Math.min(1, W / WIDE_REF_W, H / WIDE_REF_H));
-    const lx = OUTER;
-    const ly = H - OUTER - this.leftH * s;
-    const rx = W - OUTER - this.rightW * s;
-    const ry = H - OUTER - this.rightH * s;
-    this.leftCol.scale.set(s);
-    this.rightCol.scale.set(s);
-    this.leftCol.position.set(lx, ly);
-    this.rightCol.position.set(rx, ry);
-    this.safe = { top: 0, right: W - rx + SAFE_GAP, bottom: 0, left: lx + this.leftW * s + SAFE_GAP };
-    this.plate = { x: lx, y: ly, w: this.leftW * s, h: this.leftH * s };
+    const top = H - OUTER - this.rowsH * s;
+    const leftEdge = OUTER + this.leftW * s; // the left column's right edge
+    const rx = W - OUTER - this.rightW * s; // the right column's left edge (tabs included)
+    // WIN sits on the bottom line, centred in the gap between the columns
+    const winY = top + (this.rowsH - winH) * s;
+    for (const c of [this.leftCol, this.rightCol, this.center]) c.scale.set(s);
+    this.leftCol.position.set(OUTER, top);
+    this.rightCol.position.set(rx, top);
+    this.center.position.set((leftEdge + rx - winW * s) / 2, winY);
+    this.safe = { top: 0, right: W - rx + SAFE_GAP, bottom: H - winY + SAFE_GAP, left: leftEdge + SAFE_GAP };
+    this.plate = { x: OUTER, y: top, w: this.leftW * s, h: this.rowsH * s };
   }
 
   // ── columns ───────────────────────────────────────────────────────────────
-  /** menu · (TOTAL WIN) · WIN · BALANCE · (base: BUY) — top to bottom, left-aligned. */
+  /** The burger; the button row: BUY (base), or TOTAL WIN in free spins; BALANCE under it. */
   private buildLeft(): void {
     const { state } = this.host;
     const z = this.z;
-    const items: Sized[] = [];
     this.menuBtn = new SButton({
       w: z.menu[0],
       h: z.menu[1],
@@ -195,51 +201,49 @@ export class SideBar extends Container implements HbBar {
       glyphSize: z.menuGlyph,
       onTap: () => this.host.actions.openMenu(),
     });
-    items.push(this.menuBtn);
-    if (this.showFs()) {
+    const items: Sized[] = [this.menuBtn];
+    if (this.isBase()) {
+      this.buy = this.buildBuy();
+      if (this.buy) this.buy.position.set(0, this.rowB);
+    } else if (this.showFs()) {
+      // BUY's slot is free outside base: TOTAL WIN goes there, so no row grows and no inset moves
       this.totalWin = this.readout('Total win', this.host.fmtWin(state.freeSpins.totalWin));
-      items.push(this.totalWin);
+      this.totalWin.position.set(0, this.rowB + (z.spin[1] - z.readout[1]) / 2);
     }
-    this.win = this.readout('Win', this.host.fmtWin(state.win));
-    this.winValue = this.win.valueText;
-    items.push(this.win);
+    if (this.buy) items.push(this.buy);
+    if (this.totalWin) items.push(this.totalWin);
     if (!state.replay) {
       this.balance = this.readout('Balance', this.host.fmt(state.balance));
       this.balanceValue = this.balance.valueText;
+      this.balance.position.set(0, this.rowC);
       items.push(this.balance);
     }
-    if (this.isBase()) {
-      this.buy = this.buildBuy();
-      if (this.buy) items.push(this.buy);
-    }
-    const size = stack(this.leftCol, items, z.gap, 'left');
-    this.leftW = size.w;
-    this.leftH = size.h;
+    this.leftCol.addChild(...items);
+    this.leftW = Math.max(...items.map((i) => i.measureSize().w));
   }
 
-  /** BET · SPIN or the FS counter — right-aligned; the tabs hang off the hero's
-   *  left edge near its top, under it. Without a hero (replay) there are no tabs. */
+  /** The button row: SPIN or the FS counter, the tabs under its left edge from its top down; BET
+   *  under it. Right-aligned. Without a hero (replay) there are no tabs. */
   private buildRight(): void {
     const { config } = this.host;
     const z = this.z;
-    const items: Sized[] = [];
     this.bet = this.buildBet();
-    items.push(this.bet);
     let hero: Sized | undefined;
     if (this.isBase()) hero = this.spin = this.buildSpin();
     else if (this.showFs()) hero = this.fs = this.buildFs();
-    if (hero) items.push(hero);
-    const size = stack(this.rightCol, items, z.gap, 'right');
-    let colW = size.w;
+    const items: Sized[] = hero ? [hero, this.bet] : [this.bet];
+    let colW = Math.max(...items.map((i) => i.measureSize().w));
+    if (hero) hero.position.set(colW - hero.measureSize().w, this.rowB);
+    this.bet.position.set(colW - this.bet.measureSize().w, this.rowC);
+    this.rightCol.addChild(...items);
 
     const tabs: SButton[] = [];
     if (hero && this.isBase() && config.features.autoplay) tabs.push((this.autoTab = this.buildAutoTab()));
     if (hero && config.features.turbo > 0) tabs.push((this.turboTab = this.buildTurboTab()));
     if (hero && tabs.length) {
       const [tw, th] = z.tab;
-      const body = hero.measureSize().h;
       const x = hero.x - tw + z.tabOverlap;
-      let y = hero.y + Math.round(body * 0.09); // near the hero's top, as in the reference
+      let y = hero.y; // flush with the hero's top edge
       for (const t of tabs) {
         t.position.set(x, y);
         this.rightCol.addChildAt(t, 0); // under the hero
@@ -252,7 +256,6 @@ export class SideBar extends Container implements HbBar {
       }
     }
     this.rightW = colW;
-    this.rightH = size.h;
   }
 
   // ── pieces ────────────────────────────────────────────────────────────────
@@ -261,8 +264,8 @@ export class SideBar extends Container implements HbBar {
     return new SReadout({ label: this.host.t(label), value, w: z.readout[0], h: z.readout[1], labelSize: z.labelSize, valueSize: z.valueSize, grow: this.mobile });
   }
 
-  /** The mask slab, SPIN's size and shape, level with SPIN at the bottom of the left column; with a
-   *  feature active it turns red with a white cross (tap = deactivate). */
+  /** The mask slab, SPIN's size and shape, level with SPIN in the button row; with a feature active
+   *  it turns red with a white cross (tap = deactivate). */
   private buildBuy(): SButton | undefined {
     const { state, config } = this.host;
     if (config.features.buyBonus === false && !config.onBonusBuy) return undefined;
@@ -340,7 +343,8 @@ export class SideBar extends Container implements HbBar {
     });
   }
 
-  /** ▶ — a running run shows a yellow face with STOP (tap stops it); idle opens the picker. */
+  /** ▶ — a running run shows a yellow face with STOP (tap stops it); idle opens the picker. Idle
+   *  hover: the yellow face with an ink ▶. */
   private buildAutoTab(): SButton {
     const z = this.z;
     const g = z.tabGlyph;
@@ -353,6 +357,8 @@ export class SideBar extends Container implements HbBar {
       glyph: running ? makeIcon('stop', g, { ink: S.ink, fill: S.ink }) : sIcon('play', g, S.fg),
       glyphSize: g,
       insetRight: z.tabOverlap,
+      hoverFace: running ? undefined : 'yellow',
+      hoverGlyph: running ? undefined : sIcon('play', g, S.ink),
       onTap: () => {
         const { active, remaining } = this.host.state.autoplay;
         if (active || remaining > 0) this.host.actions.stopAutoplay();
@@ -361,7 +367,8 @@ export class SideBar extends Container implements HbBar {
     });
   }
 
-  /** ⚡ — L0 white bolt, L1 yellow bolt, L2 yellow face with an ink bolt. */
+  /** ⚡ — L0 white bolt, L1 yellow bolt, L2 yellow face with an ink bolt. Hover on a black tab: the
+   *  yellow face with an ink bolt (= the L2 look). */
   private buildTurboTab(): SButton {
     const z = this.z;
     const g = z.tabGlyph;
@@ -375,6 +382,8 @@ export class SideBar extends Container implements HbBar {
       glyph: sIcon('bolt', g, color),
       glyphSize: g,
       insetRight: z.tabOverlap,
+      hoverFace: level >= 2 ? undefined : 'yellow',
+      hoverGlyph: level >= 2 ? undefined : sIcon('bolt', g, S.ink),
       onTap: () => this.host.actions.cycleTurbo(),
     });
   }

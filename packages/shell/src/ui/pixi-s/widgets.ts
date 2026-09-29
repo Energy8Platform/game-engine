@@ -38,11 +38,14 @@ export interface SButtonOpts {
   glyphSize: number;
   /** Right strip hidden under a neighbour (the tabs under SPIN): the glyph centres in what is left. */
   insetRight?: number;
+  /** Face shown on hover instead of the face's own hover shade (the tabs light up yellow). */
+  hoverFace?: SFace;
+  /** Glyph shown on hover instead of `glyph` (same box) — e.g. ink on the yellow hover face. */
+  hoverGlyph?: Container;
   onTap: () => void;
 }
 
-/** A slab with a centred glyph: the burger, BUY and the autoplay / turbo tabs. Only black slabs carry
- *  the halftone — the yellow and red faces are plain, as in the reference. */
+/** A slab with a centred glyph: the burger, BUY and the autoplay / turbo tabs. */
 export class SButton extends Container implements Sized {
   readonly slab: Slab;
   readonly face: SFace;
@@ -57,10 +60,32 @@ export class SButton extends Container implements Sized {
     this.glyph = o.glyph;
     this.glyph.position.set((o.w - (o.insetRight ?? 0) - o.glyphSize) / 2, (o.h - o.glyphSize) / 2);
     this.addChild(this.slab, this.glyph);
+    const hg = o.hoverGlyph;
+    if (hg) {
+      hg.position.copyFrom(this.glyph.position);
+      hg.visible = false;
+      this.addChild(hg);
+    }
+    const swap = (on: boolean): void => {
+      if (!hg) return;
+      hg.visible = on;
+      this.glyph.visible = !on;
+    };
     this.eventMode = 'static';
     this.cursor = 'pointer';
     this.hitArea = new Rectangle(0, 0, o.w, o.h);
-    attachHover(this, () => this.slab.setFace(f.hover), () => this.slab.setFace(f.fill));
+    const hover = o.hoverFace ? FACES[o.hoverFace].fill : f.hover;
+    attachHover(
+      this,
+      () => {
+        this.slab.setFace(hover);
+        swap(true);
+      },
+      () => {
+        this.slab.setFace(f.fill);
+        swap(false);
+      },
+    );
     attachPress(this, 0.94, () => {
       if (!this._disabled) o.onTap();
     });

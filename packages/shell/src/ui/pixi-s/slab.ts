@@ -47,6 +47,7 @@ export class Slab extends Container {
   readonly h: number;
   private faceG = new Graphics();
   private points: number[];
+  private _face = '';
 
   constructor(w: number, h: number, opts: SlabOpts) {
     super();
@@ -62,7 +63,13 @@ export class Slab extends Container {
     this.setFace(opts.face);
   }
 
+  /** The colour the face is painted in right now. */
+  get face(): string {
+    return this._face;
+  }
+
   setFace(color: string): void {
+    this._face = color;
     this.faceG.clear().poly(this.points).fill(color);
   }
 }

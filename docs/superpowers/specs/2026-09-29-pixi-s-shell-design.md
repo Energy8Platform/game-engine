@@ -167,25 +167,26 @@ code.
 
 ### Wide (desktop, landscape)
 
+The bar is laid out in rows (the user's call after the second demo, 2026-09-29: "баланс и bet под
+кнопками", "win прям по низу между блоками", the tabs "одного размера и идти ровно от верхнего края
+кнопки, и при ховер желтым цветом"):
+
 ```
 [≡]
-[ВЫИГРЫШ  $0.00      ]
-[БАЛАНС   $1,000.00  ]                  [− СТАВКА $1.00 +]
 ┌──────────────────┐                ▶ ┌──────────────────┐
 │    BUY (mask)    │                ⚡ │       SPIN       │
 └──────────────────┘                   └──────────────────┘
+[БАЛАНС   $1,000.00  ]  [ВЫИГРЫШ $0.00]  [− СТАВКА $1.00 +]
 ```
 
-- The left column is anchored bottom-left and stacks, from the top: menu, (TOTAL WIN in FS),
-  WIN, BALANCE, then BUY (base mode only). BALANCE is hidden in replay, as in HB. The slabs are
-  left-aligned.
-- **BUY is SPIN-sized on desktop too** (the user's requirement, 2026-09-29: "кнопка бонуса
-  сорзамерна кнопки спина и находилась слева, как в мобильной так и десктопе"): SPIN's size and
-  lean, at the bottom of the left column, level with SPIN.
-- The right column is anchored bottom-right and stacks, from the top: BET, SPIN (or the FS
-  counter). The autoplay and turbo tabs hang off SPIN's left
-  edge, near its top (the first tab ≈ 9% of SPIN's body height below its top edge), inside SPIN's
-  vertical span.
+- **Button row.** BUY (left; SPIN's size and lean, base mode only) and SPIN or the FS counter
+  (right), level. The burger sits above BUY. In free spins BUY's slot holds TOTAL WIN, so no row
+  grows and no inset moves.
+- **Under the buttons.** BALANCE under BUY, BET under SPIN, top-aligned right below the button row.
+  BALANCE is hidden in replay, as in HB.
+- **WIN** sits on the bottom line (with BALANCE), centred in the gap between the two columns.
+- **Tabs.** Autoplay and turbo are one size, stacked from SPIN's top edge down, tucked under SPIN's
+  left edge. Hover on a black tab: the yellow face with an ink glyph.
 - **Wide readouts never grow.** WIN / BALANCE / TOTAL WIN and BET keep their design width; a label
   or value that does not fit scales down (label and value by one factor). So the side insets do not
   change with content — scenes read `safeArea` only on resize. (Mobile readouts may grow; see below.)
@@ -193,9 +194,9 @@ code.
 - **Fit scale.** `s = clamp(min(W / 1280, H / 720), 0.35, 1)`, applied to each column's inner
   container. The 0.35 floor keeps Stake popout S (400×225) readable, as in HB.
 - **Safe area.** `left` = the left column's right edge + 12 (screen px). `right` = screen width −
-  the right column's left edge (tabs included) + 12. `top = bottom = 0`. `barHeight` is therefore 0.
-  Scenes that read `api.shell.safeArea` fit the reels between the columns. Scenes that ignore it
-  are unaffected.
+  the right column's left edge (tabs included) + 12. `bottom` = screen height − WIN's top + 12 (the
+  WIN row between the columns). `top = 0`; `barHeight` equals `bottom`. Scenes that read
+  `api.shell.safeArea` fit the reels between the columns and above WIN.
 - **Menu anchor.** `menuAnchor()` is the burger rect. `menuPlate()` is the left column's bounds,
   so the HB popover opens above the column, left-aligned.
 
@@ -205,27 +206,26 @@ code.
 ┌──────────── 390 ────────────┐
 │          (reels)            │
 │ [≡]                         │
-│ [ВЫИГРЫШ $0.00]             │
-│ [БАЛАНС $1,000] [− $1.00 +] │
 │ ┌─────────┐   ▶ ┌─────────┐ │
 │ │   BUY   │   ⚡ │  SPIN   │ │
 │ └─────────┘     └─────────┘ │
+│ [БАЛАНС $1,000] [− $1.00 +] │
+│       [ВЫИГРЫШ $0.00]       │
 └─────────────────────────────┘
 ```
 
-- The same two columns, pulled together and sharing one bottom line. Side padding is 10 and
-  bottom padding is 8.
-- The left column stacks: menu, (TOTAL WIN in FS), WIN, BALANCE, then BUY. The right column
-  stacks: BET, then SPIN with the tabs.
+- The same rows as wide in one bottom block; WIN gets its own bottom row, centred under both
+  columns (there is no gap between the columns to hold it). Side padding is 10 and bottom
+  padding is 8.
 - **BUY is spin-sized.** On mobile BUY uses SPIN's slab size and lean (150×90),
-  shows the mask glyph large (76), and sits bottom-left, level with SPIN. Outside base mode BUY is
-  hidden and both columns stay bottom-anchored.
+  shows the mask glyph large (76), and sits left, level with SPIN. Outside base mode BUY is
+  hidden; its slot stays (TOTAL WIN takes it in free spins).
 - Mobile design sizes: menu 52×38, readouts 172×44 (label 11, value 17), BET 186×40, SPIN and BUY
   150×90, tabs 42×34. Left column (172) + gap (12) + right column (186) = 370 = 390 − 2·10.
   Readouts and BET grow when a value does not fit, and
   the block then scales down — that only shrinks the bottom inset, so it stays safe.
 - **Fit scale.** The block is designed at 370 wide (390 minus the side padding) and scaled by
-  `min(1, (W − 20) / blockW)`, where `blockW = max(370, left + 12 + right)`. It is never wider than
+  `min(1, (W − 20) / blockW)`, where `blockW = max(370, left + 12 + right, WIN)`. It is never wider than
   the screen, so it has no lower bound.
 - **Safe area.** `bottom` = screen height − the block's top edge. `left = right = top = 0`.
   `barHeight` equals `bottom`.
