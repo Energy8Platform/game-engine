@@ -30,8 +30,8 @@ export interface GizmoOptions {
   /** Screen→design: the scene root's world scale (1/scale). */
   designPerPixel(): number;
   snap(p: { x: number; y: number }, alt: boolean): { x: number; y: number };
-  /** ONE per gesture end. */
-  onEdit(node: string, props: Partial<GizmoTarget['props']>): void;
+  /** ONE per gesture end; `nudge` marks one from `nudge()` (an arrow key) rather than a pointer gesture. */
+  onEdit(node: string, props: Partial<GizmoTarget['props']>, nudge?: boolean): void;
   /**
    * A press inside the selection box that never moved. The body covers the whole selected
    * node so it can be dragged, which also makes it swallow every click there — the host
@@ -230,7 +230,7 @@ export function createGizmo(o: GizmoOptions): Gizmo {
       const { node, view } = target;
       const p = { x: view.position.x + dxDesign, y: view.position.y + dyDesign };
       view.position.set(p.x, p.y);
-      o.onEdit(node, p);
+      o.onEdit(node, p, true);
       redraw();
     },
     drag(h, from, to, mods = {}) {

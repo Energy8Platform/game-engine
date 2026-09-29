@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { Context } from 'cordis';
@@ -859,6 +859,57 @@ describe('SceneDocument', () => {
     expect(undo).toHaveBeenCalledWith(['scene:base_game']);
     frame(iframe, 'redo', undefined);
     expect(redo).toHaveBeenCalledWith(['scene:base_game']);
+  });
+
+  it('arrow-key nudges are written once, 300 ms after the last — one step for a held arrow', async () => {
+    const { ctx, puts } = await harness();
+    renderTab(ctx);
+    const { iframe } = canvas();
+    const logo = (doc: SceneDoc) => doc.nodes[0].children?.[0].props;
+    vi.useFakeTimers();
+    try {
+      for (const x of [1, 2, 3]) {
+        frame(iframe, 'edit', { node: 'logo', props: { x, y: 0 }, variant: null, nudge: true });
+        await act(async () => {
+          await vi.advanceTimersByTimeAsync(100);
+        });
+      }
+      expect(puts()).toHaveLength(0);
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(300);
+      });
+      expect(puts()).toHaveLength(1);
+      expect(logo(puts()[0])).toEqual({ src: 'logo.png', x: 3, y: 0 });
+    } finally {
+      vi.useRealTimers();
+    }
+    // One step: one undo puts the node back where it was before the first nudge.
+    expect(await ctx.history.undo(['scene:base_game'])).toEqual({
+      kind: 'undo',
+      ok: true,
+      label: 'scene base_game',
+    });
+    expect(logo(puts().at(-1)!)).toEqual({ src: 'logo.png' });
+  });
+
+  it('a held nudge is written before anything else the canvas sends — a drag, or an undo, which then undoes it', async () => {
+    const { ctx, puts } = await harness();
+    ctx.shell.open({ key: KEY, title: 'base_game', component: () => null, closable: true });
+    renderTab(ctx);
+    const { iframe } = canvas();
+    const logo = (doc: SceneDoc) => doc.nodes[0].children?.[0].props;
+
+    frame(iframe, 'edit', { node: 'logo', props: { x: 5, y: 0 }, variant: null, nudge: true });
+    frame(iframe, 'edit', { node: 'title', props: { x: 7, y: 8 }, variant: null });
+    await waitFor(() => expect(puts()).toHaveLength(2));
+    expect(logo(puts()[0])).toEqual({ src: 'logo.png', x: 5, y: 0 });
+    expect(puts()[1].nodes[2].props).toEqual({ src: 'title.png', x: 7, y: 8 });
+
+    frame(iframe, 'edit', { node: 'logo', props: { x: 6, y: 0 }, variant: null, nudge: true });
+    frame(iframe, 'undo', undefined);
+    await waitFor(() => expect(puts()).toHaveLength(4));
+    expect(logo(puts()[2])).toEqual({ src: 'logo.png', x: 6, y: 0 });
+    expect(logo(puts()[3])).toEqual({ src: 'logo.png', x: 5, y: 0 });
   });
 
   it('a frame from somewhere else is ignored', async () => {

@@ -1355,12 +1355,12 @@ describe('scene-edit plugin', () => {
     key('[');
     expect(events().at(-1)).toEqual({ event: 'zorder', payload: { node: 'hi', delta: -1 } });
     key('ArrowRight');
-    expect(events().at(-1)).toEqual({ event: 'edit', payload: { node: 'hi', props: { x: 121, y: 120 }, variant: null } });
+    expect(events().at(-1)).toEqual({ event: 'edit', payload: { node: 'hi', props: { x: 121, y: 120 }, variant: null, nudge: true } });
     key('ArrowDown', { shiftKey: true });
-    expect(events().at(-1)).toEqual({ event: 'edit', payload: { node: 'hi', props: { x: 121, y: 130 }, variant: null } });
+    expect(events().at(-1)).toEqual({ event: 'edit', payload: { node: 'hi', props: { x: 121, y: 130 }, variant: null, nudge: true } });
     key('ArrowLeft', { metaKey: true }); // a browser chord, not a nudge
     key('ArrowLeft', { ctrlKey: true });
-    expect(events().at(-1)).toEqual({ event: 'edit', payload: { node: 'hi', props: { x: 121, y: 130 }, variant: null } });
+    expect(events().at(-1)).toEqual({ event: 'edit', payload: { node: 'hi', props: { x: 121, y: 130 }, variant: null, nudge: true } });
     const input = document.body.appendChild(document.createElement('input'));
     input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Delete', bubbles: true }));
     expect(events().at(-1)?.event).toBe('edit'); // typing in a field is not a canvas key
@@ -1387,7 +1387,7 @@ describe('scene-edit plugin', () => {
     // The scene mode's own keys, unaffected by the listener above.
     edit().pickAndSelect(65, 65);
     key('ArrowRight');
-    expect(events().at(-1)).toEqual({ event: 'edit', payload: { node: 'hi', props: { x: 121, y: 120 }, variant: null } });
+    expect(events().at(-1)).toEqual({ event: 'edit', payload: { node: 'hi', props: { x: 121, y: 120 }, variant: null, nudge: true } });
     key('Delete');
     expect(events().at(-1)).toEqual({ event: 'remove', payload: { node: 'hi' } });
   });
@@ -1554,7 +1554,7 @@ describe('scene-edit plugin', () => {
     expect(scenes.view({ scene: 'a', node: 'hi' })!.position.x).toBe(160);
     // A nudge follows before the IDE answers the drag.
     key('ArrowRight');
-    expect(events().at(-1)).toEqual({ event: 'edit', payload: { node: 'hi', props: { x: 161, y: 120 }, variant: null } });
+    expect(events().at(-1)).toEqual({ event: 'edit', payload: { node: 'hi', props: { x: 161, y: 120 }, variant: null, nudge: true } });
     // The IDE's echo of the DRAG: it reflects the pending edit exactly, so it
     // acknowledges that one alone and the nudge is laid over it again. Had the
     // canvas kept 160.4, nothing would have matched and the nudge would be lost.
@@ -1581,7 +1581,7 @@ describe('scene-edit plugin', () => {
     expect(events().at(-1)?.event).toBe('orientation');
     expect(events().filter((e) => e.event === 'orientation')).toHaveLength(1);
     key('ArrowRight');
-    expect(events().at(-1)).toEqual({ event: 'edit', payload: { node: 'hi', props: { x: 121, y: 120 }, variant: 'portrait' } });
+    expect(events().at(-1)).toEqual({ event: 'edit', payload: { node: 'hi', props: { x: 121, y: 120 }, variant: 'portrait', nudge: true } });
     const a = scenes.docs().get('a')!;
     expect(a.portrait).toEqual({ nodes: { hi: { x: 121, y: 120 } } });
     expect(a.nodes[1].props).toEqual({ x: 120, y: 120 });
@@ -1599,7 +1599,7 @@ describe('scene-edit plugin', () => {
     expect(events().at(-1)).toEqual({ event: 'orientation', payload: { orientation: 'landscape' } });
     expect(scenes.view({ scene: 'a', node: 'hi' })!.position.x).toBe(120);
     key('ArrowRight');
-    expect(events().at(-1)).toEqual({ event: 'edit', payload: { node: 'hi', props: { x: 121, y: 120 }, variant: null } });
+    expect(events().at(-1)).toEqual({ event: 'edit', payload: { node: 'hi', props: { x: 121, y: 120 }, variant: null, nudge: true } });
   });
 
   it('disposing the fiber tears everything down', async () => {

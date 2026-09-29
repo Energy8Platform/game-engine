@@ -49,7 +49,7 @@ describe('gizmo', () => {
     const { gizmo, onEdit, onBodyClick } = boot(); const t = target(); gizmo.attach(t);
     gizmo.drag('body', { x: 100, y: 100 }, { x: 101, y: 100 });
     expect(onEdit).not.toHaveBeenCalled(); expect(onBodyClick).toHaveBeenCalledWith(101, 100);
-    gizmo.nudge(1, 0); expect(onEdit).toHaveBeenCalledWith('n', { x: 101, y: 100 });
+    gizmo.nudge(1, 0); expect(onEdit).toHaveBeenCalledWith('n', { x: 101, y: 100 }, true); // marked: an arrow key, not a gesture
   });
   it('body drag runs through snap', () => {
     const layer = new Container(); const onEdit = vi.fn();
@@ -62,7 +62,7 @@ describe('gizmo', () => {
   it('consecutive gestures re-base on the view, not the props snapshot', () => {
     const { gizmo, onEdit } = boot(); const t = target(); gizmo.attach(t);
     gizmo.nudge(1, 0); gizmo.nudge(1, 0);
-    expect(onEdit).toHaveBeenLastCalledWith('n', { x: 102, y: 100 });
+    expect(onEdit).toHaveBeenLastCalledWith('n', { x: 102, y: 100 }, true);
     gizmo.drag('body', { x: 100, y: 100 }, { x: 110, y: 100 });
     gizmo.drag('body', { x: 110, y: 100 }, { x: 120, y: 100 });
     expect(onEdit).toHaveBeenLastCalledWith('n', { x: 122, y: 100 });

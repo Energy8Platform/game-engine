@@ -362,6 +362,17 @@ describe('HistoryStatus', () => {
     expect(screen.getByTestId('history-status')).toHaveTextContent('nothing to undo');
   });
 
+  it('is a live status region, there before anything is said, so a screen reader announces each result', async () => {
+    const ctx = await bootHistory();
+    ctx.history.record('a', { label: 'move node', undo: async () => null, redo: async () => null });
+    render(<HistoryStatus ctx={ctx} />);
+    expect(screen.getByRole('status')).toHaveTextContent('');
+    await act(async () => {
+      await ctx.history.undo(['a']);
+    });
+    expect(screen.getByRole('status')).toHaveTextContent('Undo: move node');
+  });
+
   it('a later undo replaces the shown result and restarts the 4 s window', async () => {
     const ctx = await bootHistory();
     ctx.history.record('a', { label: 'first', undo: async () => null, redo: async () => null });

@@ -9,7 +9,8 @@ const VISIBLE_MS = 4000;
  * as-is on failure (`nothing to undo`, `changed elsewhere since — can't
  * undo`, …), then empty. Subscribes so a later undo/redo replaces what is
  * showing and restarts the 4 s window, rather than the old one just
- * outlasting a fresh result.
+ * outlasting a fresh result. A `status` region, mounted even while empty,
+ * so a screen reader announces each result as it lands.
  */
 export function HistoryStatus({ ctx }: { ctx: Context }) {
   const [entry, setEntry] = useState(() => ctx.history.last());
@@ -39,7 +40,7 @@ export function HistoryStatus({ ctx }: { ctx: Context }) {
         : entry.result.reason;
 
   return (
-    <span className="e8-status-item" data-testid="history-status">
+    <span className="e8-status-item" data-testid="history-status" role="status">
       {text}
     </span>
   );

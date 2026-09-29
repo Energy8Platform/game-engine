@@ -141,8 +141,11 @@ export interface ReelsSnapshot {
 
 /** Which layer of the document an edit lands in: the node's own props (`null`), or `portrait.nodes[<id>]` while the safe rect is portrait (spec §7). */
 export type Variant = 'portrait' | null;
-/** The `edit` event's payload: `x`/`y` are OFFSETS from the pin point when the node's merged props carry a `pin`. */
-export interface EditPayload { node: string; props: Record<string, number>; variant: Variant }
+/**
+ * The `edit` event's payload: `x`/`y` are OFFSETS from the pin point when the node's merged props carry a `pin`.
+ * `nudge`: an arrow key moved it — the IDE writes a run of these once, after the last, as one undo step.
+ */
+export interface EditPayload { node: string; props: Record<string, number>; variant: Variant; nudge?: true }
 
 /** `window.__e8edit` on the editor page — test hooks, like `__e8` on the game page. Symbol mode exposes only `emitted`/`snapshot`/`frameOf` (no node to `select`, no `grid`, nothing to `pickAndSelect`); reels mode exposes only `emitted`/`snapshot` (nothing to pick, nothing frame-animated at this level). */
 export interface SceneEdit {
@@ -984,7 +987,7 @@ export function apply(ctx: Context, config: SceneEditConfig): void {
      * point, so `x`/`y` are converted before either. Into the current
      * variant's layer.
      */
-    function applyEdit(node: string, props: Partial<GizmoTarget['props']>): void {
+    function applyEdit(node: string, props: Partial<GizmoTarget['props']>, nudge?: boolean): void {
       const at = pinOf(node) ?? { x: 0, y: 0 };
       const rounded: Record<string, number> = {};
       for (const [k, v] of Object.entries(props) as [string, number][]) {
@@ -992,7 +995,7 @@ export function apply(ctx: Context, config: SceneEditConfig): void {
         const by = sceneRounding[k];
         rounded[k] = by ? Math.round(value * by) / by : value;
       }
-      const edit: EditPayload = { node, props: rounded, variant: variant() };
+      const edit: EditPayload = { node, props: rounded, variant: variant(), ...(nudge ? { nudge: true as const } : {}) };
       if (pending.push(edit) > 100) pending.shift();
       scenes.replace(patch([...scenes.docs().values()], node, rounded, edit.variant));
       retarget();

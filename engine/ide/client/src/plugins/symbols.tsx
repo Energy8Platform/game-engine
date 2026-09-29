@@ -125,9 +125,9 @@ export function apply(ctx: Context, config: SymbolsConfig) {
   let docLive = false;
   let knownLive = false;
   // Writes currently in flight — while any is pending, a recorded step's
-  // `read()` answers `undefined` rather than the current (possibly stale)
-  // `doc`, so an undo/redo racing a write it doesn't know about refuses as
-  // diverged instead of overwriting it.
+  // undo/redo answers BUSY (its `pending`) before it ever compares `doc`,
+  // which the write in flight is about to replace: the step stays, to be
+  // taken once that write has landed.
   let pending = 0;
 
   const notify = () => {

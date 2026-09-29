@@ -16,11 +16,14 @@ const TIMEOUT_MS = 5000;
  * before they are written. `variant: 'portrait'` says the canvas was in a
  * portrait safe rect — the edit belongs in `portrait.nodes[node]`, not in
  * the node's own props (spec §7). Absent or `null`: the node itself.
+ * `nudge`: an arrow key moved it, not a pointer gesture — the tab writes a
+ * run of these once, after the last.
  */
 export interface EditPayload {
   node: string;
   props: Record<string, unknown>;
   variant?: 'portrait' | null;
+  nudge?: boolean;
 }
 
 type Pending = { resolve: (v: unknown) => void; reject: (e: unknown) => void };

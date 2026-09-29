@@ -151,9 +151,9 @@ export function apply(ctx: Context, config: ScenesConfig) {
   // selected — the one case its closing clears the selection.
   let hadTab = false;
   // Writes currently in flight, service-wide — while any is pending, a
-  // recorded step's `read()` answers `undefined` rather than the current
-  // (possibly stale) `docs`, so an undo/redo racing a write it doesn't
-  // know about refuses as diverged instead of overwriting it.
+  // recorded step's undo/redo answers BUSY (its `pending`) before it ever
+  // compares `docs`, which the write in flight is about to replace: the
+  // step stays, to be taken once that write has landed.
   let pending = 0;
 
   const notify = () => {

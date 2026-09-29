@@ -246,6 +246,9 @@ function roundProps(props: Record<string, unknown>): Record<string, unknown> {
   return out;
 }
 
+/** How long after the canvas' last arrow-key nudge the run of them is written — one undo step for a held arrow. */
+const NUDGE_MS = 300;
+
 const FALLBACK_DESIGN = { width: 480, height: 288 };
 /** Room the fit leaves around the frame, as the old bar did. */
 const FIT_PAD = 24;
@@ -327,12 +330,47 @@ export function SceneDocument({ ctx, path }: ViewerProps) {
 
   // A refusal leaves `docs` as it was, so no `replace` follows on its own —
   // the canvas, which applied its own edit already, is told the set again to snap back.
-  const commit = (next: SceneDoc | undefined) => {
-    if (!next || next === liveDoc()) return;
-    void ctx.scenes.update(next).then((refused) => {
+  const commit = (next: SceneDoc | undefined): Promise<void> => {
+    if (!next || next === liveDoc()) return Promise.resolve();
+    return ctx.scenes.update(next).then((refused) => {
       setError(refused[0]?.message ?? null);
       if (refused.length > 0) tell('replace', { docs: ctx.scenes.docs() });
     });
+  };
+
+  /** One canvas edit, into the layer it names. */
+  const applyEdit = ({ node, props, variant: layer }: EditPayload) => {
+    const current = liveDoc();
+    const write = layer === 'portrait' ? patchVariant : patchNode;
+    return commit(current && write(current, node, roundProps(props)));
+  };
+
+  // The canvas' arrow-key nudges, merged and held until `NUDGE_MS` after
+  // the last one — the canvas shows each at once (its own pending edits),
+  // and the file gets one write, so a held arrow is one undo step. Written
+  // at once instead when anything else from the canvas comes first.
+  const nudge = useRef<{ edit: EditPayload; timer: ReturnType<typeof setTimeout> } | null>(null);
+  /** Writes a held nudge now — the write's promise, or `undefined` when none was held. */
+  const flushNudge = (): Promise<void> | undefined => {
+    const held = nudge.current;
+    if (!held) return undefined;
+    nudge.current = null;
+    clearTimeout(held.timer);
+    return applyEdit(held.edit);
+  };
+  const holdNudge = (edit: EditPayload) => {
+    const held = nudge.current;
+    const same = held?.edit.node === edit.node && (held.edit.variant ?? null) === (edit.variant ?? null);
+    if (held && !same) void flushNudge();
+    const props = same && held ? { ...held.edit.props, ...edit.props } : edit.props;
+    if (nudge.current) clearTimeout(nudge.current.timer);
+    nudge.current = { edit: { ...edit, props }, timer: setTimeout(() => void flushNudge(), NUDGE_MS) };
+  };
+  /** `then` once a held nudge has landed — straight away when none is held. */
+  const afterNudge = (then: () => void) => {
+    const written = flushNudge();
+    if (written) void written.then(then);
+    else then();
   };
 
   // The game is highlighting the selection; a node going with this
@@ -432,23 +470,25 @@ export function SceneDocument({ ctx, path }: ViewerProps) {
       if (liveNode() !== node) ctx.scenes.select({ scene: id, node });
     });
     rpc.on('edit', (payload) => {
-      const { node, props, variant: layer } = payload as EditPayload;
-      const current = liveDoc();
-      const write = layer === 'portrait' ? patchVariant : patchNode;
-      commit(current && write(current, node, roundProps(props)));
+      const edit = payload as EditPayload;
+      if (edit.nudge) holdNudge(edit);
+      else afterNudge(() => void applyEdit(edit));
     });
-    rpc.on('remove', (payload) => remove((payload as { node: string }).node));
+    rpc.on('remove', (payload) => afterNudge(() => remove((payload as { node: string }).node)));
     rpc.on('zorder', (payload) => {
       const { node, delta } = payload as { node: string; delta: number };
-      const current = liveDoc();
-      commit(current && shiftNode(current, node, delta > 0 ? 1 : -1));
+      afterNudge(() => {
+        const current = liveDoc();
+        void commit(current && shiftNode(current, node, delta > 0 ? 1 : -1));
+      });
     });
     rpc.on('error', (payload) => setError((payload as { message: string }).message));
     // Mod+Z/Y typed on the canvas — it forwards the key (keys pressed
     // inside the iframe never reach this page's own listener) rather than
-    // undoing anything itself.
-    rpc.on('undo', () => void runHistory(ctx, 'undo'));
-    rpc.on('redo', () => void runHistory(ctx, 'redo'));
+    // undoing anything itself. A nudge still held is written first, so it
+    // is what the undo takes back.
+    rpc.on('undo', () => afterNudge(() => void runHistory(ctx, 'undo')));
+    rpc.on('redo', () => afterNudge(() => void runHistory(ctx, 'redo')));
     rpc.on('drop', (payload) => {
       const { path, file, x, y } = payload as {
         path?: string;
@@ -460,6 +500,8 @@ export function SceneDocument({ ctx, path }: ViewerProps) {
       else if (path) void dropAsset(path, x, y);
     });
     return () => {
+      // Closing the tab mid-run keeps the nudges: written now, not dropped.
+      void flushNudge();
       rpc.dispose();
       rpcRef.current = null;
       scenes.setVariant(id, null);
