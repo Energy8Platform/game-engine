@@ -9,6 +9,7 @@ import * as viewersMedia from './plugins/viewers-media';
 import * as shell from './plugins/shell';
 import * as modules from './plugins/modules';
 import type { ModulesConfig } from './plugins/modules';
+import * as history from './plugins/history';
 import * as gameComposition from './plugins/game-composition';
 import type { GameCompositionConfig } from './plugins/game-composition';
 import * as assetNodeTypes from './plugins/asset-node-types';
@@ -71,6 +72,10 @@ export async function createIdeClient(
   // same `fetchFn` `files` already takes.
   await ctx.plugin(workspace, config);
   await ctx.plugin(modules, config);
+  // In-memory undo/redo, no deps of its own — composed here, ahead of
+  // every service below that records a step into it (`gameComposition`
+  // included) and every tab that registers a `scope`.
+  await ctx.plugin(history);
   await ctx.plugin(gameComposition, config);
   // A pure contribution registry, like `viewers` — composed right before
   // `scenes`, whose canvas drop handler (a later task) is its first reader.
