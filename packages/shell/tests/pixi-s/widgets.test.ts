@@ -2,7 +2,7 @@ import '../pixi/setup-canvas'; // must be first — patches canvas getContext be
 import { describe, it, expect, vi } from 'vitest';
 import type { Ticker } from 'pixi.js';
 import { SButton, SReadout, SBet, SSpin, SFsCounter, type SSpinOpts } from '@/ui/pixi-s/widgets';
-import { SKEW } from '@/ui/pixi-s/slab';
+import { SKEW, DOT_STEP } from '@/ui/pixi-s/slab';
 import { sIcon } from '@/ui/pixi-s/icons';
 import { S, DISABLED_ALPHA } from '@/ui/pixi-s/theme';
 
@@ -60,6 +60,33 @@ describe('S widgets', () => {
     expect(long.labelText.text).toBe('BALANCE');
   });
 
+  it('SReadout with grow off keeps its design width and scales the text down to fit inside', () => {
+    const r = new SReadout({ label: 'Total win', value: '€10,000,000,000.00', w: 268, h: 56, labelSize: 15, valueSize: 23, grow: false });
+    expect(r.measureSize()).toEqual({ w: 268, h: 56 });
+    expect(r.labelText.x).toBeGreaterThan(0);
+    expect(r.valueText.x + r.valueText.width).toBeLessThanOrEqual(268 - SKEW.readout[0][0]);
+    expect(r.valueText.scale.x).toBeLessThan(1);
+    expect(r.labelText.scale.x).toBeCloseTo(r.valueText.scale.x, 5); // one factor for both
+  });
+
+  it('grown slabs round their width up to the dot step (bounded dot-context cache)', () => {
+    const r = new SReadout({ label: 'Balance', value: '€10,000,000,000.00', w: 172, h: 44, labelSize: 11, valueSize: 17 });
+    expect(r.measureSize().w).toBeGreaterThan(172);
+    expect(r.measureSize().w % DOT_STEP).toBe(0);
+    const b = new SBet({ label: 'Legendary Warrior Ante', value: '€1,000.00', w: 186, h: 40, labelSize: 11, valueSize: 17, stepper: false, onStep: () => {} });
+    expect(b.measureSize().w).toBeGreaterThan(186);
+    expect(b.measureSize().w % DOT_STEP).toBe(0);
+  });
+
+  it('SBet: the label is yellow; with grow off it keeps its width and scales the text to fit', () => {
+    const b = new SBet({ label: 'Legendary Warrior Ante', value: '€1,000.00', w: 232, h: 38, labelSize: 14, valueSize: 19, stepper: false, onStep: () => {}, grow: false });
+    expect(b.labelText.style.fill).toBe(S.yellow);
+    expect(b.measureSize()).toEqual({ w: 232, h: 38 });
+    expect(b.labelText.x).toBeGreaterThan(0);
+    expect(b.valueText.x + b.valueText.width).toBeLessThanOrEqual(232);
+    expect(Math.abs(b.labelText.x - (232 - (b.valueText.x + b.valueText.width)))).toBeLessThan(0.5); // centred
+  });
+
   it('SBet: ± step (unless disabled), the value opens the picker, no stepper when asked', () => {
     const steps: number[] = [];
     const onValue = vi.fn();
@@ -97,6 +124,12 @@ describe('S widgets', () => {
     expect(spin({ autoplay: 'running', remaining: Infinity }).s.count).toBe('∞');
   });
 
+  it('SSpin hit-tests its leaning outline, not its box', () => {
+    const { s } = spin();
+    expect(s.hitArea!.contains(2, 5)).toBe(false); // the empty top-left lean corner
+    expect(s.hitArea!.contains(130, 68)).toBe(true);
+  });
+
   it('SSpin: disabled ignores taps; busy rotates the glyph on the ticker until destroyed', () => {
     const { fns, ticker } = fakeTicker();
     const { s, calls } = spin({ ticker });
@@ -116,5 +149,14 @@ describe('S widgets', () => {
     expect(fs.valueText.text).toBe('3 / 10');
     expect(fs.valueText.x).toBeCloseTo((260 - fs.valueText.width) / 2, 5);
     expect(fs.measureSize()).toEqual({ w: 260, h: 136 });
+  });
+
+  it('SFsCounter scales a long label and value down to fit inside the leaning slab, centred', () => {
+    const fs = new SFsCounter({ w: 150, h: 90, label: 'БЕСПЛАТНЫЕ ВРАЩЕНИЯ', value: '€1,234,567.89', labelSize: 11, valueSize: 22 });
+    const inner = 150 - 2 * SKEW.spin[0][0]; // the lean eats SKEW.spin[0][0] at each end
+    for (const t of [fs.labelText, fs.valueText]) {
+      expect(t.width).toBeLessThanOrEqual(inner);
+      expect(t.x).toBeCloseTo((150 - t.width) / 2, 5);
+    }
   });
 });

@@ -1,7 +1,7 @@
-import { Container, Graphics, Rectangle, type Text, type Ticker } from 'pixi.js';
+import { Container, Graphics, Polygon, Rectangle, type Text, type Ticker } from 'pixi.js';
 import { attachHover, attachPress, type SpinAutoplayMode } from '../pixi-hb/primitives/widgets';
 import { makeIcon, type IconView } from '../pixi-hb/pixi-icon';
-import { Slab, SKEW, TOOTH_D, slabPoints, type Corners } from './slab';
+import { Slab, SKEW, TOOTH_D, DOT_STEP, slabPoints, type Corners } from './slab';
 import { sIcon } from './icons';
 import { sLabel, sValue } from './text';
 import { S, DISABLED_ALPHA } from './theme';
@@ -105,6 +105,17 @@ export class SStep extends Container {
   }
 }
 
+/** The slab width for `texts` side by side plus `chrome` px of padding and gaps. When they do not fit
+ *  `w`: `grow` widens the slab (rounded up to DOT_STEP, so the dot-context cache stays small);
+ *  otherwise the slab keeps `w` and the texts scale down by one factor. */
+function fitSlab(w: number, chrome: number, texts: Text[], grow: boolean): number {
+  const textW = texts.reduce((a, t) => a + t.width, 0);
+  if (chrome + textW <= w) return w;
+  if (grow) return Math.ceil((chrome + textW) / DOT_STEP) * DOT_STEP;
+  for (const t of texts) t.scale.set((w - chrome) / textW);
+  return w;
+}
+
 export interface SReadoutOpts {
   label: string;
   value: string;
@@ -112,10 +123,14 @@ export interface SReadoutOpts {
   h: number;
   labelSize: number;
   valueSize: number;
+  /** Widen past `w` when the text does not fit (default). Off: keep `w` and scale the text down —
+   *  the wide columns set the scene's side insets, which must not change with content. */
+  grow?: boolean;
 }
 
-/** WIN / BALANCE / TOTAL WIN: the yellow caps label, then the white value, on a black slab. Grows past
- *  `w` when the value would not fit; the bar's fit scale then shrinks the whole column. */
+/** WIN / BALANCE / TOTAL WIN: the yellow caps label, then the white value, on a black slab. With
+ *  `grow` (mobile) it widens when the text would not fit and the bar's fit scale then shrinks the
+ *  whole block; without it the text scales down inside `w`. */
 export class SReadout extends Container implements Sized {
   readonly labelText: Text;
   readonly valueText: Text;
@@ -127,8 +142,8 @@ export class SReadout extends Container implements Sized {
     const gap = Math.round(o.valueSize * 0.5);
     this.labelText = sLabel(o.label, o.labelSize);
     this.valueText = sValue(o.value, o.valueSize);
-    const need = pad + this.labelText.width + gap + this.valueText.width + pad;
-    this.slab = new Slab(Math.max(o.w, Math.ceil(need)), o.h, { face: S.plate, dots: S.plateDot, corners: SKEW.readout });
+    const w = fitSlab(o.w, 2 * pad + gap, [this.labelText, this.valueText], o.grow !== false);
+    this.slab = new Slab(w, o.h, { face: S.plate, dots: S.plateDot, corners: SKEW.readout });
     this.labelText.position.set(pad, (o.h - this.labelText.height) / 2);
     this.valueText.position.set(pad + this.labelText.width + gap, (o.h - this.valueText.height) / 2);
     this.addChild(this.slab, this.labelText, this.valueText);
@@ -140,9 +155,8 @@ export class SReadout extends Container implements Sized {
 }
 
 export interface SBetOpts {
+  /** BET, or the active feature's title — yellow either way, as in the reference. */
   label: string;
-  /** Label colour — white for BET, yellow when it names an active feature. */
-  labelColor?: string;
   value: string;
   w: number;
   h: number;
@@ -153,6 +167,8 @@ export interface SBetOpts {
   onStep: (dir: 1 | -1) => void;
   /** Tap on the label/value area (opens the bet picker); omitted = not tappable. */
   onValue?: () => void;
+  /** As SReadoutOpts.grow. */
+  grow?: boolean;
 }
 
 /** − BET value + on one black slab. The ± hit boxes are h×h squares at the ends. */
@@ -167,11 +183,11 @@ export class SBet extends Container implements Sized {
   constructor(o: SBetOpts) {
     super();
     const gap = Math.round(o.valueSize * 0.4);
-    this.labelText = sLabel(o.label, o.labelSize, o.labelColor ?? S.fg);
+    this.labelText = sLabel(o.label, o.labelSize);
     this.valueText = sValue(o.value, o.valueSize);
-    const mid = this.labelText.width + gap + this.valueText.width;
     const side = o.stepper ? o.h : Math.round(o.h * 0.4);
-    const w = Math.max(o.w, Math.ceil(mid + 2 * side + 2 * gap));
+    const w = fitSlab(o.w, 2 * side + 3 * gap, [this.labelText, this.valueText], o.grow !== false);
+    const mid = this.labelText.width + gap + this.valueText.width;
     this.slab = new Slab(w, o.h, { face: S.plate, dots: S.plateDot, corners: SKEW.bet });
     const x0 = (w - mid) / 2;
     this.labelText.position.set(x0, (o.h - this.labelText.height) / 2);
@@ -236,7 +252,8 @@ export class SSpin extends Container implements Sized {
     this.addChild(this.veil);
     this.eventMode = 'static';
     this.cursor = 'pointer';
-    this.hitArea = new Rectangle(0, 0, o.w, o.h);
+    // The leaning outline, not the box: the tabs' visible strips left of the lean are theirs to hit.
+    this.hitArea = new Polygon(slabPoints(o.w, o.h, SKEW.spin, true));
     attachHover(this, () => this.slab.setFace(S.yellowHover), () => this.slab.setFace(S.yellow));
     attachPress(this, 0.96, () => {
       if (this._disabled) return;
@@ -328,13 +345,17 @@ export interface SFsCounterOpts {
 /** Replaces SPIN in free spins: the yellow sawtooth slab with an ink caps label over the counter. */
 export class SFsCounter extends Container implements Sized {
   readonly slab: Slab;
+  readonly labelText: Text;
   readonly valueText: Text;
 
   constructor(o: SFsCounterOpts) {
     super();
     this.slab = new Slab(o.w, o.h, { face: S.yellow, dots: S.yellowDot, fade: false, corners: SKEW.spin, sawtooth: true });
-    const label = sLabel(o.label, o.labelSize, S.ink);
+    const label = (this.labelText = sLabel(o.label, o.labelSize, S.ink));
     this.valueText = sValue(o.value, o.valueSize, S.ink);
+    // Centred text clears the lean at both ends only when narrower than w − 2·lean (+ breathing room).
+    const maxW = o.w - 2 * SKEW.spin[0][0] - o.labelSize;
+    for (const t of [label, this.valueText]) if (t.width > maxW) t.scale.set(maxW / t.width);
     const body = o.h - TOOTH_D;
     const gap = Math.round(o.labelSize * 0.4);
     const top = (body - label.height - gap - this.valueText.height) / 2;

@@ -88,8 +88,8 @@ export function halftone(w: number, h: number, corners: Corners, sawtooth: boole
   return out;
 }
 
-// One context per slab size / corners / colour / fade — the bar is rebuilt on ~20 state changes per
-// spin, and with whole-px sizes the cache is bounded by the number of distinct slabs.
+// One context per slab size / corners / sawtooth / fade / colour — the bar is rebuilt on ~20 state
+// changes per spin, and with whole-px sizes the cache is bounded by the number of distinct slabs.
 const dotCache = new Map<string, GraphicsContext>();
 
 function dotContext(w: number, h: number, corners: Corners, sawtooth: boolean, fade: boolean, color: string): GraphicsContext {

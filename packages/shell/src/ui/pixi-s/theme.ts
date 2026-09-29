@@ -6,7 +6,7 @@ export const S = {
   yellowDot: '#d8a63d', // halftone on yellow
   plate: '#0b0b0b', // the black slab
   plateHover: '#1b1b1b',
-  plateDot: '#1c1c1c', // halftone on black
+  plateDot: '#2e2614', // halftone on black — warm olive, as sampled
   red: '#e0301e', // BUY while a feature is active
   redHover: '#c42716',
   shadow: '#000000',

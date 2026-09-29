@@ -87,6 +87,26 @@ describe('S side bar — wide', () => {
     expect(rightCol.getChildIndex(autoTab!)).toBeLessThan(rightCol.getChildIndex(spin!)); // SPIN draws over
   });
 
+  it('BET: the label is yellow, as in the reference — the feature title too', () => {
+    expect(parts(build(host(1280, 720))).bet.labelText.style.fill).toBe(S.yellow);
+    const ctx = host(1280, 720);
+    ctx.state.activeFeature = ANTE;
+    expect(parts(build(ctx)).bet.labelText.style.fill).toBe(S.yellow);
+  });
+
+  it('the tabs sit near SPIN\'s top (reference: ~10–15px below it), inside its span', () => {
+    for (const [w, h] of [[1280, 720], [390, 844]]) {
+      const bar = build(host(w, h));
+      const s = box(parts(bar).spin!);
+      const a = box(parts(bar).autoTab!);
+      const t = box(parts(bar).turboTab!);
+      const k = bar.fitScale();
+      expect(a.y - s.y).toBeGreaterThanOrEqual(6 * k);
+      expect(a.y - s.y).toBeLessThanOrEqual(15 * k);
+      expect(t.b).toBeLessThan(s.b);
+    }
+  });
+
   it('reserves the sides: the safe insets reach just past each column', () => {
     const bar = build(host(1280, 720));
     const l = box(parts(bar).leftCol);
@@ -116,6 +136,27 @@ describe('S side bar — wide', () => {
   it('fits Stake popout S (400×225), a laptop (1024×576) and a landscape phone (844×390)', () => {
     for (const [w, h] of [[400, 225], [1024, 576], [844, 390]]) expectOnScreen(build(host(w, h)), w, h);
     expect(build(host(400, 225)).fitScale()).toBe(0.35);
+  });
+
+  it('the side insets do not change with content: FS rows, long labels and huge wins never widen a column', () => {
+    const RU: Record<string, string> = { 'Total win': 'ОБЩИЙ ВЫИГРЫШ', Balance: 'БАЛАНС', Win: 'ВЫИГРЫШ' };
+    const t = (s: string) => RU[s] ?? s;
+    const base = build(host(1280, 720, FULL, { t })).safeArea();
+    const ctx = host(1280, 720, FULL, { t });
+    ctx.state.mode = 'freeSpins';
+    ctx.state.freeSpins = { current: 3, total: 10, totalWin: 1_000_000 };
+    ctx.state.win = 1_000_000;
+    ctx.state.balance = 10_000_000_000;
+    const bar = build(ctx);
+    expect(bar.safeArea().left).toBe(base.left);
+    const p = parts(bar);
+    for (const r of [p.totalWin!, p.win, p.balance!]) {
+      expect(r.labelText.x).toBeGreaterThan(0);
+      expect(r.valueText.x + r.valueText.width).toBeLessThanOrEqual(r.slab.w);
+    }
+    const feat = host(1280, 720, FULL, { t });
+    feat.state.activeFeature = { ...ANTE, title: 'Legendary Warrior Ante' };
+    expect(build(feat).safeArea().right).toBe(base.right);
   });
 
   it('a huge balance and a long feature title never make the columns overlap', () => {

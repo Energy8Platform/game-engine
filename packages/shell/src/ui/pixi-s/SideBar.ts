@@ -219,7 +219,7 @@ export class SideBar extends Container implements HbBar {
   }
 
   /** (wide, base: BUY) · BET · SPIN or the FS counter — right-aligned; the tabs hang off the hero's
-   *  left edge, under it. Without a hero (replay) there are no tabs. */
+   *  left edge near its top, under it. Without a hero (replay) there are no tabs. */
   private buildRight(): void {
     const { config } = this.host;
     const z = this.z;
@@ -242,10 +242,9 @@ export class SideBar extends Container implements HbBar {
     if (hero && config.features.turbo > 0) tabs.push((this.turboTab = this.buildTurboTab()));
     if (hero && tabs.length) {
       const [tw, th] = z.tab;
-      const total = tabs.length * th + (tabs.length - 1) * z.tabGap;
       const body = hero.measureSize().h - TOOTH_D;
       const x = hero.x - tw + z.tabOverlap;
-      let y = hero.y + (body - total) / 2;
+      let y = hero.y + Math.round(body * 0.09); // near the hero's top, as in the reference
       for (const t of tabs) {
         t.position.set(x, y);
         this.rightCol.addChildAt(t, 0); // under the hero
@@ -264,7 +263,7 @@ export class SideBar extends Container implements HbBar {
   // ── pieces ────────────────────────────────────────────────────────────────
   private readout(label: string, value: string): SReadout {
     const z = this.z;
-    return new SReadout({ label: this.host.t(label), value, w: z.readout[0], h: z.readout[1], labelSize: z.labelSize, valueSize: z.valueSize });
+    return new SReadout({ label: this.host.t(label), value, w: z.readout[0], h: z.readout[1], labelSize: z.labelSize, valueSize: z.valueSize, grow: this.mobile });
   }
 
   /** The mask tab; with a feature active it turns red with a white cross (tap = deactivate). */
@@ -285,7 +284,8 @@ export class SideBar extends Container implements HbBar {
     });
   }
 
-  /** − BET +. With a feature active the label names it (yellow) and the value is the feature price. */
+  /** − BET +. With a feature active the label names it and the value is the feature price. Wide: the
+   *  slab never grows (the right inset stays put); mobile: it may. */
   private buildBet(): SBet {
     const { state } = this.host;
     const z = this.z;
@@ -293,13 +293,13 @@ export class SideBar extends Container implements HbBar {
     const isBase = this.isBase();
     return new SBet({
       label: feature ? feature.title : this.host.t('Bet'),
-      labelColor: feature ? S.yellow : S.fg,
       value: this.host.fmt(feature ? state.bet * feature.priceMultiplier : state.bet),
       w: z.bet[0],
       h: z.bet[1],
       labelSize: z.betLabel,
       valueSize: z.betValue,
       stepper: isBase,
+      grow: this.mobile,
       onStep: (dir) => {
         if (!this.host.state.busy) this.host.actions.stepBet(dir);
       },

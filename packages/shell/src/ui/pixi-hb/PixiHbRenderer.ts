@@ -52,10 +52,10 @@ export interface PixiHbRendererOptions {
 }
 
 /** The Pixi VIEW half of the shell — the renderer the controller drives. Owns the root/bar/modal
- *  containers, builds the BottomBar + overlays, runs money count-ups + the frosted backdrop, and
- *  reports its surface size back to the controller. All the keyboard / pull-focus / overlay-flow
- *  logic lives in the ShellController; this class is pure Pixi rendering — a 1:1 port of the
- *  PixiGameShell rendering methods. */
+ *  containers, builds the bar from `opts.bar` (default: BottomBar) + overlays, runs money count-ups
+ *  + the frosted backdrop, and reports its surface size back to the controller. All the keyboard /
+ *  pull-focus / overlay-flow logic lives in the ShellController; this class is pure Pixi rendering —
+ *  a 1:1 port of the PixiGameShell rendering methods. */
 export class PixiHbRenderer implements ShellRenderer {
   private app: Application;
   private parent?: Container;
