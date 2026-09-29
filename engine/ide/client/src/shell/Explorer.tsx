@@ -4,6 +4,17 @@ import { diagnostic, type Diagnostic, type FileEntry } from '@energy8engine/cont
 import { FILE_KEY_PREFIX } from '../plugins/shell';
 import { activateOnKey } from './activate';
 import { EditorDocument } from './EditorDocument';
+import {
+  REMOVE_OVER_CAP_MESSAGE,
+  createStep,
+  mkdirStep,
+  moveStep,
+  removeStep,
+  snapshotForRemove,
+  writeStep,
+  type ExplorerStepDeps,
+  type RemoveSnapshot,
+} from './explorerSteps';
 import { ExplorerMenu } from './ExplorerMenu';
 import { ViewerDocument, extensionOf } from './ViewerDocument';
 
@@ -23,6 +34,11 @@ import { ViewerDocument, extensionOf } from './ViewerDocument';
  * only a clean answer triggers a refetch. Both a tree-read failure and an
  * action refusal also go to `ctx.connection.report()`, so they outlive this
  * view exactly as they outlived `AssetsScreen`.
+ *
+ * Every accepted verb (create/mkdir/move/remove/upload) also records one
+ * `HistoryStep` under the `files` key (`explorerSteps.ts`, design doc
+ * §4) — undone or redone with Mod+Z while focus is inside this sidebar
+ * (the key router in `historyKeys.ts` sends it here).
  *
  * Clicking a directory toggles its fold; clicking a file calls `openPath`.
  * Either click also selects the row: the header's "new file"/"new folder"
@@ -46,9 +62,17 @@ import { ViewerDocument, extensionOf } from './ViewerDocument';
 /** The type an internal drag carries: the dragged row's path. Anything else on a drop is the OS's `Files`. */
 const DRAG_TYPE = 'text/x-e8-path';
 
-/** What a confirm row is currently asking about — one state for both irreversible actions, same shape `AssetsScreen` used. */
+/**
+ * What a confirm row is currently asking about — one state for both
+ * irreversible actions, same shape `AssetsScreen` used. A delete's
+ * `snapshot` is what undo would need to bring it back — asked for the
+ * moment the question comes up (`askDelete`), so it is usually ready by
+ * the time "yes" is clicked; `null` while still being read, in which
+ * case a click that lands first is simply not undoable (same as over the
+ * cap — see `confirm`).
+ */
 type Pending =
-  | { kind: 'delete'; path: string }
+  | { kind: 'delete'; path: string; snapshot: RemoveSnapshot | null }
   | { kind: 'overwrite'; path: string; bytes: Uint8Array; also: Diagnostic[] };
 
 /** Which inline input is up: a new entry inside `dir`, or a new name for `path`. */
@@ -246,9 +270,23 @@ export function Explorer({ ctx }: { ctx: Context }): JSX.Element {
     if (!diagnostics.some((diag) => diag.severity === 'error')) void refreshTree();
   }
 
-  /** `also`: this view's own words about the upload, shown next to the host's answer once it lands. */
-  function upload(path: string, bytes: Uint8Array, also: Diagnostic[] = []) {
-    ctx.files.write(path, bytes).then(({ diagnostics }) => finish([...diagnostics, ...also]));
+  // What every `explorerSteps` builder needs: the same `files` a verb
+  // itself calls, `history` to replay its own write through, and this
+  // view's own refetch for once that write lands (design doc §4).
+  const stepDeps: ExplorerStepDeps = {
+    files: ctx.files,
+    history: ctx.history,
+    refresh: () => void refreshTree(),
+  };
+
+  /** `also`: this view's own words about the upload, shown next to the host's answer once it lands. `before`: the bytes this path held before (`null` for one that didn't exist), for the undo step. */
+  function upload(path: string, bytes: Uint8Array, before: Uint8Array | null, also: Diagnostic[] = []) {
+    ctx.files.write(path, bytes).then(({ diagnostics }) => {
+      finish([...diagnostics, ...also]);
+      if (diagnostics.length === 0) {
+        ctx.history.record('files', writeStep(stepDeps, path, before, bytes));
+      }
+    });
   }
 
   function handleUpload(event: ChangeEvent<HTMLInputElement>) {
@@ -271,7 +309,7 @@ export function Explorer({ ctx }: { ctx: Context }): JSX.Element {
         setPending({ kind: 'overwrite', path, bytes, also });
         return;
       }
-      upload(path, bytes, also);
+      upload(path, bytes, null, also);
     };
     reader.onerror = () => {
       const own = [
@@ -288,9 +326,20 @@ export function Explorer({ ctx }: { ctx: Context }): JSX.Element {
     reader.readAsArrayBuffer(file);
   }
 
+  /**
+   * The confirm shows at once, `snapshot: null` — a remove is common and
+   * usually small; there is no reason to make every one of them wait on
+   * a read. The bytes (or, over the cap, just the fact of it) land
+   * moments later, patched into the SAME pending row once read — but
+   * only while it is still the row this delete asked about; a `cancel`,
+   * or a different row's own delete, in the meantime drops the answer.
+   */
   function askDelete(path: string) {
     setActionDiagnostics([]); // an older refusal shouldn't linger over a new question
-    setPending({ kind: 'delete', path });
+    setPending({ kind: 'delete', path, snapshot: null });
+    void snapshotForRemove(ctx.files, path, entries ?? []).then((snapshot) => {
+      setPending((prev) => (prev?.kind === 'delete' && prev.path === path ? { ...prev, snapshot } : prev));
+    });
   }
 
   function cancel() {
@@ -300,16 +349,31 @@ export function Explorer({ ctx }: { ctx: Context }): JSX.Element {
   function confirm(asked: Pending) {
     setPending(null);
     if (asked.kind === 'overwrite') {
-      upload(asked.path, asked.bytes, asked.also);
+      // The bytes this path holds right now, read just before they are
+      // replaced — what undoing this upload would write back.
+      ctx.files.read(asked.path).then(({ bytes: before }) => {
+        upload(asked.path, asked.bytes, before ?? null, asked.also);
+      });
       return;
     }
     ctx.files.remove(asked.path).then(({ diagnostics }) => {
       finish(diagnostics);
-      // A gone entry can't stay the target for "new file"/"new folder".
-      if (diagnostics.length === 0)
+      if (diagnostics.length === 0) {
+        // Over the cap, `snapshotForRemove` gave up before reading
+        // everything — and with no snapshot yet at all (a fast click,
+        // still loading), there is nothing to undo with either way, so
+        // no step (design doc §4).
+        if (asked.snapshot && !asked.snapshot.overCap) {
+          ctx.history.record(
+            'files',
+            removeStep(stepDeps, asked.path, asked.snapshot.dirs, asked.snapshot.files),
+          );
+        }
+        // A gone entry can't stay the target for "new file"/"new folder".
         setSelected((prev) =>
           prev !== null && (prev === asked.path || prev.startsWith(`${asked.path}/`)) ? null : prev,
         );
+      }
     });
   }
 
@@ -377,7 +441,10 @@ export function Explorer({ ctx }: { ctx: Context }): JSX.Element {
     }
     void ctx.files.move(from, to).then(({ diagnostics }) => {
       finish(diagnostics);
-      if (diagnostics.length === 0) followMove(from, to);
+      if (diagnostics.length === 0) {
+        ctx.history.record('files', moveStep(stepDeps, from, to));
+        followMove(from, to);
+      }
     });
   }
 
@@ -394,7 +461,15 @@ export function Explorer({ ctx }: { ctx: Context }): JSX.Element {
     if (e.kind === 'create') {
       const path = joinPath(e.dir, name);
       const request = e.what === 'dir' ? ctx.files.mkdir(path) : ctx.files.create(path);
-      void request.then(({ diagnostics }) => finish(diagnostics));
+      void request.then(({ diagnostics }) => {
+        finish(diagnostics);
+        if (diagnostics.length === 0) {
+          ctx.history.record(
+            'files',
+            e.what === 'dir' ? mkdirStep(stepDeps, path) : createStep(stepDeps, path),
+          );
+        }
+      });
       return true;
     }
     const to = joinPath(dirOf(e.path), name);
@@ -520,12 +595,16 @@ export function Explorer({ ctx }: { ctx: Context }): JSX.Element {
     );
   }
 
-  /** What the delete confirm asks: a directory's count is everything under it, the directory itself excluded. */
+  /** What the delete confirm asks: a directory's count is everything under it, the directory itself excluded; over the cap, it also says the remove won't be undoable (design doc §4). */
   function confirmText(entry: FileEntry): string {
     if (pending?.kind === 'overwrite') return `replace "${entry.path}"?`;
-    if (entry.kind === 'file') return `delete "${entry.path}"?`;
-    const count = (entries ?? []).filter((e) => e.path.startsWith(`${entry.path}/`)).length;
-    return `delete folder "${entry.path}" and ${count} entries?`;
+    const question =
+      entry.kind === 'file'
+        ? `delete "${entry.path}"?`
+        : `delete folder "${entry.path}" and ${(entries ?? []).filter((e) => e.path.startsWith(`${entry.path}/`)).length} entries?`;
+    return pending?.kind === 'delete' && pending.snapshot?.overCap
+      ? `${question} ${REMOVE_OVER_CAP_MESSAGE}`
+      : question;
   }
 
   return (

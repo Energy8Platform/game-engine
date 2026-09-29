@@ -87,7 +87,7 @@ type HostAnswers = {
  */
 export async function harnessWithCalls(
   result: TreeResult,
-  contents: Record<string, string> = {},
+  contents: Record<string, string | Uint8Array> = {},
   hostAnswers: HostAnswers = {},
 ): Promise<{ ctx: Context & { files: TestFiles }; calls: string[] }> {
   let entries = 'entries' in result ? result.entries : [];
@@ -155,7 +155,10 @@ export async function harnessWithCalls(
     }
 
     if (Object.prototype.hasOwnProperty.call(contents, path)) {
-      return new Response(contents[path]);
+      // A `Uint8Array` body (as opposed to a plain string) round-trips
+      // arbitrary bytes exactly — a JS string re-encodes as UTF-8 on the
+      // way through `Response`, which mangles a byte like `0xff`.
+      return new Response(contents[path] as BodyInit);
     }
     return new Response(JSON.stringify({ diagnostics: [d(`"${path}" was not found: ENOENT`)] }), {
       status: 404,
@@ -181,7 +184,7 @@ export async function harnessWithCalls(
 
 export async function harness(
   result: TreeResult,
-  contents: Record<string, string> = {},
+  contents: Record<string, string | Uint8Array> = {},
   hostAnswers: HostAnswers = {},
 ): Promise<Context & { files: TestFiles }> {
   const { ctx } = await harnessWithCalls(result, contents, hostAnswers);
