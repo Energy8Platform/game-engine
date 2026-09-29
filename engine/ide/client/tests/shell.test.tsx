@@ -1185,6 +1185,9 @@ describe('Shell', () => {
     // A Russian layout's Ctrl+S reports `key: 'ы'`, never 's' — `code`
     // (the physical key) is what still catches it.
     expect(fire({ key: 'ы', code: 'KeyS', ctrlKey: true })).toBe(true);
+    // A Latin layout means its own letter: Dvorak's Ctrl+O sits on the
+    // physical S key and is Open, not Save.
+    expect(fire({ key: 'o', code: 'KeyS', ctrlKey: true })).toBe(false);
   });
 
   it('a keydown with Mod+Z on document.body undoes the active tab and prevents default', () => {

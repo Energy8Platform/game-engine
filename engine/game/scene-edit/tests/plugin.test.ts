@@ -1392,6 +1392,20 @@ describe('scene-edit plugin', () => {
     expect(events().at(-1)).toEqual({ event: 'remove', payload: { node: 'hi' } });
   });
 
+  it('a Latin letter on the physical Z/Y key means that letter; the physical key counts only for a non-Latin layout', async () => {
+    const { events, ready, key } = boot();
+    await ready();
+    const last = (k: string, code: string) => {
+      const n = events().length;
+      key(k, { code, ctrlKey: true });
+      return events().length === n ? null : events().at(-1);
+    };
+    expect(last('y', 'KeyZ')).toEqual({ event: 'redo' }); // QWERTZ Ctrl+Y
+    expect(last('w', 'KeyZ')).toBeNull(); // AZERTY Ctrl+W
+    expect(last('f', 'KeyY')).toBeNull(); // Dvorak Ctrl+F
+    expect(last('я', 'KeyZ')).toEqual({ event: 'undo' }); // Russian Ctrl+Z
+  });
+
   it('a drop with the Explorer type emits drop with design coords; a foreign drop is ignored', async () => {
     const { events, ready, dropTarget } = boot();
     await ready();

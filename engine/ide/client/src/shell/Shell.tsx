@@ -4,7 +4,7 @@ import type { Context } from 'cordis';
 import { diagnostic } from '@energy8engine/contracts';
 import type { ConnectionService } from '../plugins/connection';
 import type { SlotMeta } from '../plugins/slots';
-import { runHistoryKey } from './historyKeys';
+import { chordLetter, runHistoryKey } from './historyKeys';
 import {
   byOrder,
   useShell,
@@ -341,9 +341,10 @@ export function Shell({ ctx }: { ctx: Context }) {
   // Cmd/Ctrl+S is swallowed here for EVERY tab: the editor's own listener
   // saves only when its tab is active, so on any other tab the keystroke
   // reached the browser and opened its save-page dialog, which an IDE
-  // never wants. `code === 'KeyS'` is checked beside `key.toLowerCase() ===
-  // 's'` for the same reason `historyAction` checks `code` — a non-Latin
-  // layout's Ctrl+S reports a `key` that never matches `'s'`.
+  // never wants. Which letter the chord is comes from `chordLetter`, the
+  // same reading `historyAction` uses: a non-Latin layout's Ctrl+S reports
+  // a `key` that never matches `'s'`, and a Latin layout that puts another
+  // letter on the physical S key (Dvorak's Ctrl+O) means that letter.
   //
   // Mod+Z / Mod+Shift+Z / Mod+Y are routed the same way, for the same
   // reason: `runHistoryKey` decides who undoes/redoes (a text field, the
@@ -357,11 +358,7 @@ export function Shell({ ctx }: { ctx: Context }) {
       event.returnValue = '';
     };
     const handleKeydown = (event: KeyboardEvent) => {
-      if (
-        (event.metaKey || event.ctrlKey) &&
-        (event.key.toLowerCase() === 's' || event.code === 'KeyS')
-      )
-        event.preventDefault();
+      if ((event.metaKey || event.ctrlKey) && chordLetter(event) === 's') event.preventDefault();
       if (runHistoryKey(ctx, event)) event.preventDefault();
     };
     window.addEventListener('beforeunload', hold);

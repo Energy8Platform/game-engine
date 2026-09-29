@@ -2,41 +2,50 @@ import type { Context } from 'cordis';
 import type { HistoryResult } from '../plugins/history';
 
 /**
+ * The letter a Mod chord means, lower-cased, or `''`. `key` is the
+ * character the active layout produced and wins whenever it is a Latin
+ * letter — QWERTZ puts Y on the physical Z key, so its Ctrl+Y must read
+ * as `'y'`, not as the `'KeyZ'` its `code` says. `code` (the physical
+ * key) is the fallback only for a layout that produces no Latin letter: a
+ * Russian layout's Ctrl+Z reports `key: 'я'`, `code: 'KeyZ'`.
+ */
+export function chordLetter(e: Pick<KeyboardEvent, 'key' | 'code'>): string {
+  if (/^[a-z]$/i.test(e.key)) return e.key.toLowerCase();
+  return /^Key[A-Z]$/.test(e.code) ? e.code.slice(3).toLowerCase() : '';
+}
+
+/**
  * `'undo'` for Mod+Z, `'redo'` for Mod+Shift+Z or Mod+Y — Alt held, no
- * Mod, or any other key is `null` (design doc §5). `key` is lower-cased
- * before comparing: a real keyboard already reports Shift+Z as `'Z'`
- * regardless of this function's own `shiftKey` check, and comparing case-
- * insensitively keeps the two independent.
- *
- * `code` is checked alongside `key`: `code` names the physical key
- * (`'KeyZ'`/`'KeyY'`) regardless of the active keyboard layout, while
- * `key` is the character that layout produces — on a Russian layout,
- * Ctrl+Z reports `key: 'я'`, which never matches `'z'`. Checking either
- * is what makes Mod+Z work on a non-Latin layout without mis-firing on a
- * layout where some OTHER physical key happens to produce the letter 'z'
- * (there isn't one in practice, but `code` is the one that's actually
- * layout-independent, so it leads).
+ * Mod, or any other key is `null` (design doc §5). Which letter the chord
+ * is comes from `chordLetter`.
  */
 export function historyAction(
   e: Pick<KeyboardEvent, 'key' | 'code' | 'metaKey' | 'ctrlKey' | 'shiftKey' | 'altKey'>,
 ): 'undo' | 'redo' | null {
   if (e.altKey || (!e.metaKey && !e.ctrlKey)) return null;
-  const key = e.key.toLowerCase();
-  if (key === 'z' || e.code === 'KeyZ') return e.shiftKey ? 'redo' : 'undo';
-  if (key === 'y' || e.code === 'KeyY') return 'redo';
+  const letter = chordLetter(e);
+  if (letter === 'z') return e.shiftKey ? 'redo' : 'undo';
+  if (letter === 'y') return 'redo';
   return null;
 }
 
 /**
- * An `<input>`/`<textarea>`/`[contenteditable]`/Monaco editor — each keeps
- * its own undo, so a key routed here must not also run the IDE's (design
- * doc §5).
+ * The fields that keep their own text undo: a text-entry `<input>`, a
+ * `<textarea>`, `[contenteditable]`, a Monaco editor — a key routed here
+ * must not also run the IDE's (design doc §5). A checkbox, radio, range,
+ * color, file or button input has no undo of its own, and neither does a
+ * `<select>`: Mod+Z after toggling one is the IDE's.
  */
+const EDITABLE = [
+  'input:not([type=checkbox]):not([type=radio]):not([type=range]):not([type=color])' +
+    ':not([type=button]):not([type=submit]):not([type=reset]):not([type=file])',
+  'textarea',
+  '[contenteditable]',
+  '.monaco-editor',
+].join(', ');
+
 function isEditableTarget(target: EventTarget | null): boolean {
-  return (
-    target instanceof Element &&
-    target.closest('input, textarea, [contenteditable], .monaco-editor') !== null
-  );
+  return target instanceof Element && target.closest(EDITABLE) !== null;
 }
 
 /** The Explorer sidebar — its file operations are the `files` key (design doc §4). */
@@ -46,7 +55,7 @@ function isExplorerTarget(target: EventTarget | null): boolean {
 
 /**
  * Routes one key event to `ctx.history`: nothing for a text field or
- * Monaco (their own undo); the Explorer's `files` key with focus there;
+ * Monaco (their own undo — see `EDITABLE`); the Explorer's `files` key with focus there;
  * otherwise the active tab's keys (design doc §3–§5). Answers whether it
  * acted, so the caller `preventDefault()`s only then — a key that matches
  * Mod+Z/Y shape but has nothing to act on (no active tab, not the

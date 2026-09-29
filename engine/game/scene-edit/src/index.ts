@@ -225,17 +225,17 @@ export function apply(ctx: Context, config: SceneEditConfig): void {
   // payload) — set up here, ahead of the mode branch below, so it runs for
   // scene, symbol AND reels mode alike. scene-edit cannot import the IDE
   // client's `historyAction`, so its key test is re-stated in these few
-  // lines: Alt held, or no Mod at all, is not a chord; `code` is checked
-  // alongside `key` so a non-Latin layout's physical Z/Y still matches
-  // (`key` is the character the layout produces, `code` the physical key).
+  // lines: Alt held, or no Mod at all, is not a chord; the letter is `key`
+  // when the layout produced a Latin one (QWERTZ's Ctrl+Y sits on the
+  // physical Z key and is a redo), and the physical `code` only when it did
+  // not (a Russian layout's Ctrl+Z is `key: 'я'`, `code: 'KeyZ'`).
   // A field's own undo (an `<input>` — scene mode's own `onKey` below uses
   // the same `isField`) is left alone, and so is everything else, in
   // particular scene mode's own Ctrl/Meta-free nudge keys.
   const onHistoryKey = (e: KeyboardEvent) => {
     if (e.altKey || (!e.metaKey && !e.ctrlKey) || isField(e.target)) return;
-    const k = e.key.toLowerCase();
-    const action =
-      k === 'z' || e.code === 'KeyZ' ? (e.shiftKey ? 'redo' : 'undo') : k === 'y' || e.code === 'KeyY' ? 'redo' : null;
+    const k = /^[a-z]$/i.test(e.key) ? e.key.toLowerCase() : e.code === 'KeyZ' ? 'z' : e.code === 'KeyY' ? 'y' : '';
+    const action = k === 'z' ? (e.shiftKey ? 'redo' : 'undo') : k === 'y' ? 'redo' : null;
     if (!action) return;
     e.preventDefault();
     emit(action);

@@ -156,6 +156,29 @@ describe('historyAction', () => {
       }),
     ).toBe('redo');
   });
+
+  // A Latin layout that puts a DIFFERENT letter on the physical Z or Y key
+  // means that letter: `key` wins whenever it is a Latin letter, and `code`
+  // is only the fallback for a layout that produces none.
+  const chord = (key: string, code: string) =>
+    historyAction({ key, code, metaKey: false, ctrlKey: true, shiftKey: false, altKey: false });
+
+  it('QWERTZ: Ctrl+Y sits on the physical Z key and still redoes', () => {
+    expect(chord('y', 'KeyZ')).toBe('redo');
+    expect(chord('z', 'KeyY')).toBe('undo');
+  });
+
+  it('AZERTY: Ctrl+W on the physical Z key is not undo', () => {
+    expect(chord('w', 'KeyZ')).toBeNull();
+  });
+
+  it('Dvorak: Ctrl+F on the physical Y key is not redo (Find keeps it)', () => {
+    expect(chord('f', 'KeyY')).toBeNull();
+  });
+
+  it('Russian: Ctrl+Z (я) on the physical Z key undoes', () => {
+    expect(chord('я', 'KeyZ')).toBe('undo');
+  });
 });
 
 describe('runHistoryKey', () => {
@@ -169,6 +192,48 @@ describe('runHistoryKey', () => {
     expect(runHistoryKey(ctx, keydown(document.createElement('input')))).toBe(false);
     expect(undo).not.toHaveBeenCalled();
     expect(redo).not.toHaveBeenCalled();
+  });
+
+  it.each(['text', 'number', 'search', 'email', 'password', 'url', 'tel'])(
+    'an <input type=%s> keeps its own text undo',
+    async (type) => {
+      const ctx = await boot();
+      openTab(ctx, 'a');
+      ctx.history.scope((tabKey) => (tabKey === 'a' ? ['a'] : undefined));
+      const undo = vi.spyOn(ctx.history, 'undo');
+      const input = document.createElement('input');
+      input.type = type;
+
+      expect(runHistoryKey(ctx, keydown(input))).toBe(false);
+      expect(undo).not.toHaveBeenCalled();
+    },
+  );
+
+  // No text to undo in any of these: Mod+Z right after toggling a feature
+  // or dragging a slider is the IDE's.
+  it.each(['checkbox', 'radio', 'range', 'color', 'button', 'submit', 'reset', 'file'])(
+    "an <input type=%s> has no undo of its own — the active tab's keys undo",
+    async (type) => {
+      const ctx = await boot();
+      openTab(ctx, 'a');
+      ctx.history.scope((tabKey) => (tabKey === 'a' ? ['a'] : undefined));
+      const undo = vi.spyOn(ctx.history, 'undo');
+      const input = document.createElement('input');
+      input.type = type;
+
+      expect(runHistoryKey(ctx, keydown(input))).toBe(true);
+      expect(undo).toHaveBeenCalledWith(['a']);
+    },
+  );
+
+  it("a <select> has no undo of its own — the active tab's keys undo", async () => {
+    const ctx = await boot();
+    openTab(ctx, 'a');
+    ctx.history.scope((tabKey) => (tabKey === 'a' ? ['a'] : undefined));
+    const undo = vi.spyOn(ctx.history, 'undo');
+
+    expect(runHistoryKey(ctx, keydown(document.createElement('select')))).toBe(true);
+    expect(undo).toHaveBeenCalledWith(['a']);
   });
 
   it('a <textarea> target answers false and calls neither undo nor redo', async () => {
