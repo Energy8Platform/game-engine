@@ -163,6 +163,8 @@ export function apply(ctx: Context, config: FlowConfig) {
       notify();
     },
     async update(next) {
+      // Read as this write starts: `true` only for an undo/redo's own write.
+      const replayed = ctx.history.replaying();
       // Captured before the PUT — `null` until a project has a flow.yml at
       // all, so a write that CREATES it has no "before" to go back to
       // (undoing it would need a delete, out of scope, design doc §3).
@@ -200,7 +202,7 @@ export function apply(ctx: Context, config: FlowConfig) {
         // Recorded on every ACCEPTED write, warnings included — `host` here
         // is the host's own diagnostics on a 2xx (e.g. "no incoming edge"),
         // not a refusal; `!res.ok` above already sent refusals back.
-        if (before !== null) {
+        if (before !== null && !replayed) {
           ctx.history.record(
             'flow',
             valueStep({

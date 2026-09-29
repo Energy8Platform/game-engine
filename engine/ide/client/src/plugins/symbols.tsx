@@ -198,16 +198,21 @@ export function apply(ctx: Context, config: SymbolsConfig) {
   }
 
   /**
-   * Runs `putDoc(next)` and, on an accepted write, records `before`/`next`
-   * under the `symbols` key — `before` is whatever the doc was when THIS
-   * write's turn in the queue came, which for a reducer is the doc it was
+   * Runs `putDoc(next)` and, on an accepted write that is not an
+   * undo/redo's own (`replayed`), records `before`/`next` under the
+   * `symbols` key — `before` is whatever the doc was when THIS write's
+   * turn in the queue came, which for a reducer is the doc it was
    * actually run against, not the doc at the moment `update` was called.
    */
-  async function recordedPut(before: SymbolsDoc, next: SymbolsDoc): Promise<Diagnostic[]> {
+  async function recordedPut(
+    before: SymbolsDoc,
+    next: SymbolsDoc,
+    replayed: boolean,
+  ): Promise<Diagnostic[]> {
     pending++;
     try {
       const diagnostics = await putDoc(next);
-      if (diagnostics.length === 0) {
+      if (diagnostics.length === 0 && !replayed) {
         ctx.history.record(
           'symbols',
           valueStep({
@@ -241,11 +246,14 @@ export function apply(ctx: Context, config: SymbolsConfig) {
   function queuedUpdate(
     arg: SymbolsDoc | ((doc: SymbolsDoc) => SymbolsDoc),
   ): Promise<Diagnostic[]> {
+    // Read at the call, not at this write's turn in the queue: `replaying()`
+    // is only true during the undo/redo's own synchronous call here.
+    const replayed = ctx.history.replaying();
     const run = chain.then(() => {
       const current = doc ?? EMPTY;
-      if (typeof arg !== 'function') return recordedPut(current, arg);
+      if (typeof arg !== 'function') return recordedPut(current, arg, replayed);
       const next = arg(current);
-      return next === current ? [] : recordedPut(current, next);
+      return next === current ? [] : recordedPut(current, next, replayed);
     });
     // A reducer that throws must not jam the queue for every write after it.
     chain = run.catch(() => {});

@@ -253,6 +253,8 @@ export function apply(ctx: Context, config: ScenesConfig) {
     create: (id) => send('POST', '/api/scenes', { id }),
     remove: (id) => send('DELETE', `/api/scenes/${encodeURIComponent(id)}`),
     async update(doc) {
+      // Read as this write starts: `true` only for an undo/redo's own write.
+      const replayed = ctx.history.replaying();
       // Captured before the PUT: the docs the host resolves and applies
       // arrive INSIDE `send`, so `docs` is already the new set by the time
       // this `await` returns.
@@ -267,7 +269,7 @@ export function apply(ctx: Context, config: ScenesConfig) {
         const diagnostics = await send('PUT', `/api/scenes/${encodeURIComponent(doc.id)}`, doc);
         // A scene this write CREATED has no "before" to go back to —
         // undoing it would need a delete, out of scope (design doc §3).
-        if (diagnostics.length === 0 && before !== undefined) {
+        if (diagnostics.length === 0 && before !== undefined && !replayed) {
           ctx.history.record(
             `scene:${doc.id}`,
             valueStep({

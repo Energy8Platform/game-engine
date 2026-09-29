@@ -218,6 +218,8 @@ export function apply(ctx: Context, config: GameCompositionConfig) {
       return () => listeners.delete(listener);
     },
     async update(id, nextConfig) {
+      // Read as this write starts: `true` only for an undo/redo's own write.
+      const replayed = ctx.history.replaying();
       // Captured before the PUT: `undefined` while the boot GET is still in
       // flight (`rows` is `null`) or for an id with no row — nothing here
       // creates a row, the host refuses an unknown id itself, and this
@@ -254,7 +256,7 @@ export function apply(ctx: Context, config: GameCompositionConfig) {
           service.diagnostics = Array.isArray(answer.diagnostics)
             ? (answer.diagnostics as Diagnostic[])
             : [];
-          if (before !== undefined) {
+          if (before !== undefined && !replayed) {
             ctx.history.record(
               `row:${id}`,
               valueStep({

@@ -178,6 +178,51 @@ describe('scenes service', () => {
     expect(calls.at(-1)).toEqual({ method: 'PUT', url: '/api/scenes/a', body: after });
   });
 
+  it("a write accepted while an undo's own write is still out is recorded; the undo's own write is not", async () => {
+    const bAfter: SceneDoc = { id: 'b', nodes: [{ id: 'm', type: 'sprite', props: {} }] };
+    // The host's copy: every PUT puts its doc in place and answers the set.
+    let set: SceneDoc[] = [A, B];
+    const put = (body: unknown) => {
+      const doc = body as SceneDoc;
+      set = set.map((d) => (d.id === doc.id ? doc : d));
+      return { body: { scenes: set, diagnostics: [], nodeTypes: [] } };
+    };
+    let releaseUndo!: () => void;
+    let putsA = 0;
+    const { ctx, calls } = await harness({
+      'GET /api/scenes': boot({ scenes: set, diagnostics: [], nodeTypes: [] }),
+      // The second PUT of `a` is the undo's own write: held until released.
+      'PUT /api/scenes/a': (body) =>
+        ++putsA === 2
+          ? new Promise((resolve) => {
+              releaseUndo = () => resolve(put(body));
+            })
+          : put(body),
+      'PUT /api/scenes/b': put,
+    });
+    await vi.waitFor(() => expect(ctx.scenes.docs()).toEqual([A, B]));
+    expect(await ctx.scenes.update({ id: 'a', nodes: [] })).toEqual([]);
+
+    const undo = ctx.history.undo(['scene:a']);
+    await vi.waitFor(() => expect(putsA).toBe(2));
+    // Another tab's edit, accepted while the undo's write is out.
+    expect(await ctx.scenes.update(bAfter)).toEqual([]);
+    releaseUndo();
+    expect(await undo).toEqual({ kind: 'undo', ok: true, label: 'scene a' });
+
+    expect(await ctx.history.undo(['scene:b'])).toEqual({
+      kind: 'undo',
+      ok: true,
+      label: 'scene b',
+    });
+    expect(calls.at(-1)).toEqual({ method: 'PUT', url: '/api/scenes/b', body: B });
+    expect(await ctx.history.undo(['scene:a'])).toEqual({
+      kind: 'undo',
+      ok: false,
+      reason: 'nothing to undo',
+    });
+  });
+
   it('a refused update records nothing', async () => {
     const { ctx } = await harness({
       'GET /api/scenes': boot(),

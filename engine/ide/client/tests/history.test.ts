@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { Context } from 'cordis';
 import * as history from '../src/plugins/history';
 import { valueStep, type HistoryStep } from '../src/plugins/history';
+import { createIdeClient } from '../src/index';
 
 /**
  * The service itself: no fetch, no socket — `apply()` only registers
@@ -181,11 +182,10 @@ describe('history', () => {
     });
     ctx.history.record('a', { label: 'second', undo: () => topUndo, redo: async () => null });
 
-    // Neither call is awaited before the next starts. `move()` picks and
-    // pops its entry synchronously, before it ever awaits the step's own
-    // `undo()` — so the two calls cannot both grab the top entry: the
-    // first call pops 'second' (the top), and only then does the second
-    // call run its own synchronous pick, finding 'first' underneath.
+    // Neither call is awaited before the next starts. The second waits for
+    // the first to settle before it picks: the first pops 'second' (the
+    // top), its refusal drops it, and only then does the second pick,
+    // finding 'first' underneath.
     const callForSecond = ctx.history.undo(['a']);
     const callForFirst = ctx.history.undo(['a']);
 
@@ -199,11 +199,63 @@ describe('history', () => {
     await expect(callForFirst).resolves.toEqual({ kind: 'undo', ok: true, label: 'first' });
   });
 
+  it('two undos started back to back on a slow write both apply, in order — the second waits for the first write instead of answering BUSY on it', async () => {
+    const ctx = await boot();
+    // A service shaped like `flow`: its own write in flight counts as
+    // pending until the answer lands.
+    let current = 2;
+    let pending = 0;
+    const write = async (value: number) => {
+      pending++;
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      current = value;
+      pending--;
+      return { error: null };
+    };
+    const step = (before: number, after: number) =>
+      valueStep({
+        label: `${before} → ${after}`,
+        before,
+        after,
+        read: () => current,
+        write,
+        pending: () => pending > 0,
+        history: ctx.history,
+      });
+    ctx.history.record('a', step(0, 1));
+    ctx.history.record('a', step(1, 2));
+
+    const results = await Promise.all([ctx.history.undo(['a']), ctx.history.undo(['a'])]);
+
+    expect(results).toEqual([
+      { kind: 'undo', ok: true, label: '1 → 2' },
+      { kind: 'undo', ok: true, label: '0 → 1' },
+    ]);
+    expect(current).toBe(0);
+  });
+
+  it("a person's own write in flight still answers BUSY", async () => {
+    const ctx = await boot();
+    const s = valueStep({
+      label: 'x',
+      before: 0,
+      after: 1,
+      read: () => 1,
+      write: async () => ({ error: null }),
+      pending: () => true,
+      history: ctx.history,
+    });
+    ctx.history.record('a', s);
+    expect(await ctx.history.undo(['a'])).toEqual({ kind: 'undo', ok: false, reason: history.BUSY });
+  });
+
   describe('valueStep', () => {
     it("undo with read() equal to 'after' writes 'before' through history.replay", async () => {
       const ctx = await boot();
       let current = 'AFTER';
+      let replaying: boolean | undefined;
       const write = vi.fn(async (value: string) => {
+        replaying = ctx.history.replaying();
         current = value;
         return { error: null };
       });
@@ -220,6 +272,7 @@ describe('history', () => {
       expect(await s.undo()).toBeNull();
       expect(current).toBe('BEFORE');
       expect(write).toHaveBeenCalledWith('BEFORE');
+      expect(replaying).toBe(true);
     });
 
     it('a diverged read refuses undo without writing', async () => {
@@ -355,40 +408,50 @@ describe('history', () => {
   });
 
   describe('replay guards recording', () => {
-    it('replaying() is true while a replay(write) is pending, false once it settles', async () => {
+    it("replaying() is true only during replay()'s own synchronous call to write — not across that write's await", async () => {
       const ctx = await boot();
-      let resolvePending!: () => void;
-      const pending = new Promise<void>((r) => {
-        resolvePending = r;
+      let release!: () => void;
+      const gate = new Promise<void>((resolve) => {
+        release = resolve;
       });
+      let seen: boolean | undefined;
 
       expect(ctx.history.replaying()).toBe(false);
       const p = ctx.history.replay(async () => {
-        await pending;
+        seen = ctx.history.replaying();
+        await gate;
         return 'done';
       });
-      expect(ctx.history.replaying()).toBe(true);
-      resolvePending();
-      await p;
+      // What the write's own first synchronous stretch saw — where a
+      // service reads it — and what anything else running during the
+      // await sees.
+      expect(seen).toBe(true);
+      expect(ctx.history.replaying()).toBe(false);
+      release();
+      expect(await p).toBe('done');
       expect(ctx.history.replaying()).toBe(false);
     });
 
-    it('a record from inside the replayed write is ignored; one made after it settles is kept', async () => {
+    it('a write that throws before it awaits anything still leaves replaying() false', async () => {
+      const ctx = await boot();
+      await expect(
+        ctx.history.replay(() => {
+          throw new Error('boom');
+        }),
+      ).rejects.toThrow('boom');
+      expect(ctx.history.replaying()).toBe(false);
+    });
+
+    it("record() keeps every step it is handed — whether a write is a replay is its service's call, made as the write starts", async () => {
       const ctx = await boot();
       await ctx.history.replay(async () => {
-        ctx.history.record('a', makeStep('during replay'));
+        await Promise.resolve();
+        ctx.history.record('a', makeStep('recorded by its service'));
       });
-      expect(await ctx.history.undo(['a'])).toEqual({
-        kind: 'undo',
-        ok: false,
-        reason: 'nothing to undo',
-      });
-
-      ctx.history.record('a', makeStep('after replay'));
       expect(await ctx.history.undo(['a'])).toEqual({
         kind: 'undo',
         ok: true,
-        label: 'after replay',
+        label: 'recorded by its service',
       });
     });
   });
@@ -413,6 +476,91 @@ describe('history', () => {
       const ctx = await boot();
       ctx.history.scope(() => ['x']);
       expect(ctx.history.keysFor(undefined)).toEqual([]);
+    });
+  });
+
+  describe('a project switch', () => {
+    /**
+     * The real `createIdeClient`, so `history` sees the real `workspace`
+     * the way the app composes them; the socket is shared by every plugin
+     * that opens one, and `switchTo` delivers the `workspace` frame the
+     * host sends when the open project changes. The fetch never answers —
+     * the frames alone set the workspace state.
+     */
+    async function client() {
+      const listeners: ((event: { data: string }) => void)[] = [];
+      const socket = {
+        readyState: 1,
+        addEventListener(type: string, listener: (event: { data: string }) => void) {
+          if (type === 'message') listeners.push(listener);
+        },
+        send() {},
+        close() {},
+      };
+      const fetchFn = (() => new Promise(() => {})) as unknown as typeof fetch;
+      const ctx = await createIdeClient({ url: 'ws://x/ide', socketFactory: () => socket, fetchFn });
+      const switchTo = (active: string | null) => {
+        const workspace = { projects: [], templates: [], active, previewUrl: null, diagnostics: [] };
+        const data = JSON.stringify({ type: 'workspace', workspace });
+        for (const listener of listeners) listener({ data });
+      };
+      return { ctx, switchTo };
+    }
+
+    it('empties every key, value and files alike, and last(), and notifies', async () => {
+      const { ctx, switchTo } = await client();
+      switchTo('a');
+      ctx.history.record('scene:base_game', makeStep('scene base_game'));
+      ctx.history.record('files', makeStep('remove game/spec.json'));
+      ctx.history.record('files', makeStep('upload logo.png'));
+      // One step on an undone stack too, and a result on the status line.
+      expect(await ctx.history.undo(['files'])).toMatchObject({ ok: true });
+      const listener = vi.fn();
+      ctx.history.subscribe(listener);
+
+      switchTo('b');
+
+      expect(listener).toHaveBeenCalled();
+      expect(ctx.history.last()).toBeUndefined();
+      expect(await ctx.history.undo(['scene:base_game', 'files'])).toEqual({
+        kind: 'undo',
+        ok: false,
+        reason: 'nothing to undo',
+      });
+      expect(await ctx.history.redo(['files'])).toEqual({
+        kind: 'redo',
+        ok: false,
+        reason: 'nothing to redo',
+      });
+    });
+
+    it('the host\'s "no project" frame between two projects is a switch too; a frame for the same project is not', async () => {
+      const { ctx, switchTo } = await client();
+      switchTo('a');
+      ctx.history.record('flow', makeStep('flow'));
+      switchTo('a');
+      expect(await ctx.history.undo(['flow'])).toEqual({ kind: 'undo', ok: true, label: 'flow' });
+
+      ctx.history.record('flow', makeStep('flow'));
+      switchTo(null);
+      expect(await ctx.history.undo(['flow'])).toEqual({
+        kind: 'undo',
+        ok: false,
+        reason: 'nothing to undo',
+      });
+    });
+
+    it('clear() on its own does the same', async () => {
+      const ctx = await boot();
+      ctx.history.record('row:reels1', makeStep('reels1 settings'));
+      await ctx.history.undo(['row:reels1']);
+      ctx.history.clear();
+      expect(ctx.history.last()).toBeUndefined();
+      expect(await ctx.history.redo(['row:reels1'])).toEqual({
+        kind: 'redo',
+        ok: false,
+        reason: 'nothing to redo',
+      });
     });
   });
 

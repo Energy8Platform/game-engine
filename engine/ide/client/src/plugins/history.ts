@@ -12,6 +12,10 @@ import type { Context } from 'cordis';
  * entry's `seq` is "when this was last touched", so "the latest among
  * several keys' tops" (§3) is the same comparison for undo and redo alike:
  * whichever of the candidate keys' top entries has the highest `seq`.
+ *
+ * Every key empties when the open project changes (`clear`): two projects
+ * made from one template share paths and keys, so a step recorded in one
+ * would otherwise write into — or delete from — the other.
  */
 declare module 'cordis' {
   interface Context {
@@ -41,19 +45,27 @@ export type HistoryResult =
 export const BUSY = 'a save is still in flight — try again';
 
 export interface HistoryService {
-  /** Adds a step under `key` (no-op for a write the history itself is making — see `replay`). */
+  /** Adds a step under `key`. A service skips this for its own write that `replay` started — see `replaying`. */
   record(key: string, step: HistoryStep): void;
+  /** One at a time: a call made while another undo/redo is still applying waits for it to settle first. */
   undo(keys: readonly string[]): Promise<HistoryResult>;
   redo(keys: readonly string[]): Promise<HistoryResult>;
   /** Registers which data keys a tab undoes; the first matcher answering wins. Returns a disposer. */
   scope(match: (tabKey: string) => readonly string[] | undefined): () => void;
   keysFor(tabKey: string | undefined): readonly string[];
-  /** Runs `write` with recording off for the writes it starts — used by value steps. */
+  /** Calls `write` with `replaying()` true for that one synchronous call — used by value steps. */
   replay<T>(write: () => Promise<T>): Promise<T>;
-  /** True while a `replay` write is in flight (services check it before recording). */
+  /**
+   * True only while `replay` is making its synchronous call to `write`. A
+   * service reads it synchronously as its own write starts and, if it was
+   * true, does not record that write — a write that starts while a
+   * replayed one is merely awaited is someone else's, and is recorded.
+   */
   replaying(): boolean;
   /** The last undo/redo result and when (ms), for the status line. */
   last(): { result: HistoryResult; at: number } | undefined;
+  /** Empties every key's stacks and `last()`. Runs on its own whenever the open project changes. */
+  clear(): void;
   subscribe(listener: () => void): () => void;
 }
 
@@ -76,14 +88,13 @@ export function apply(ctx: Context): void {
   const matchers: ((tabKey: string) => readonly string[] | undefined)[] = [];
   const listeners = new Set<() => void>();
   let seq = 0;
-  // ponytail: a plain depth counter, not a token tied to one write's promise
-  // chain — a `record()` from an unrelated write that happens to overlap
-  // this replay's `await` window is swallowed too, not just the ones the
-  // replayed write itself causes. Fine while services only ever call
-  // `history.replay` around their own single write; give the guard a token
-  // per `replay()` call if that overlap ever starts dropping real edits.
   let replayDepth = 0;
   let lastEntry: { result: HistoryResult; at: number } | undefined;
+  // The undo/redo queue: a second Mod+Z pressed while the first one's write
+  // is still out would otherwise see that write as pending and answer BUSY.
+  // ponytail: one write that never answers holds every later undo/redo
+  // behind it; give `move` a timeout if a hung request ever shows up.
+  let moves: Promise<unknown> = Promise.resolve();
 
   function bucketFor(key: string): Bucket {
     let bucket = buckets.get(key);
@@ -99,7 +110,6 @@ export function apply(ctx: Context): void {
   }
 
   function record(key: string, step: HistoryStep): void {
-    if (replaying()) return;
     const bucket = bucketFor(key);
     bucket.done.push({ seq: ++seq, step });
     if (bucket.done.length > MAX_STEPS_PER_KEY) bucket.done.shift();
@@ -152,6 +162,19 @@ export function apply(ctx: Context): void {
     return result;
   }
 
+  function queued(keys: readonly string[], kind: 'undo' | 'redo'): Promise<HistoryResult> {
+    const run = moves.then(() => move(keys, kind));
+    // A listener that throws must not jam every undo/redo after it.
+    moves = run.catch(() => {});
+    return run;
+  }
+
+  function clear(): void {
+    buckets.clear();
+    lastEntry = undefined;
+    notify();
+  }
+
   function scope(match: (tabKey: string) => readonly string[] | undefined): () => void {
     matchers.push(match);
     return () => {
@@ -169,28 +192,50 @@ export function apply(ctx: Context): void {
     return [];
   }
 
+  // `async` so a write that throws before its first await is a rejection
+  // too; the call itself still runs synchronously, inside the count.
   async function replay<T>(write: () => Promise<T>): Promise<T> {
     replayDepth++;
+    let written: Promise<T>;
     try {
-      return await write();
+      written = write();
     } finally {
       replayDepth--;
     }
+    return written;
   }
 
   function replaying(): boolean {
     return replayDepth > 0;
   }
 
+  // Reached through `ctx.inject`, not a static `inject`: nothing else here
+  // needs `workspace`, and a context without one (this plugin's own tests)
+  // still gets a history — one that never clears on its own.
+  ctx.inject(['workspace'], (c: Context) => {
+    // `undefined` until the first answer — that one is not a switch.
+    let active = c.workspace.state()?.active;
+    c.effect(
+      () =>
+        c.workspace.subscribe(() => {
+          const next = c.workspace.state()?.active;
+          if (active !== undefined && next !== active) clear();
+          active = next;
+        }),
+      'history:project-switch',
+    );
+  });
+
   ctx.provide('history', {
     record,
-    undo: (keys) => move(keys, 'undo'),
-    redo: (keys) => move(keys, 'redo'),
+    undo: (keys) => queued(keys, 'undo'),
+    redo: (keys) => queued(keys, 'redo'),
     scope,
     keysFor,
     replay,
     replaying,
     last: () => lastEntry,
+    clear,
     subscribe(listener) {
       listeners.add(listener);
       return () => listeners.delete(listener);

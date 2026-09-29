@@ -74,7 +74,8 @@ export async function createIdeClient(
   await ctx.plugin(modules, config);
   // In-memory undo/redo, no deps of its own — composed here, ahead of
   // every service below that records a step into it (`gameComposition`
-  // included) and every tab that registers a `scope`.
+  // included) and every tab that registers a `scope`. It empties itself on
+  // a project switch by reaching `workspace` (above) through `ctx.inject`.
   await ctx.plugin(history);
   await ctx.plugin(gameComposition, config);
   // A pure contribution registry, like `viewers` — composed right before
