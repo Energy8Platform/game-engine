@@ -294,13 +294,9 @@ test('removing a file from the Explorer is undone with Mod+Z, content and all', 
     .poll(() => existsSync(join(dir, 'game', 'spec.json')), { timeout: 10_000 })
     .toBe(false);
 
-  // The confirm's own "yes" button went with the row it belonged to, so
-  // focus fell out of the Explorer — a click on an unrelated folder brings
-  // it back (folding it is the only effect; nothing opens, nothing is a
-  // field), which is exactly why the brief calls this click out as its own
-  // step rather than assuming the confirm click already left it there.
-  await row(page, 'assets').click();
-
+  // No click back into the Explorer first: the confirm's "yes" goes with
+  // its row, and the view keeps focus itself, so Mod+Z right away is the
+  // Explorer's.
   await page.keyboard.press(UNDO_KEY);
   await expect
     .poll(() => existsSync(join(dir, 'game', 'spec.json')), { timeout: 10_000 })
