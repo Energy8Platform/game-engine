@@ -7,14 +7,23 @@ import type { HistoryResult } from '../plugins/history';
  * before comparing: a real keyboard already reports Shift+Z as `'Z'`
  * regardless of this function's own `shiftKey` check, and comparing case-
  * insensitively keeps the two independent.
+ *
+ * `code` is checked alongside `key`: `code` names the physical key
+ * (`'KeyZ'`/`'KeyY'`) regardless of the active keyboard layout, while
+ * `key` is the character that layout produces — on a Russian layout,
+ * Ctrl+Z reports `key: 'я'`, which never matches `'z'`. Checking either
+ * is what makes Mod+Z work on a non-Latin layout without mis-firing on a
+ * layout where some OTHER physical key happens to produce the letter 'z'
+ * (there isn't one in practice, but `code` is the one that's actually
+ * layout-independent, so it leads).
  */
 export function historyAction(
-  e: Pick<KeyboardEvent, 'key' | 'metaKey' | 'ctrlKey' | 'shiftKey' | 'altKey'>,
+  e: Pick<KeyboardEvent, 'key' | 'code' | 'metaKey' | 'ctrlKey' | 'shiftKey' | 'altKey'>,
 ): 'undo' | 'redo' | null {
   if (e.altKey || (!e.metaKey && !e.ctrlKey)) return null;
   const key = e.key.toLowerCase();
-  if (key === 'z') return e.shiftKey ? 'redo' : 'undo';
-  if (key === 'y') return 'redo';
+  if (key === 'z' || e.code === 'KeyZ') return e.shiftKey ? 'redo' : 'undo';
+  if (key === 'y' || e.code === 'KeyY') return 'redo';
   return null;
 }
 
@@ -57,7 +66,16 @@ export function runHistoryKey(ctx: Context, e: KeyboardEvent): boolean {
   return true;
 }
 
-/** For a canvas's forwarded `undo`/`redo` event: the active tab's own keys (design doc §5). */
+/**
+ * For a canvas's forwarded `undo`/`redo` event: the active tab's own keys
+ * (design doc §5). Computes `keysFor(ctx.shell.active()?.key)` the same
+ * way `runHistoryKey`'s own "elsewhere" branch does — not shared with it,
+ * because the two disagree on what to do with an empty result: a canvas's
+ * event always came from a real tab wanting a real answer, so this always
+ * calls through and lets `history.undo`/`redo` say "nothing to undo"
+ * itself, while `runHistoryKey` treats no keys as nothing having happened
+ * at all (no call, `false`, so the caller does not swallow the keystroke).
+ */
 export async function runHistory(ctx: Context, action: 'undo' | 'redo'): Promise<HistoryResult> {
   const keys = ctx.history.keysFor(ctx.shell.active()?.key);
   return action === 'undo' ? ctx.history.undo(keys) : ctx.history.redo(keys);

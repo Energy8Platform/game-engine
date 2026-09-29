@@ -1182,6 +1182,9 @@ describe('Shell', () => {
     expect(fire({ key: 'S', ctrlKey: true })).toBe(true);
     expect(fire({ key: 's' })).toBe(false);
     expect(fire({ key: 'a', metaKey: true })).toBe(false);
+    // A Russian layout's Ctrl+S reports `key: 'ы'`, never 's' — `code`
+    // (the physical key) is what still catches it.
+    expect(fire({ key: 'ы', code: 'KeyS', ctrlKey: true })).toBe(true);
   });
 
   it('a keydown with Mod+Z on document.body undoes the active tab and prevents default', () => {

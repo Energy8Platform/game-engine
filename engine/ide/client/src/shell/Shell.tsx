@@ -341,7 +341,9 @@ export function Shell({ ctx }: { ctx: Context }) {
   // Cmd/Ctrl+S is swallowed here for EVERY tab: the editor's own listener
   // saves only when its tab is active, so on any other tab the keystroke
   // reached the browser and opened its save-page dialog, which an IDE
-  // never wants.
+  // never wants. `code === 'KeyS'` is checked beside `key.toLowerCase() ===
+  // 's'` for the same reason `historyAction` checks `code` — a non-Latin
+  // layout's Ctrl+S reports a `key` that never matches `'s'`.
   //
   // Mod+Z / Mod+Shift+Z / Mod+Y are routed the same way, for the same
   // reason: `runHistoryKey` decides who undoes/redoes (a text field, the
@@ -355,7 +357,10 @@ export function Shell({ ctx }: { ctx: Context }) {
       event.returnValue = '';
     };
     const handleKeydown = (event: KeyboardEvent) => {
-      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 's')
+      if (
+        (event.metaKey || event.ctrlKey) &&
+        (event.key.toLowerCase() === 's' || event.code === 'KeyS')
+      )
         event.preventDefault();
       if (runHistoryKey(ctx, event)) event.preventDefault();
     };

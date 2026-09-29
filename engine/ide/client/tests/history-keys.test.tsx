@@ -42,35 +42,119 @@ function keydown(target: Element, init: KeyboardEventInit = {}): KeyboardEvent {
 describe('historyAction', () => {
   it('Mod+Z, meta or ctrl, is undo', () => {
     expect(
-      historyAction({ key: 'z', metaKey: true, ctrlKey: false, shiftKey: false, altKey: false }),
+      historyAction({
+        key: 'z',
+        code: 'KeyZ',
+        metaKey: true,
+        ctrlKey: false,
+        shiftKey: false,
+        altKey: false,
+      }),
     ).toBe('undo');
     expect(
-      historyAction({ key: 'z', metaKey: false, ctrlKey: true, shiftKey: false, altKey: false }),
+      historyAction({
+        key: 'z',
+        code: 'KeyZ',
+        metaKey: false,
+        ctrlKey: true,
+        shiftKey: false,
+        altKey: false,
+      }),
     ).toBe('undo');
   });
 
   it('Mod+Shift+Z is redo', () => {
     expect(
-      historyAction({ key: 'Z', metaKey: true, ctrlKey: false, shiftKey: true, altKey: false }),
+      historyAction({
+        key: 'Z',
+        code: 'KeyZ',
+        metaKey: true,
+        ctrlKey: false,
+        shiftKey: true,
+        altKey: false,
+      }),
     ).toBe('redo');
   });
 
   it('Mod+Y is redo', () => {
     expect(
-      historyAction({ key: 'y', metaKey: true, ctrlKey: false, shiftKey: false, altKey: false }),
+      historyAction({
+        key: 'y',
+        code: 'KeyY',
+        metaKey: true,
+        ctrlKey: false,
+        shiftKey: false,
+        altKey: false,
+      }),
     ).toBe('redo');
   });
 
   it('is null for Alt+Mod+Z, a plain Z, and Mod+X', () => {
     expect(
-      historyAction({ key: 'z', metaKey: true, ctrlKey: false, shiftKey: false, altKey: true }),
+      historyAction({
+        key: 'z',
+        code: 'KeyZ',
+        metaKey: true,
+        ctrlKey: false,
+        shiftKey: false,
+        altKey: true,
+      }),
     ).toBeNull();
     expect(
-      historyAction({ key: 'z', metaKey: false, ctrlKey: false, shiftKey: false, altKey: false }),
+      historyAction({
+        key: 'z',
+        code: 'KeyZ',
+        metaKey: false,
+        ctrlKey: false,
+        shiftKey: false,
+        altKey: false,
+      }),
     ).toBeNull();
     expect(
-      historyAction({ key: 'x', metaKey: true, ctrlKey: false, shiftKey: false, altKey: false }),
+      historyAction({
+        key: 'x',
+        code: 'KeyX',
+        metaKey: true,
+        ctrlKey: false,
+        shiftKey: false,
+        altKey: false,
+      }),
     ).toBeNull();
+  });
+
+  // A Russian keyboard layout reports Ctrl+Z as `key: 'я'` — never 'z' —
+  // so `code` (the physical key, layout-independent) is what recognizes it.
+  it('a non-Latin layout is recognized by `code`: Ctrl+Z (я) undoes, Ctrl+Shift+Z (Я) and Ctrl+Y (н) redo', () => {
+    expect(
+      historyAction({
+        key: 'я',
+        code: 'KeyZ',
+        metaKey: false,
+        ctrlKey: true,
+        shiftKey: false,
+        altKey: false,
+      }),
+    ).toBe('undo');
+    expect(
+      historyAction({
+        key: 'Я',
+        code: 'KeyZ',
+        metaKey: false,
+        ctrlKey: true,
+        shiftKey: true,
+        altKey: false,
+      }),
+    ).toBe('redo');
+    expect(
+      historyAction({
+        key: 'н',
+        code: 'KeyY',
+        metaKey: false,
+        ctrlKey: true,
+        shiftKey: false,
+        altKey: false,
+      }),
+    ).toBe('redo');
   });
 });
 
