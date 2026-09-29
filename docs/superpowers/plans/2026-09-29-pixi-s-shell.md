@@ -2,7 +2,9 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Ship `@energy8platform/shell/pixi-s`, a Pixi skin that reuses HB's renderer and overlays but draws a side-column control bar of skewed black/yellow halftone "slabs".
+**Goal:** Ship `@energy8platform/shell/pixi-s`, a Pixi skin that reuses HB's renderer and overlays but draws a side-column control bar of skewed black/yellow "slabs".
+
+> **Amended after execution (2026-09-29, user feedback on the demo):** slabs are flat (halftone dots and SPIN's sawtooth removed), and BUY is SPIN-sized at the bottom of the left column on desktop too. The task code below is the executed history; the spec is current.
 
 **Architecture:** `PixiHbRenderer` gains a `bar` factory option and asks the bar for its `safeArea`. The new `src/ui/pixi-s/` holds only the palette, font, three glyphs, the `Slab` primitive, S widgets and the `SideBar`. `createPixiSShell` wires `new PixiHbRenderer({ …, bar: (ctx) => new SideBar(ctx) })`. HB overlays are imported unchanged.
 
@@ -14,7 +16,7 @@
 
 - Package `@energy8platform/shell` (`packages/shell`). New code lives in `packages/shell/src/ui/pixi-s/`. The sub-path is `./pixi-s`. The public factories are `createPixiSShell` and `removePixiSShell`.
 - HB overlays (`src/ui/pixi-hb/components/{Menu,GameInfo,BuyBonus,Modal,ReplayModal,pickers}.ts`) are not modified. HB behaviour stays the same: every existing test in `tests/pixi-hb/` and `tests/pixi/` passes unchanged.
-- Palette values, verbatim: yellow `#f8be45`, yellowDot `#d8a63d`, plate `#0b0b0b`, plateDot `#2e2614`, shadow alpha `.45`, fg `#f4f2eb`, ink `#0b0b0b`, red `#e0301e`, disabled alpha `0.4`.
+- Palette values, verbatim: yellow `#f8be45`, plate `#0b0b0b`, shadow alpha `.45`, fg `#f4f2eb`, ink `#0b0b0b`, red `#e0301e`, disabled alpha `0.4`.
 - No new npm dependencies. No version bumps or releases. No game-engine re-export.
 - Font: Montserrat ExtraBold 800, Latin + Cyrillic subsets from `@fontsource/montserrat@5.3.0`, family name `MontserratS`.
 - Run a single test file from the package dir: `cd packages/shell && npx vitest run <path>`. Run the full suite from the repo root: `npm test --workspace @energy8platform/shell`. Typecheck: `npm run typecheck --workspace @energy8platform/shell`. (Root-level `npx vitest run <path>` gives false failures. Do not use it.)

@@ -1,7 +1,7 @@
 import { Container, Graphics, Polygon, Rectangle, type Text, type Ticker } from 'pixi.js';
 import { attachHover, attachPress, type SpinAutoplayMode } from '../pixi-hb/primitives/widgets';
 import { makeIcon, type IconView } from '../pixi-hb/pixi-icon';
-import { Slab, SKEW, TOOTH_D, DOT_STEP, slabPoints, type Corners } from './slab';
+import { Slab, SKEW, slabPoints, type Corners } from './slab';
 import { sIcon } from './icons';
 import { sLabel, sValue } from './text';
 import { S, DISABLED_ALPHA } from './theme';
@@ -53,7 +53,7 @@ export class SButton extends Container implements Sized {
     super();
     const f = FACES[o.face];
     this.face = o.face;
-    this.slab = new Slab(o.w, o.h, { face: f.fill, dots: o.face === 'plate' ? S.plateDot : undefined, corners: o.corners });
+    this.slab = new Slab(o.w, o.h, { face: f.fill, corners: o.corners });
     this.glyph = o.glyph;
     this.glyph.position.set((o.w - (o.insetRight ?? 0) - o.glyphSize) / 2, (o.h - o.glyphSize) / 2);
     this.addChild(this.slab, this.glyph);
@@ -106,12 +106,11 @@ export class SStep extends Container {
 }
 
 /** The slab width for `texts` side by side plus `chrome` px of padding and gaps. When they do not fit
- *  `w`: `grow` widens the slab (rounded up to DOT_STEP, so the dot-context cache stays small);
- *  otherwise the slab keeps `w` and the texts scale down by one factor. */
+ *  `w`: `grow` widens the slab; otherwise the slab keeps `w` and the texts scale down by one factor. */
 function fitSlab(w: number, chrome: number, texts: Text[], grow: boolean): number {
   const textW = texts.reduce((a, t) => a + t.width, 0);
   if (chrome + textW <= w) return w;
-  if (grow) return Math.ceil((chrome + textW) / DOT_STEP) * DOT_STEP;
+  if (grow) return Math.ceil(chrome + textW);
   for (const t of texts) t.scale.set((w - chrome) / textW);
   return w;
 }
@@ -143,7 +142,7 @@ export class SReadout extends Container implements Sized {
     this.labelText = sLabel(o.label, o.labelSize);
     this.valueText = sValue(o.value, o.valueSize);
     const w = fitSlab(o.w, 2 * pad + gap, [this.labelText, this.valueText], o.grow !== false);
-    this.slab = new Slab(w, o.h, { face: S.plate, dots: S.plateDot, corners: SKEW.readout });
+    this.slab = new Slab(w, o.h, { face: S.plate, corners: SKEW.readout });
     this.labelText.position.set(pad, (o.h - this.labelText.height) / 2);
     this.valueText.position.set(pad + this.labelText.width + gap, (o.h - this.valueText.height) / 2);
     this.addChild(this.slab, this.labelText, this.valueText);
@@ -188,7 +187,7 @@ export class SBet extends Container implements Sized {
     const side = o.stepper ? o.h : Math.round(o.h * 0.4);
     const w = fitSlab(o.w, 2 * side + 3 * gap, [this.labelText, this.valueText], o.grow !== false);
     const mid = this.labelText.width + gap + this.valueText.width;
-    this.slab = new Slab(w, o.h, { face: S.plate, dots: S.plateDot, corners: SKEW.bet });
+    this.slab = new Slab(w, o.h, { face: S.plate, corners: SKEW.bet });
     const x0 = (w - mid) / 2;
     this.labelText.position.set(x0, (o.h - this.labelText.height) / 2);
     this.valueText.position.set(x0 + this.labelText.width + gap, (o.h - this.valueText.height) / 2);
@@ -226,7 +225,7 @@ export interface SSpinOpts {
   onResume: () => void;
 }
 
-/** The yellow sawtooth SPIN slab with HB's spin glyph in ink. Busy: the glyph rotates. Disabled: a
+/** The yellow SPIN slab with HB's spin glyph in ink. Busy: the glyph rotates. Disabled: a
  *  dark veil over the slab (not alpha — a half-transparent yellow hero would wash out over the game). */
 export class SSpin extends Container implements Sized {
   readonly slab: Slab;
@@ -241,19 +240,18 @@ export class SSpin extends Container implements Sized {
   constructor(o: SSpinOpts) {
     super();
     this.ticker = o.ticker;
-    this.slab = new Slab(o.w, o.h, { face: S.yellow, dots: S.yellowDot, fade: false, corners: SKEW.spin, sawtooth: true });
-    const body = o.h - TOOTH_D;
+    this.slab = new Slab(o.w, o.h, { face: S.yellow, corners: SKEW.spin });
     this.glyph = makeIcon('spin', o.glyph, { ink: S.ink, fill: S.ink });
-    this.glyph.position.set((o.w - o.glyph) / 2, (body - o.glyph) / 2);
-    this.veil = new Graphics().poly(slabPoints(o.w, o.h, SKEW.spin, true)).fill({ color: 0x000000, alpha: 0.35 });
+    this.glyph.position.set((o.w - o.glyph) / 2, (o.h - o.glyph) / 2);
+    this.veil = new Graphics().poly(slabPoints(o.w, o.h, SKEW.spin)).fill({ color: 0x000000, alpha: 0.35 });
     this.veil.visible = false;
     this.addChild(this.slab, this.glyph);
-    if (o.autoplay !== 'off') this.buildAutoplay(o.autoplay === 'running', o.remaining, o.w, body);
+    if (o.autoplay !== 'off') this.buildAutoplay(o.autoplay === 'running', o.remaining, o.w, o.h);
     this.addChild(this.veil);
     this.eventMode = 'static';
     this.cursor = 'pointer';
     // The leaning outline, not the box: the tabs' visible strips left of the lean are theirs to hit.
-    this.hitArea = new Polygon(slabPoints(o.w, o.h, SKEW.spin, true));
+    this.hitArea = new Polygon(slabPoints(o.w, o.h, SKEW.spin));
     attachHover(this, () => this.slab.setFace(S.yellowHover), () => this.slab.setFace(S.yellow));
     attachPress(this, 0.96, () => {
       if (this._disabled) return;
@@ -342,7 +340,7 @@ export interface SFsCounterOpts {
   valueSize: number;
 }
 
-/** Replaces SPIN in free spins: the yellow sawtooth slab with an ink caps label over the counter. */
+/** Replaces SPIN in free spins: the yellow slab with an ink caps label over the counter. */
 export class SFsCounter extends Container implements Sized {
   readonly slab: Slab;
   readonly labelText: Text;
@@ -350,15 +348,14 @@ export class SFsCounter extends Container implements Sized {
 
   constructor(o: SFsCounterOpts) {
     super();
-    this.slab = new Slab(o.w, o.h, { face: S.yellow, dots: S.yellowDot, fade: false, corners: SKEW.spin, sawtooth: true });
+    this.slab = new Slab(o.w, o.h, { face: S.yellow, corners: SKEW.spin });
     const label = (this.labelText = sLabel(o.label, o.labelSize, S.ink));
     this.valueText = sValue(o.value, o.valueSize, S.ink);
     // Centred text clears the lean at both ends only when narrower than w − 2·lean (+ breathing room).
     const maxW = o.w - 2 * SKEW.spin[0][0] - o.labelSize;
     for (const t of [label, this.valueText]) if (t.width > maxW) t.scale.set(maxW / t.width);
-    const body = o.h - TOOTH_D;
     const gap = Math.round(o.labelSize * 0.4);
-    const top = (body - label.height - gap - this.valueText.height) / 2;
+    const top = (o.h - label.height - gap - this.valueText.height) / 2;
     label.position.set((o.w - label.width) / 2, top);
     this.valueText.position.set((o.w - this.valueText.width) / 2, top + label.height + gap);
     this.addChild(this.slab, label, this.valueText);

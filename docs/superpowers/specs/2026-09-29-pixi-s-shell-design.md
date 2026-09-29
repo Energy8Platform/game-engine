@@ -2,8 +2,7 @@
 
 A third Pixi skin for the game shell. It reuses the Hellbuddha renderer (`PixiHbRenderer`) and all
 of HB's overlays unchanged, and replaces only the control bar: instead of HB's bottom panel, S draws
-two **side columns** that flank the reels, built from skewed black "slabs" with a halftone dot
-texture and a yellow accent. The core (`src/core/`) and every public contract (`ShellConfig`,
+two **side columns** that flank the reels, built from flat skewed black "slabs" with a yellow accent. The core (`src/core/`) and every public contract (`ShellConfig`,
 `Shell`, events, actions, state) stay as they are. A game switches by passing
 `shellFactory: createPixiSShell`.
 
@@ -38,7 +37,7 @@ packages/shell/
     ├── fonts.ts        ← generated
     ├── text.ts         ← installSFont(), S text styles (label, value)
     ├── icons.ts        ← S glyphs: mask, play, bolt (hand-written SVG fragments)
-    ├── slab.ts         ← the slab primitive (skewed quad, shadow, halftone, sawtooth edge)
+    ├── slab.ts         ← the slab primitive (skewed quad + shadow)
     └── SideBar.ts      ← the bar: wide + mobile layouts, safe area, menu anchor
 ```
 
@@ -101,9 +100,7 @@ Sampled from the reference screenshot:
 | token | value | use |
 |---|---|---|
 | `yellow` | `#f8be45` | SPIN and BUY faces, labels, ± glyphs, active tab |
-| `yellowDot` | `#d8a63d` | halftone dots on yellow |
 | `plate` | `#0b0b0b` | slab face |
-| `plateDot` | `#2e2614` | halftone dots on black (warm olive) |
 | `shadow` | `rgba(0,0,0,.45)` | slab drop shadow |
 | `fg` | `#f4f2eb` | values, white glyphs |
 | `ink` | `#0b0b0b` | glyphs on yellow |
@@ -119,10 +116,7 @@ One class draws every bar element:
 ```ts
 new Slab(w: number, h: number, opts: {
   face: string;                 // S.plate or S.yellow or S.red
-  dots?: string;                // halftone colour; omitted = no texture
-  fade?: boolean;               // dots thin toward the top-right (default true; SPIN passes false)
   corners?: Corners;            // per-corner offsets in px (the "torn" skew)
-  sawtooth?: boolean;           // zig-zag bottom edge (SPIN / FS counter)
   shadow?: boolean;             // offset darker copy behind the face (default true)
 })                              // + setFace(color) for hover
 ```
@@ -132,12 +126,8 @@ new Slab(w: number, h: number, opts: {
   bottom edge rising 4px). The offsets are constants, not random, so the bar looks the same on
   every render and in every test.
 - **Shadow.** The same quad offset by `(3, 3)` in `S.shadow`, drawn first.
-- **Halftone.** A dot grid (spacing 6px, dot radius 1.1px). A dot is kept only when it lies
-  wholly inside the quad (point-in-polygon on its four extreme points), so no mask is needed. On
-  black plates the dot radius fades from full at the bottom-left to nothing toward the top-right.
-  On SPIN the dots are uniform. The dots of one slab are one `GraphicsContext`, cached by size,
-  corners, colour and fade, and shared, so a bar rebuild re-tessellates nothing.
-- **Sawtooth.** SPIN's bottom edge is a zig-zag: teeth 8px wide and 5px deep.
+- **Flat faces.** No texture and no sawtooth edge (2026-09-29, the user's call after the first demo:
+  "убери эти точки на плашках, и у спина пилу снизу").
 
 ### Elements
 
@@ -147,9 +137,9 @@ new Slab(w: number, h: number, opts: {
 | WIN / BALANCE | black, 280×54 (label 15, value 26) | yellow caps label (`t('Win')` / `t('Balance')`), white value |
 | TOTAL WIN (FS) | as WIN | label `t('Total win')` |
 | BET | black, 290×46 (label 14, value 24) | yellow `minus` · yellow caps `t('Bet')` · white value · yellow `plus` |
-| BUY | yellow tab, 96×52 | black `mask` glyph; feature active: red face, white `close` |
-| SPIN | yellow, sawtooth, 260×136 | black `spin` glyph; busy: glyph spins (HB behaviour) |
-| FS counter (replaces SPIN) | yellow, sawtooth | black label `t('Free spins')` + value `3 / 10` (or `state.bonus` label/value) |
+| BUY | yellow, SPIN's size and shape | black `mask` glyph; feature active: red face, white `close` |
+| SPIN | yellow, 248×126 | black `spin` glyph; busy: glyph spins (HB behaviour) |
+| FS counter (replaces SPIN) | yellow, SPIN's size | black label `t('Free spins')` + value `3 / 10` (or `state.bonus` label/value) |
 | autoplay tab | black, 52×40, tucked 12px under SPIN's left edge | white `play`; running: yellow face, black `stop` |
 | turbo tab | black, under the autoplay tab | `bolt`: L0 white; L1 yellow glyph; L2 yellow face, black glyph |
 
@@ -178,18 +168,22 @@ code.
 ### Wide (desktop, landscape)
 
 ```
-[≡]                                              [BUY]
-[ВЫИГРЫШ  $0.00      ]                  [− СТАВКА $1.00 +]
-[БАЛАНС   $1,000.00  ]              ▶ ┌──────────────────┐
-                                    ⚡ │       SPIN       │
-                                       └/\/\/\/\/\/\/\/\/┘
+[≡]
+[ВЫИГРЫШ  $0.00      ]
+[БАЛАНС   $1,000.00  ]                  [− СТАВКА $1.00 +]
+┌──────────────────┐                ▶ ┌──────────────────┐
+│    BUY (mask)    │                ⚡ │       SPIN       │
+└──────────────────┘                   └──────────────────┘
 ```
 
 - The left column is anchored bottom-left and stacks, from the top: menu, (TOTAL WIN in FS),
-  WIN, BALANCE. BALANCE is hidden in replay, as in HB. The slabs are left-aligned and the gap
-  between them is 10.
-- The right column is anchored bottom-right and stacks, from the top: BUY (right-aligned, base
-  mode only), BET, SPIN (or the FS counter). The autoplay and turbo tabs hang off SPIN's left
+  WIN, BALANCE, then BUY (base mode only). BALANCE is hidden in replay, as in HB. The slabs are
+  left-aligned.
+- **BUY is SPIN-sized on desktop too** (the user's requirement, 2026-09-29: "кнопка бонуса
+  сорзамерна кнопки спина и находилась слева, как в мобильной так и десктопе"): SPIN's size and
+  lean, at the bottom of the left column, level with SPIN.
+- The right column is anchored bottom-right and stacks, from the top: BET, SPIN (or the FS
+  counter). The autoplay and turbo tabs hang off SPIN's left
   edge, near its top (the first tab ≈ 9% of SPIN's body height below its top edge), inside SPIN's
   vertical span.
 - **Wide readouts never grow.** WIN / BALANCE / TOTAL WIN and BET keep their design width; a label
@@ -223,12 +217,12 @@ code.
   bottom padding is 8.
 - The left column stacks: menu, (TOTAL WIN in FS), WIN, BALANCE, then BUY. The right column
   stacks: BET, then SPIN with the tabs.
-- **BUY is spin-sized.** On mobile BUY uses SPIN's slab size (150×90, without the sawtooth),
+- **BUY is spin-sized.** On mobile BUY uses SPIN's slab size and lean (150×90),
   shows the mask glyph large (76), and sits bottom-left, level with SPIN. Outside base mode BUY is
   hidden and both columns stay bottom-anchored.
 - Mobile design sizes: menu 52×38, readouts 172×44 (label 11, value 17), BET 186×40, SPIN and BUY
   150×90, tabs 42×34. Left column (172) + gap (12) + right column (186) = 370 = 390 − 2·10.
-  Readouts and BET grow when a value does not fit (the width rounds up to the 6px dot step), and
+  Readouts and BET grow when a value does not fit, and
   the block then scales down — that only shrinks the bottom inset, so it stays safe.
 - **Fit scale.** The block is designed at 370 wide (390 minus the side padding) and scaled by
   `min(1, (W − 20) / blockW)`, where `blockW = max(370, left + 12 + right)`. It is never wider than
@@ -276,7 +270,7 @@ Vitest, in `tests/pixi-s/`, with the shared `tests/pixi/_host` context:
    - The left column's left edge is at the padding. The right column's right edge is at `W −`
      padding.
    - Both columns are bottom-anchored.
-   - BUY sits above BET.
+   - BUY is SPIN-sized at the bottom of the left column, level with SPIN.
    - The tabs lie to the left of SPIN and overlap its box.
 2. **Wide safe area.**
    - `safeArea.left` and `safeArea.right` equal the measured column edges plus the gap.
@@ -306,9 +300,6 @@ reference by eye.
 
 ## 9. Risks
 
-- **Halftone cost.** About 2000 circles per bar. The shared dot contexts make each rebuild after
-  the first a cache hit. Readout widths are rounded to whole pixels, so the cache stays bounded by
-  the number of distinct slab sizes.
 - **Safe-area semantics.** Until now `safeArea` was bottom-only. Scaffolded games do not read it,
   so nothing breaks. A game that relies on `barHeight` sees 0 on S desktop. This is intended: the
   columns take the sides, not a bottom strip.

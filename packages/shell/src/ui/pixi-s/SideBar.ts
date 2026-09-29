@@ -6,7 +6,7 @@ import { makeIcon } from '../pixi-hb/pixi-icon';
 import type { Rect } from '@/core/popover';
 import type { SafeArea } from '@/core/renderer';
 import { bonusBuyLocked } from '@/core/state';
-import { SKEW, TOOTH_D } from './slab';
+import { SKEW } from './slab';
 import { sIcon } from './icons';
 import { S } from './theme';
 import { SButton, SReadout, SBet, SSpin, SFsCounter, type Sized } from './widgets';
@@ -21,7 +21,7 @@ interface Sizes {
   bet: [number, number];
   betLabel: number;
   betValue: number;
-  buy: [number, number];
+  /** The mask glyph on BUY — BUY itself is SPIN's size. */
   buyGlyph: number;
   spin: [number, number];
   spinGlyph: number;
@@ -38,19 +38,18 @@ const WIDE: Sizes = {
   menu: [64, 40], menuGlyph: 20,
   readout: [268, 56], labelSize: 15, valueSize: 23,
   bet: [232, 38], betLabel: 14, betValue: 19,
-  buy: [90, 38], buyGlyph: 60,
+  buyGlyph: 120,
   spin: [248, 126], spinGlyph: 84,
   tab: [56, 34], tabGlyph: 20, tabGap: 4, tabOverlap: 20,
   gap: 4,
 };
 
-/** Left (172) + M_COL_GAP (12) + right (186) = M_REF_W (370) = a 390 phone minus the side padding.
- *  BUY is SPIN's size on mobile. */
+/** Left (172) + M_COL_GAP (12) + right (186) = M_REF_W (370) = a 390 phone minus the side padding. */
 const MOBILE: Sizes = {
   menu: [52, 38], menuGlyph: 20,
   readout: [172, 44], labelSize: 11, valueSize: 17,
   bet: [186, 40], betLabel: 11, betValue: 17,
-  buy: [150, 90], buyGlyph: 76,
+  buyGlyph: 76,
   spin: [150, 90], spinGlyph: 56,
   tab: [50, 30], tabGlyph: 16, tabGap: 4, tabOverlap: 20,
   gap: 8,
@@ -182,7 +181,7 @@ export class SideBar extends Container implements HbBar {
   }
 
   // ── columns ───────────────────────────────────────────────────────────────
-  /** menu · (TOTAL WIN) · WIN · BALANCE · (mobile, base: BUY) — top to bottom, left-aligned. */
+  /** menu · (TOTAL WIN) · WIN · BALANCE · (base: BUY) — top to bottom, left-aligned. */
   private buildLeft(): void {
     const { state } = this.host;
     const z = this.z;
@@ -209,7 +208,7 @@ export class SideBar extends Container implements HbBar {
       this.balanceValue = this.balance.valueText;
       items.push(this.balance);
     }
-    if (this.mobile && this.isBase()) {
+    if (this.isBase()) {
       this.buy = this.buildBuy();
       if (this.buy) items.push(this.buy);
     }
@@ -218,16 +217,12 @@ export class SideBar extends Container implements HbBar {
     this.leftH = size.h;
   }
 
-  /** (wide, base: BUY) · BET · SPIN or the FS counter — right-aligned; the tabs hang off the hero's
+  /** BET · SPIN or the FS counter — right-aligned; the tabs hang off the hero's
    *  left edge near its top, under it. Without a hero (replay) there are no tabs. */
   private buildRight(): void {
     const { config } = this.host;
     const z = this.z;
     const items: Sized[] = [];
-    if (!this.mobile && this.isBase()) {
-      this.buy = this.buildBuy();
-      if (this.buy) items.push(this.buy);
-    }
     this.bet = this.buildBet();
     items.push(this.bet);
     let hero: Sized | undefined;
@@ -242,7 +237,7 @@ export class SideBar extends Container implements HbBar {
     if (hero && config.features.turbo > 0) tabs.push((this.turboTab = this.buildTurboTab()));
     if (hero && tabs.length) {
       const [tw, th] = z.tab;
-      const body = hero.measureSize().h - TOOTH_D;
+      const body = hero.measureSize().h;
       const x = hero.x - tw + z.tabOverlap;
       let y = hero.y + Math.round(body * 0.09); // near the hero's top, as in the reference
       for (const t of tabs) {
@@ -266,7 +261,8 @@ export class SideBar extends Container implements HbBar {
     return new SReadout({ label: this.host.t(label), value, w: z.readout[0], h: z.readout[1], labelSize: z.labelSize, valueSize: z.valueSize, grow: this.mobile });
   }
 
-  /** The mask tab; with a feature active it turns red with a white cross (tap = deactivate). */
+  /** The mask slab, SPIN's size and shape, level with SPIN at the bottom of the left column; with a
+   *  feature active it turns red with a white cross (tap = deactivate). */
   private buildBuy(): SButton | undefined {
     const { state, config } = this.host;
     if (config.features.buyBonus === false && !config.onBonusBuy) return undefined;
@@ -274,10 +270,10 @@ export class SideBar extends Container implements HbBar {
     const feature = state.activeFeature;
     const cross = Math.round(z.buyGlyph * 0.5);
     return new SButton({
-      w: z.buy[0],
-      h: z.buy[1],
+      w: z.spin[0],
+      h: z.spin[1],
       face: feature ? 'red' : 'yellow',
-      corners: SKEW.buy,
+      corners: SKEW.spin,
       glyph: feature ? makeIcon('close', cross, { ink: S.fg, fill: S.fg }) : sIcon('mask', z.buyGlyph, S.ink),
       glyphSize: feature ? cross : z.buyGlyph,
       onTap: () => (feature ? this.host.actions.deactivateFeature() : this.host.actions.openBuyBonus()),

@@ -3,10 +3,8 @@
 export const S = {
   yellow: '#f8be45', // SPIN / BUY faces, labels, ± glyphs, an engaged tab
   yellowHover: '#e9ae36',
-  yellowDot: '#d8a63d', // halftone on yellow
   plate: '#0b0b0b', // the black slab
   plateHover: '#1b1b1b',
-  plateDot: '#2e2614', // halftone on black — warm olive, as sampled
   red: '#e0301e', // BUY while a feature is active
   redHover: '#c42716',
   shadow: '#000000',

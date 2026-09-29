@@ -36,8 +36,4 @@ describe('S foundations', () => {
     expect(sIcon('mask', 24, S.yellow).context).not.toBe(a.context);
     expect(a.getLocalBounds().width).toBeGreaterThan(20); // the mask spans most of its 24-unit box
   });
-
-  it('the halftone on black is warm olive, as sampled from the reference', () => {
-    expect(S.plateDot).toBe('#2e2614');
-  });
 });

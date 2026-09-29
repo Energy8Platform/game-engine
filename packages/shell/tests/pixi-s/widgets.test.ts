@@ -2,7 +2,7 @@ import '../pixi/setup-canvas'; // must be first — patches canvas getContext be
 import { describe, it, expect, vi } from 'vitest';
 import type { Ticker } from 'pixi.js';
 import { SButton, SReadout, SBet, SSpin, SFsCounter, type SSpinOpts } from '@/ui/pixi-s/widgets';
-import { SKEW, DOT_STEP } from '@/ui/pixi-s/slab';
+import { SKEW } from '@/ui/pixi-s/slab';
 import { sIcon } from '@/ui/pixi-s/icons';
 import { S, DISABLED_ALPHA } from '@/ui/pixi-s/theme';
 
@@ -67,15 +67,6 @@ describe('S widgets', () => {
     expect(r.valueText.x + r.valueText.width).toBeLessThanOrEqual(268 - SKEW.readout[0][0]);
     expect(r.valueText.scale.x).toBeLessThan(1);
     expect(r.labelText.scale.x).toBeCloseTo(r.valueText.scale.x, 5); // one factor for both
-  });
-
-  it('grown slabs round their width up to the dot step (bounded dot-context cache)', () => {
-    const r = new SReadout({ label: 'Balance', value: '€10,000,000,000.00', w: 172, h: 44, labelSize: 11, valueSize: 17 });
-    expect(r.measureSize().w).toBeGreaterThan(172);
-    expect(r.measureSize().w % DOT_STEP).toBe(0);
-    const b = new SBet({ label: 'Legendary Warrior Ante', value: '€1,000.00', w: 186, h: 40, labelSize: 11, valueSize: 17, stepper: false, onStep: () => {} });
-    expect(b.measureSize().w).toBeGreaterThan(186);
-    expect(b.measureSize().w % DOT_STEP).toBe(0);
   });
 
   it('SBet: the label is yellow; with grow off it keeps its width and scales the text to fit', () => {

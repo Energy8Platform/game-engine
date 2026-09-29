@@ -57,25 +57,33 @@ function expectOnScreen(bar: SideBar, w: number, h: number): void {
 const ANTE = { id: 'ante', type: 'feature' as const, title: 'Warrior Ante', description: '', priceMultiplier: 1.25 };
 
 describe('S side bar — wide', () => {
-  it('two bottom-anchored columns at the screen edges; menu, win, balance top to bottom', () => {
+  it('two bottom-anchored columns at the screen edges; menu, win, balance, BUY top to bottom', () => {
     const p = parts(build(host(1280, 720)));
     expect(p.leftCol.x).toBe(OUTER);
     const r = box(p.rightCol);
     expect(r.r).toBeGreaterThan(1280 - OUTER - 1);
     expect(r.r).toBeLessThanOrEqual(1280 - OUTER + 3); // + the slab shadow
-    for (const b of [box(p.balance!).b, r.b]) {
+    for (const b of [box(p.leftCol).b, r.b]) {
       expect(b).toBeGreaterThan(720 - OUTER - 1);
       expect(b).toBeLessThanOrEqual(720 - OUTER + 3);
     }
     expect(box(p.menuBtn).y).toBeLessThan(box(p.win).y);
     expect(box(p.win).y).toBeLessThan(box(p.balance!).y);
+    expect(box(p.balance!).y).toBeLessThan(box(p.buy!).y);
   });
 
-  it('BUY sits above BET; the tabs tuck under SPIN from its left', () => {
+  it('BUY is SPIN-sized at the bottom of the left column, level with SPIN (as on mobile)', () => {
+    const { buy, spin, balance, leftCol, rightCol } = parts(build(host(1280, 720)));
+    expect(buy!.measureSize()).toEqual(spin!.measureSize());
+    expect(buy!.parent).toBe(leftCol);
+    expect(rightCol.children).not.toContain(buy);
+    expect(box(buy!).y).toBeGreaterThan(box(balance!).y);
+    expect(Math.abs(box(buy!).b - box(spin!).b)).toBeLessThan(1);
+  });
+
+  it('the tabs tuck under SPIN from its left', () => {
     const bar = build(host(1280, 720));
-    const { buy, bet, spin, autoTab, turboTab, rightCol } = parts(bar);
-    expect(box(buy!).b).toBeLessThanOrEqual(box(bet).y + 3);
-    expect(Math.abs(box(buy!).r - box(bet).r)).toBeLessThan(1);
+    const { spin, autoTab, turboTab, rightCol } = parts(bar);
     const s = box(spin!);
     const a = box(autoTab!);
     const t = box(turboTab!);
