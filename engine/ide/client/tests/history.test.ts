@@ -107,6 +107,18 @@ describe('history', () => {
     });
   });
 
+  it('a step over the whole budget on its own is not kept, and leaves the older steps alone', async () => {
+    const ctx = await boot();
+    const MB = 1024 * 1024;
+    const holding = (label: string, bytes: number): HistoryStep => ({ ...makeStep(label), bytes });
+    ctx.history.record('files', holding('a', 10 * MB));
+    ctx.history.record('files', holding('b', 10 * MB));
+    ctx.history.record('files', holding('huge', 201 * MB));
+
+    expect(await ctx.history.undo(['files'])).toEqual({ kind: 'undo', ok: true, label: 'b' });
+    expect(await ctx.history.undo(['files'])).toEqual({ kind: 'undo', ok: true, label: 'a' });
+  });
+
   it("undo takes the latest step among a tab's keys; redo replays in the reverse order", async () => {
     const ctx = await boot();
     ctx.history.record('a', makeStep('a1'));

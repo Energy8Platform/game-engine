@@ -114,6 +114,9 @@ export function apply(ctx: Context): void {
   }
 
   function record(key: string, step: HistoryStep): void {
+    // A step over the whole budget on its own is not kept — and must not
+    // evict every older step on its way out.
+    if ((step.bytes ?? 0) > MAX_BYTES_PER_KEY) return;
     const bucket = bucketFor(key);
     bucket.done.push({ seq: ++seq, step });
     if (bucket.done.length > MAX_STEPS_PER_KEY) bucket.done.shift();
