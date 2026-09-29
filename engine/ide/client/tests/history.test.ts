@@ -124,6 +124,58 @@ describe('history', () => {
     });
   });
 
+  it('a step whose undo() throws is dropped like a refusal, its message becomes the reason', async () => {
+    const ctx = await boot();
+    ctx.history.record('a', {
+      label: 'boom',
+      undo: async () => {
+        throw new Error('kaboom');
+      },
+      redo: async () => null,
+    });
+    const listener = vi.fn();
+    ctx.history.subscribe(listener);
+
+    const result = await ctx.history.undo(['a']);
+
+    expect(result).toEqual({ kind: 'undo', ok: false, reason: 'kaboom' });
+    expect(ctx.history.last()?.result).toEqual(result);
+    expect(listener).toHaveBeenCalledTimes(1);
+    // Dropped exactly like an ordinary refusal — nothing left to redo into it.
+    expect(await ctx.history.redo(['a'])).toEqual({
+      kind: 'redo',
+      ok: false,
+      reason: 'nothing to redo',
+    });
+  });
+
+  it('two overlapping, unawaited undo() calls take two different steps; a refusal of the first does not disturb the second', async () => {
+    const ctx = await boot();
+    ctx.history.record('a', makeStep('first'));
+    let resolveTop!: (reason: string | null) => void;
+    const topUndo = new Promise<string | null>((resolve) => {
+      resolveTop = resolve;
+    });
+    ctx.history.record('a', { label: 'second', undo: () => topUndo, redo: async () => null });
+
+    // Neither call is awaited before the next starts. `move()` picks and
+    // pops its entry synchronously, before it ever awaits the step's own
+    // `undo()` — so the two calls cannot both grab the top entry: the
+    // first call pops 'second' (the top), and only then does the second
+    // call run its own synchronous pick, finding 'first' underneath.
+    const callForSecond = ctx.history.undo(['a']);
+    const callForFirst = ctx.history.undo(['a']);
+
+    resolveTop('cannot undo this one');
+
+    await expect(callForSecond).resolves.toEqual({
+      kind: 'undo',
+      ok: false,
+      reason: 'cannot undo this one',
+    });
+    await expect(callForFirst).resolves.toEqual({ kind: 'undo', ok: true, label: 'first' });
+  });
+
   describe('valueStep', () => {
     it("undo with read() equal to 'after' writes 'before' through history.replay", async () => {
       const ctx = await boot();
@@ -219,6 +271,44 @@ describe('history', () => {
       });
       expect(await s.undo()).toBeNull();
       expect(write).toHaveBeenCalledWith({ grid: 3 });
+    });
+
+    it('compares independent of object key order, nested included — an echo with shuffled keys still undoes', async () => {
+      const ctx = await boot();
+      const write = vi.fn(async () => ({ error: null }));
+      const before = { grid: 3, meta: { rev: 1, note: 'old' } };
+      const after = { grid: 4, meta: { rev: 2, note: 'new' } };
+      const s = valueStep({
+        label: 'x',
+        before,
+        after,
+        // The host round-tripped this through YAML/JSON: same value as
+        // `after`, top-level AND nested keys in a different order.
+        read: () => ({ meta: { note: 'new', rev: 2 }, grid: 4 }),
+        write,
+        history: ctx.history,
+      });
+      expect(await s.undo()).toBeNull();
+      expect(write).toHaveBeenCalledWith(before);
+    });
+
+    it('treats a reordered array as an actual change — refuses', async () => {
+      const ctx = await boot();
+      const write = vi.fn(async () => ({ error: null }));
+      // `redo` expects `read()` to equal `before`; `read()` here has the
+      // same elements as `before` but reordered, same as `after`'s elements
+      // reversed would be an object key shuffle — but for an array, order
+      // IS the value, so this must still refuse.
+      const s = valueStep({
+        label: 'x',
+        before: { items: [1, 2, 3] },
+        after: { items: [3, 2, 1] },
+        read: () => ({ items: [3, 2, 1] }),
+        write,
+        history: ctx.history,
+      });
+      expect(await s.redo()).toBe("changed elsewhere since — can't redo");
+      expect(write).not.toHaveBeenCalled();
     });
   });
 

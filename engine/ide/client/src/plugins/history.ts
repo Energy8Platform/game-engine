@@ -116,7 +116,15 @@ export function apply(ctx: Context): void {
     } else {
       const bucket = buckets.get(bestKey)!;
       bucket[from].pop();
-      const reason = kind === 'undo' ? await bestEntry.step.undo() : await bestEntry.step.redo();
+      let reason: string | null;
+      try {
+        reason = kind === 'undo' ? await bestEntry.step.undo() : await bestEntry.step.redo();
+      } catch (error) {
+        // A throw is a refusal like any other — the step is dropped the
+        // same way a returned reason drops it, just with the message as
+        // the reason instead of the step's own words.
+        reason = error instanceof Error ? error.message : String(error);
+      }
       if (reason === null) {
         bucket[to].push({ seq: ++seq, step: bestEntry.step });
         result = { kind, ok: true, label: bestEntry.step.label };
@@ -175,7 +183,28 @@ export function apply(ctx: Context): void {
   });
 }
 
-/** A step over a whole value: compares the current value (JSON) before applying; writes through `write`. */
+/**
+ * `JSON.stringify` with every object's keys sorted before serializing, so
+ * two values that differ only in key order compare equal — the host
+ * round-trips documents through YAML/JSON, and an echo of the person's own
+ * write is not guaranteed to come back with the same key order it went out
+ * with. Arrays keep their order: position is meaning there, not the
+ * incidental artifact object key order is. `undefined` object members are
+ * dropped, matching `JSON.stringify`'s own behavior, so the two stay
+ * interchangeable for anything already relying on that.
+ */
+function stableStringify(value: unknown): string | undefined {
+  if (Array.isArray(value)) return `[${value.map((v) => stableStringify(v) ?? 'null').join(',')}]`;
+  if (value !== null && typeof value === 'object') {
+    const entries = Object.entries(value as Record<string, unknown>)
+      .filter(([, v]) => v !== undefined)
+      .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0));
+    return `{${entries.map(([k, v]) => `${JSON.stringify(k)}:${stableStringify(v)}`).join(',')}}`;
+  }
+  return JSON.stringify(value);
+}
+
+/** A step over a whole value: compares the current value (JSON, key order ignored) before applying; writes through `write`. */
 export function valueStep<T>(opts: {
   label: string;
   before: T;
@@ -187,7 +216,7 @@ export function valueStep<T>(opts: {
   const { label, before, after, read, write, history: historyService } = opts;
 
   async function apply(target: T, expected: T, verb: 'undo' | 'redo'): Promise<string | null> {
-    if (JSON.stringify(read()) !== JSON.stringify(expected)) {
+    if (stableStringify(read()) !== stableStringify(expected)) {
       return `changed elsewhere since — can't ${verb}`;
     }
     const { error } = await historyService.replay(() => write(target));
