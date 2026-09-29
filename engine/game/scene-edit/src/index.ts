@@ -220,6 +220,29 @@ export function apply(ctx: Context, config: SceneEditConfig): void {
   };
   let alive = true;
   ctx.effect(() => () => { alive = false; wire.dispose(); }, 'scene-edit:wire');
+
+  // Mod+Z / Mod+Shift+Z / Mod+Y forwarded to the IDE as `undo`/`redo` (no
+  // payload) — set up here, ahead of the mode branch below, so it runs for
+  // scene, symbol AND reels mode alike. scene-edit cannot import the IDE
+  // client's `historyAction`, so its key test is re-stated in these few
+  // lines: Alt held, or no Mod at all, is not a chord; `code` is checked
+  // alongside `key` so a non-Latin layout's physical Z/Y still matches
+  // (`key` is the character the layout produces, `code` the physical key).
+  // A field's own undo (an `<input>` — scene mode's own `onKey` below uses
+  // the same `isField`) is left alone, and so is everything else, in
+  // particular scene mode's own Ctrl/Meta-free nudge keys.
+  const onHistoryKey = (e: KeyboardEvent) => {
+    if (e.altKey || (!e.metaKey && !e.ctrlKey) || isField(e.target)) return;
+    const k = e.key.toLowerCase();
+    const action =
+      k === 'z' || e.code === 'KeyZ' ? (e.shiftKey ? 'redo' : 'undo') : k === 'y' || e.code === 'KeyY' ? 'redo' : null;
+    if (!action) return;
+    e.preventDefault();
+    emit(action);
+  };
+  window.addEventListener('keydown', onHistoryKey);
+  ctx.effect(() => () => window.removeEventListener('keydown', onHistoryKey), 'scene-edit:history-keys');
+
   // Into the same safe rect the scenes runtime fits into: the editor page
   // provides `safeArea` (the IDE's preset band, `?safeBottom=`), and a
   // resize here without it would undo that fit until the next one.

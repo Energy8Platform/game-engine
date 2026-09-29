@@ -4,6 +4,7 @@ import type { GameCompositionRow } from '@energy8engine/contracts';
 import { useGameComposition } from '../plugins/game-composition';
 import { useWorkspace } from '../plugins/workspace';
 import { createCanvasRpc, type CanvasRpc } from './canvas-rpc';
+import { runHistory } from './historyKeys';
 import { CANVAS_SILENT, useCanvasSilence } from './useCanvasSilence';
 
 /**
@@ -111,6 +112,11 @@ export function ReelsDocument({ ctx }: { ctx: Context }) {
       sendRows();
     });
     rpc.on('error', (payload) => canvasSays((payload as { message: string }).message));
+    // Mod+Z/Y typed on the canvas — it forwards the key (keys pressed
+    // inside the iframe never reach this page's own listener) rather than
+    // undoing anything itself.
+    rpc.on('undo', () => void runHistory(ctx, 'undo'));
+    rpc.on('redo', () => void runHistory(ctx, 'redo'));
     return () => {
       rpc.dispose();
       rpcRef.current = null;

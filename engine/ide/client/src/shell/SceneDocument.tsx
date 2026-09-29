@@ -14,6 +14,7 @@ import { useWorkspace } from '../plugins/workspace';
 import { useGameComposition } from '../plugins/game-composition';
 import { activateOnKey } from './activate';
 import { createCanvasRpc, type CanvasRpc, type EditPayload } from './canvas-rpc';
+import { runHistory } from './historyKeys';
 import { CanvasToolbar, clampZoom, type GridState, type Viewport } from './CanvasToolbar';
 
 /**
@@ -443,6 +444,11 @@ export function SceneDocument({ ctx, path }: ViewerProps) {
       commit(current && shiftNode(current, node, delta > 0 ? 1 : -1));
     });
     rpc.on('error', (payload) => setError((payload as { message: string }).message));
+    // Mod+Z/Y typed on the canvas — it forwards the key (keys pressed
+    // inside the iframe never reach this page's own listener) rather than
+    // undoing anything itself.
+    rpc.on('undo', () => void runHistory(ctx, 'undo'));
+    rpc.on('redo', () => void runHistory(ctx, 'redo'));
     rpc.on('drop', (payload) => {
       const { path, file, x, y } = payload as {
         path?: string;

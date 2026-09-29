@@ -3,7 +3,20 @@ import { describe, expect, it, vi } from 'vitest';
 import type { DocumentMeta } from '../src/plugins/shell';
 import type { SlotMeta } from '../src/plugins/slots';
 import { CANVAS_SILENT } from '../src/shell/useCanvasSilence';
-import { canvas, harness, renderDocument, renderSettings, row } from './reels-harness';
+import { canvas, harness, PREVIEW_URL, renderDocument, renderSettings, row } from './reels-harness';
+
+/** A frame FROM the iframe: the message event the browser would deliver to the tab's window. */
+function frame(iframe: HTMLIFrameElement, event: string, payload: unknown) {
+  act(() => {
+    window.dispatchEvent(
+      new MessageEvent('message', {
+        data: { type: 'e8:ide:evt', event, payload },
+        origin: PREVIEW_URL,
+        source: iframe.contentWindow,
+      }),
+    );
+  });
+}
 
 /**
  * The Reels document standalone: the toolbar and the reel lab canvas —
@@ -109,6 +122,20 @@ describe('ReelsDocument — canvas sync', () => {
         { id: 'motion1', config: { style: 'swap' } },
       ],
     });
+  });
+
+  it("a canvas undo/redo event runs the history with the five reel row keys — Mod+Z typed inside the iframe never reaches this page's own listener", async () => {
+    const { ctx } = await harness([row('reels1', { grid: { cols: 5 } })]);
+    ctx.shell.openContributed('reels');
+    renderDocument(ctx);
+    const c = canvas();
+    const undo = vi.spyOn(ctx.history, 'undo');
+    const redo = vi.spyOn(ctx.history, 'redo');
+    const keys = ['row:reels1', 'row:motion1', 'row:anticipation1', 'row:cascade1', 'row:features1'];
+    frame(c.iframe, 'undo', undefined);
+    expect(undo).toHaveBeenCalledWith(keys);
+    frame(c.iframe, 'redo', undefined);
+    expect(redo).toHaveBeenCalledWith(keys);
   });
 
   // An edit reaching the composition from anywhere — the Composition

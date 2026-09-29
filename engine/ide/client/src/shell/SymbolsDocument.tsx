@@ -5,6 +5,7 @@ import { useSymbols } from '../plugins/symbols';
 import { useWorkspace } from '../plugins/workspace';
 import { useGameComposition } from '../plugins/game-composition';
 import { createCanvasRpc, type CanvasRpc } from './canvas-rpc';
+import { runHistory } from './historyKeys';
 import { CANVAS_SILENT, useCanvasSilence } from './useCanvasSilence';
 import { DROP_TYPE, symbolWrites } from './symbols-writes';
 
@@ -158,6 +159,11 @@ export function SymbolsDocument({ ctx }: { ctx: Context }) {
       askSnapshot();
     });
     rpc.on('error', (payload) => canvasSays((payload as { message: string }).message));
+    // Mod+Z/Y typed on the canvas — it forwards the key (keys pressed
+    // inside the iframe never reach this page's own listener) rather than
+    // undoing anything itself.
+    rpc.on('undo', () => void runHistory(ctx, 'undo'));
+    rpc.on('redo', () => void runHistory(ctx, 'redo'));
     return () => {
       rpc.dispose();
       rpcRef.current = null;

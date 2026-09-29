@@ -848,6 +848,19 @@ describe('SceneDocument', () => {
     await waitFor(() => expect(reqs('grid').at(-1)).toEqual({ on: true, step: 8 }));
   });
 
+  it("a canvas undo/redo event runs the history with this tab's own keys — Mod+Z typed inside the iframe never reaches this page's own listener", async () => {
+    const { ctx } = await harness();
+    ctx.shell.open({ key: KEY, title: 'base_game', component: () => null, closable: true });
+    renderTab(ctx);
+    const { iframe } = canvas();
+    const undo = vi.spyOn(ctx.history, 'undo');
+    const redo = vi.spyOn(ctx.history, 'redo');
+    frame(iframe, 'undo', undefined);
+    expect(undo).toHaveBeenCalledWith(['scene:base_game']);
+    frame(iframe, 'redo', undefined);
+    expect(redo).toHaveBeenCalledWith(['scene:base_game']);
+  });
+
   it('a frame from somewhere else is ignored', async () => {
     const { ctx, calls } = await harness();
     renderTab(ctx);

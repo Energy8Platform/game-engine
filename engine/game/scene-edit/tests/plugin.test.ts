@@ -401,6 +401,25 @@ describe('symbol mode', () => {
     expect(snap.screen.w).toBeCloseTo(172.8, 3);
     expect(snap.screen.h).toBeCloseTo(115.2, 3);
   });
+
+  it('emits undo on Mod+Z, redo on Mod+Shift+Z and Mod+Y; nothing on plain Z or inside a field', async () => {
+    const { symbols } = fakeSymbols();
+    const { events, ready } = bootSymbol(symbols);
+    await ready();
+    const press = (init: KeyboardEventInit) => window.dispatchEvent(new KeyboardEvent('keydown', { cancelable: true, ...init }));
+    press({ key: 'z', metaKey: true });
+    expect(events().at(-1)).toEqual({ event: 'undo' });
+    press({ key: 'z', metaKey: true, shiftKey: true });
+    expect(events().at(-1)).toEqual({ event: 'redo' });
+    press({ key: 'y', metaKey: true });
+    expect(events().at(-1)).toEqual({ event: 'redo' });
+    const n = events().length;
+    press({ key: 'z' }); // no Mod: not a chord
+    expect(events()).toHaveLength(n);
+    const input = document.body.appendChild(document.createElement('input'));
+    input.dispatchEvent(new KeyboardEvent('keydown', { key: 'z', metaKey: true, bubbles: true, cancelable: true }));
+    expect(events()).toHaveLength(n); // typing in a field is not a canvas key
+  });
 });
 
 /**
@@ -635,6 +654,24 @@ describe('reels mode', () => {
     expect(snap.fitted.h).toBeCloseTo(s * 300, 5);
     const checker = app.stage.getChildByLabel('reels-checker')!;
     expect([checker.getBounds().maxX, checker.getBounds().maxY]).toEqual([960, 576]);
+  });
+
+  it('emits undo on Mod+Z, redo on Mod+Shift+Z and Mod+Y; nothing on plain Z or inside a field', async () => {
+    const { events, ready } = bootReels(fakeBoard());
+    await ready();
+    const press = (init: KeyboardEventInit) => window.dispatchEvent(new KeyboardEvent('keydown', { cancelable: true, ...init }));
+    press({ key: 'z', metaKey: true });
+    expect(events().at(-1)).toEqual({ event: 'undo' });
+    press({ key: 'z', metaKey: true, shiftKey: true });
+    expect(events().at(-1)).toEqual({ event: 'redo' });
+    press({ key: 'y', metaKey: true });
+    expect(events().at(-1)).toEqual({ event: 'redo' });
+    const n = events().length;
+    press({ key: 'z' }); // no Mod: not a chord
+    expect(events()).toHaveLength(n);
+    const input = document.body.appendChild(document.createElement('input'));
+    input.dispatchEvent(new KeyboardEvent('keydown', { key: 'z', metaKey: true, bubbles: true, cancelable: true }));
+    expect(events()).toHaveLength(n); // typing in a field is not a canvas key
   });
 });
 
@@ -1330,6 +1367,29 @@ describe('scene-edit plugin', () => {
     key('Escape');
     expect(events().at(-1)).toEqual({ event: 'selected', payload: { node: null } });
     expect(gizmoShown()).toBe(false);
+  });
+
+  it('emits undo on Mod+Z, redo on Mod+Shift+Z and Mod+Y; nothing on plain Z or inside a field; nudge/delete still work', async () => {
+    const { edit, events, ready, key } = boot();
+    await ready();
+    key('z', { metaKey: true });
+    expect(events().at(-1)).toEqual({ event: 'undo' });
+    key('z', { metaKey: true, shiftKey: true });
+    expect(events().at(-1)).toEqual({ event: 'redo' });
+    key('y', { metaKey: true });
+    expect(events().at(-1)).toEqual({ event: 'redo' });
+    const n = events().length;
+    key('z'); // no Mod: not a chord, and not a nudge key either
+    expect(events()).toHaveLength(n);
+    const input = document.body.appendChild(document.createElement('input'));
+    input.dispatchEvent(new KeyboardEvent('keydown', { key: 'z', metaKey: true, bubbles: true, cancelable: true }));
+    expect(events()).toHaveLength(n); // typing in a field is not a canvas key
+    // The scene mode's own keys, unaffected by the listener above.
+    edit().pickAndSelect(65, 65);
+    key('ArrowRight');
+    expect(events().at(-1)).toEqual({ event: 'edit', payload: { node: 'hi', props: { x: 121, y: 120 }, variant: null } });
+    key('Delete');
+    expect(events().at(-1)).toEqual({ event: 'remove', payload: { node: 'hi' } });
   });
 
   it('a drop with the Explorer type emits drop with design coords; a foreign drop is ignored', async () => {

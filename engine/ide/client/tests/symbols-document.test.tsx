@@ -76,6 +76,19 @@ describe('SymbolsDocument', () => {
       expect(iframe.closest('.e8-symbols-stage')).toBeTruthy();
     });
 
+    it("a canvas undo/redo event runs the history with the 'symbols' key — Mod+Z typed inside the iframe never reaches this page's own listener", async () => {
+      const { ctx } = await booted();
+      ctx.shell.open({ key: 'symbols', title: 'Symbols', component: () => null, closable: false });
+      renderDocument(ctx);
+      const { iframe } = canvas();
+      const undo = vi.spyOn(ctx.history, 'undo');
+      const redo = vi.spyOn(ctx.history, 'redo');
+      frame(iframe, 'undo', undefined);
+      expect(undo).toHaveBeenCalledWith(['symbols']);
+      frame(iframe, 'redo', undefined);
+      expect(redo).toHaveBeenCalledWith(['symbols']);
+    });
+
     it('on ready, sends the doc, the remembered zoom, the selection, then asks snapshot, in that order', async () => {
       localStorage.clear();
       const { ctx } = await booted();
