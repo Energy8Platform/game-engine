@@ -1,6 +1,8 @@
 import { Container, Graphics, Text } from 'pixi.js';
 import type { PixiComponentContext } from '../../pixi/context';
 import type { Rect } from '@/core/popover';
+import type { HbBar } from '../PixiHbRenderer';
+import type { SafeArea } from '@/core/renderer';
 import { FlexBox } from '../../pixi/primitives/flex';
 import { IconButton, Readout, SpinDisc, BonusButton, FsHero } from '../primitives/widgets';
 import type { SpinAutoplayMode } from '../primitives/widgets';
@@ -10,7 +12,7 @@ import { plaque } from '../primitives/plaque';
 
 // ── design constants ─────────────────────────────────────────────────────────
 /** Which of the disc's three faces the autoplay state calls for — see `SpinAutoplayMode`. */
-function autoplayDiscMode(state: { autoplay: { active: boolean; remaining: number } }): SpinAutoplayMode {
+export function autoplayDiscMode(state: { autoplay: { active: boolean; remaining: number } }): SpinAutoplayMode {
   if (state.autoplay.active) return 'running';
   return state.autoplay.remaining > 0 ? 'paused' : 'off';
 }
@@ -69,7 +71,7 @@ function readout(
 
 /** The bottom control bar. Rebuilt on every `render()`. Exposes balance/win value Texts for
  *  count-up and runs the wide/mobile fit-scale. */
-export class BottomBar extends Container {
+export class BottomBar extends Container implements HbBar {
   balanceValue?: Text;
   winValue?: Text;
   private host: PixiComponentContext;
@@ -128,6 +130,11 @@ export class BottomBar extends Container {
   fitScale(): number {
     if (this.destroyed) return 1;
     return this.inner.scale.x;
+  }
+
+  /** Only the bottom strip is reserved; the rest of the screen is full-bleed. */
+  safeArea(): SafeArea {
+    return { top: 0, right: 0, bottom: this.height, left: 0 };
   }
 
   // ── shared pieces ─────────────────────────────────────────────────────────

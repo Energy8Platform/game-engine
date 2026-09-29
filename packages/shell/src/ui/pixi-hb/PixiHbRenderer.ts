@@ -9,7 +9,8 @@ import {
   type Text,
   type Ticker,
 } from 'pixi.js';
-import type { ShellRenderer, ShellHost, OverlayRequest, OverlayHandle } from '@/core/renderer';
+import type { ShellRenderer, ShellHost, OverlayRequest, OverlayHandle, SafeArea } from '@/core/renderer';
+import type { Rect } from '@/core/popover';
 import type { ShellTokens } from '@/core/theme';
 import type { PixiComponentContext, ShellLayer, LayerHandle } from '../pixi/context';
 import { installShellFont, whenFontReady } from './text';
@@ -25,9 +26,29 @@ import { openBetPicker, openAutoplayPicker } from './components/pickers';
 import { buildModal } from './components/Modal';
 import { buildReplayModal } from './components/ReplayModal';
 
+/** What PixiHbRenderer needs from a control bar. HB's BottomBar and the S skin's SideBar implement
+ *  it; the renderer rebuilds the bar through `PixiHbRendererOptions.bar` on every renderBar(). */
+export interface HbBar extends Container {
+  /** Value Texts `animateMoney` counts up (absent when that readout is hidden). */
+  balanceValue?: Text;
+  winValue?: Text;
+  /** Position and scale the freshly built bar for the current screen. */
+  applyFit(): void;
+  /** Screen rect of the burger — the menu popover's pointer. */
+  menuAnchor(): Rect | null;
+  /** Screen rect the menu popover places itself against. */
+  menuPlate(): Rect | null;
+  /** The bar's own content scale (the popover matches it). */
+  fitScale(): number;
+  /** Screen-space insets the scene should avoid. */
+  safeArea(): SafeArea;
+}
+
 export interface PixiHbRendererOptions {
   app: Application;
   parent?: Container;
+  /** Build the control bar. Default: HB's BottomBar. */
+  bar?: (ctx: PixiComponentContext) => HbBar;
 }
 
 /** The Pixi VIEW half of the shell — the renderer the controller drives. Owns the root/bar/modal
@@ -44,7 +65,8 @@ export class PixiHbRenderer implements ShellRenderer {
   private root = new Container();
   private barLayer = new Container();
   private modalLayer = new Container();
-  private bar?: BottomBar;
+  private bar?: HbBar;
+  private makeBar: (ctx: PixiComponentContext) => HbBar;
   private currentLayer: ShellLayer | null = null;
   private backdrop?: { node: Container; texture: RenderTexture };
   /** Whether `currentLayer` asked for a frosted backdrop. Light-dismiss layers (the menu popover)
@@ -57,6 +79,7 @@ export class PixiHbRenderer implements ShellRenderer {
   constructor(opts: PixiHbRendererOptions) {
     this.app = opts.app;
     this.parent = opts.parent;
+    this.makeBar = opts.bar ?? ((ctx) => new BottomBar(ctx));
   }
 
   private get ticker(): Ticker {
@@ -100,7 +123,7 @@ export class PixiHbRenderer implements ShellRenderer {
       this.barLayer.removeChild(this.bar);
       this.bar.destroy({ children: true });
     }
-    this.bar = new BottomBar(this.ctx);
+    this.bar = this.makeBar(this.ctx);
     this.barLayer.addChild(this.bar);
     this.bar.applyFit();
     // renderBar() runs on every resize AND on ~20 other state changes (bet/win/turbo/mode/…), any of
@@ -309,14 +332,14 @@ export class PixiHbRenderer implements ShellRenderer {
   }
 
   // ── safe area / visibility (PixiGameShell parity) ─────────────────────────────
-  /** Height of the bottom control bar in px (0 before first layout, or in replay-only chrome). */
+  /** The bar's bottom inset in px — 0 before first layout, or for a bar that reserves no bottom strip. */
   get barHeight(): number {
-    return this.bar?.height ?? 0;
+    return this.safeArea.bottom;
   }
 
-  /** Insets a scene should avoid. Only the bottom bar is reserved; the rest is full-bleed. */
-  get safeArea(): { top: number; right: number; bottom: number; left: number } {
-    return { top: 0, right: 0, bottom: this.barHeight, left: 0 };
+  /** Insets a scene should avoid, as the bar reports them (HB: the bottom strip; S: the side columns). */
+  get safeArea(): SafeArea {
+    return this.bar?.safeArea() ?? { top: 0, right: 0, bottom: 0, left: 0 };
   }
 
   /** Show/hide the whole shell (bar + overlays). */
