@@ -26,6 +26,11 @@
       "import": "./dist/pixi-hb.esm.js",
       "require": "./dist/pixi-hb.cjs.js",
       "types": "./dist/pixi-hb.d.ts"
+    },
+    "./pixi-s": {
+      "import": "./dist/pixi-s.esm.js",
+      "require": "./dist/pixi-s.cjs.js",
+      "types": "./dist/pixi-s.d.ts"
     }
   },
   "files": [
