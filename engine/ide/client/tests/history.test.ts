@@ -80,6 +80,33 @@ describe('history', () => {
     });
   });
 
+  it("a key's steps hold at most 200 MB of `bytes` between them — the oldest go first; another key's are its own", async () => {
+    const ctx = await boot();
+    const MB = 1024 * 1024;
+    const holding = (label: string, bytes: number): HistoryStep => ({ ...makeStep(label), bytes });
+    ctx.history.record('files', holding('a', 90 * MB));
+    ctx.history.record('files', holding('b', 90 * MB));
+    ctx.history.record('other', holding('elsewhere', 150 * MB));
+    ctx.history.record('files', holding('c', 90 * MB)); // 270 MB: 'a' goes
+
+    expect(await ctx.history.undo(['files'])).toEqual({ kind: 'undo', ok: true, label: 'c' });
+    expect(await ctx.history.undo(['files'])).toEqual({ kind: 'undo', ok: true, label: 'b' });
+    expect(await ctx.history.undo(['files'])).toEqual({
+      kind: 'undo',
+      ok: false,
+      reason: 'nothing to undo',
+    });
+    expect(await ctx.history.undo(['other'])).toEqual({ kind: 'undo', ok: true, label: 'elsewhere' });
+
+    // One step over the budget on its own is not kept either.
+    ctx.history.record('files', holding('huge', 201 * MB));
+    expect(await ctx.history.undo(['files'])).toEqual({
+      kind: 'undo',
+      ok: false,
+      reason: 'nothing to undo',
+    });
+  });
+
   it("undo takes the latest step among a tab's keys; redo replays in the reverse order", async () => {
     const ctx = await boot();
     ctx.history.record('a', makeStep('a1'));

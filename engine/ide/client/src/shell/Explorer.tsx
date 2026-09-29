@@ -39,7 +39,10 @@ import { ViewerDocument, extensionOf } from './ViewerDocument';
  * Every accepted verb (create/mkdir/move/remove/upload) also records one
  * `HistoryStep` under the `files` key (`explorerSteps.ts`, design doc
  * §4) — undone or redone with Mod+Z while focus is inside this sidebar
- * (the key router in `historyKeys.ts` sends it here).
+ * (the key router in `historyKeys.ts` sends it here). A verb whose control
+ * goes away as it runs (the confirm's "yes", the inline input, a dragged
+ * row) hands focus to the view itself, so that Mod+Z right after it still
+ * lands here rather than on the active tab.
  *
  * Clicking a directory toggles its fold; clicking a file calls `openPath`.
  * Either click also selects the row: the header's "new file"/"new folder"
@@ -213,6 +216,10 @@ export function Explorer({ ctx }: { ctx: Context }): JSX.Element {
   // The directory a drag is hovering, '' for the root; drawn as `e8-drop-target`.
   const [dropTarget, setDropTarget] = useState<string | null>(null);
   const uploadInput = useRef<HTMLInputElement>(null);
+  // Where focus goes after a verb — the view's own root, always mounted,
+  // unlike the tree, which goes when the last entry does.
+  const root = useRef<HTMLDivElement>(null);
+  const keepFocus = () => root.current?.focus();
 
   function applyTree(result: { entries: FileEntry[]; diagnostics: Diagnostic[] }) {
     setEntries(result.entries);
@@ -274,19 +281,33 @@ export function Explorer({ ctx }: { ctx: Context }): JSX.Element {
   }
 
   // What every `explorerSteps` builder needs: the same `files` a verb
-  // itself calls, `history` to replay its own write through, and this
-  // view's own refetch for once that write lands (design doc §4).
+  // itself calls, `history` to replay its own write through, this view's
+  // own refetch for once that write lands (design doc §4), and the same
+  // dirty-tab guard and tab follow a move made here has.
   const stepDeps: ExplorerStepDeps = {
     files: ctx.files,
     history: ctx.history,
     refresh: () => void refreshTree(),
+    dirtyUnder,
+    followMove,
   };
 
-  /** `also`: this view's own words about the upload, shown next to the host's answer once it lands. `before`: the bytes this path held before (`null` for one that didn't exist), for the undo step. */
-  function upload(path: string, bytes: Uint8Array, before: Uint8Array | null, also: Diagnostic[] = []) {
+  /**
+   * `also`: this view's own words about the upload, shown next to the
+   * host's answer once it lands. `before`: the bytes this path held before
+   * (`null` for one that didn't exist), for the undo step — `undefined`
+   * when they could not be read, and then there is no step: its undo
+   * would have nothing to put back.
+   */
+  function upload(
+    path: string,
+    bytes: Uint8Array,
+    before: Uint8Array | null | undefined,
+    also: Diagnostic[] = [],
+  ) {
     ctx.files.write(path, bytes).then(({ diagnostics }) => {
       finish([...diagnostics, ...also]);
-      if (diagnostics.length === 0) {
+      if (diagnostics.length === 0 && before !== undefined) {
         ctx.history.record('files', writeStep(stepDeps, path, before, bytes));
       }
     });
@@ -356,11 +377,12 @@ export function Explorer({ ctx }: { ctx: Context }): JSX.Element {
 
   async function confirm(asked: Pending) {
     setPending(null);
+    keepFocus();
     if (asked.kind === 'overwrite') {
       // The bytes this path holds right now, read just before they are
       // replaced — what undoing this upload would write back.
-      ctx.files.read(asked.path).then(({ bytes: before }) => {
-        upload(asked.path, asked.bytes, before ?? null, asked.also);
+      ctx.files.read(asked.path).then(({ bytes: before, diagnostics }) => {
+        upload(asked.path, asked.bytes, diagnostics.length > 0 ? undefined : before, asked.also);
       });
       return;
     }
@@ -426,6 +448,14 @@ export function Explorer({ ctx }: { ctx: Context }): JSX.Element {
     }
   }
 
+  /** Whether a tab at `path`, or under it, has unsaved edits. */
+  function dirtyUnder(path: string): boolean {
+    const key = `${FILE_KEY_PREFIX}${path}`;
+    return ctx.shell
+      .documents()
+      .some((doc) => doc.dirty && (doc.key === key || doc.key.startsWith(`${key}/`)));
+  }
+
   /**
    * The one move both the rename input and a drop go through. Refused
    * here, before any request, when a tab at `from` (or under it) has
@@ -433,11 +463,7 @@ export function Explorer({ ctx }: { ctx: Context }): JSX.Element {
    * otherwise discard them silently.
    */
   function move(from: string, to: string) {
-    const oldKey = `${FILE_KEY_PREFIX}${from}`;
-    const dirty = ctx.shell
-      .documents()
-      .some((doc) => doc.dirty && (doc.key === oldKey || doc.key.startsWith(`${oldKey}/`)));
-    if (dirty) {
+    if (dirtyUnder(from)) {
       finish([
         diagnostic(
           'error',
@@ -467,6 +493,7 @@ export function Explorer({ ctx }: { ctx: Context }): JSX.Element {
       return false;
     }
     setEditing(null);
+    keepFocus();
     if (e.kind === 'create') {
       const path = joinPath(e.dir, name);
       const request = e.what === 'dir' ? ctx.files.mkdir(path) : ctx.files.create(path);
@@ -512,6 +539,7 @@ export function Explorer({ ctx }: { ctx: Context }): JSX.Element {
     e.preventDefault();
     e.stopPropagation();
     setDropTarget(null);
+    keepFocus();
     const from = e.dataTransfer.getData(DRAG_TYPE);
     if (from) {
       const to = joinPath(target, baseOf(from));
@@ -618,7 +646,7 @@ export function Explorer({ ctx }: { ctx: Context }): JSX.Element {
   }
 
   return (
-    <div className="e8-explorer">
+    <div className="e8-explorer" ref={root} tabIndex={-1}>
       <div className="e8-explorer-header">
         <span className="e8-explorer-title">Explorer</span>
         <span className="e8-explorer-actions">

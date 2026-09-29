@@ -8,6 +8,9 @@ import { createIdeClient, type FilesService } from '../src/index';
  * real `createIdeClient` with a fake `fetchFn`, the same precedent
  * `assets-screen.test.tsx` set; the fake records every write, remove,
  * create and move it answered so a test can check what the view asked for.
+ * An accepted write or remove also changes `contents`, so a later read
+ * answers what the host would have on disk; a test changes `contents`
+ * itself for a write made somewhere else (Monaco, another client).
  */
 
 export function d(message: string): Diagnostic {
@@ -124,6 +127,7 @@ export async function harnessWithCalls(
     if (method === 'PUT') {
       const body = JSON.parse((init?.body as string | undefined) ?? '{}') as { base64?: string };
       written.push([path, decodeBase64(body.base64 ?? '')]);
+      if (writeDiagnostics.length === 0) contents[path] = new Uint8Array(decodeBase64(body.base64 ?? ''));
       return new Response(JSON.stringify({ diagnostics: writeDiagnostics }), {
         headers: { 'content-type': 'application/json' },
       });
@@ -131,6 +135,10 @@ export async function harnessWithCalls(
 
     if (method === 'DELETE') {
       removed.push(path);
+      if (removeDiagnostics.length === 0) {
+        for (const key of Object.keys(contents))
+          if (key === path || key.startsWith(`${path}/`)) delete contents[key];
+      }
       return new Response(JSON.stringify({ diagnostics: removeDiagnostics }), {
         headers: { 'content-type': 'application/json' },
       });

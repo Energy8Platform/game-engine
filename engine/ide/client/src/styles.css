@@ -441,6 +441,11 @@ label {
   outline: 2px solid var(--e8-accent);
   outline-offset: 1px;
 }
+/* The view itself only holds focus after a verb whose control went away
+   (so Mod+Z still reaches the Explorer) — it is no control, so no ring. */
+.e8-explorer:focus {
+  outline: none;
+}
 .e8-explorer-tree {
   list-style: none;
   margin: 0;

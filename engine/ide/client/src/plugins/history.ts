@@ -28,6 +28,8 @@ export interface HistoryStep {
   label: string;
   undo(): Promise<string | null>;
   redo(): Promise<string | null>;
+  /** File bytes the step holds on to (the Explorer's removes and uploads) — counted against its key's `MAX_BYTES_PER_KEY`. */
+  bytes?: number;
 }
 
 export type HistoryResult =
@@ -72,6 +74,8 @@ export interface HistoryService {
 export const name = 'history';
 
 const MAX_STEPS_PER_KEY = 100;
+/** What one key's steps may hold between them; past it the oldest go, a step over it on its own included. */
+export const MAX_BYTES_PER_KEY = 200 * 1024 * 1024;
 
 interface Entry {
   seq: number;
@@ -114,6 +118,8 @@ export function apply(ctx: Context): void {
     bucket.done.push({ seq: ++seq, step });
     if (bucket.done.length > MAX_STEPS_PER_KEY) bucket.done.shift();
     bucket.undone = [];
+    let held = bucket.done.reduce((sum, entry) => sum + (entry.step.bytes ?? 0), 0);
+    while (held > MAX_BYTES_PER_KEY) held -= bucket.done.shift()!.step.bytes ?? 0;
     notify();
   }
 
