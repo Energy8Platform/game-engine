@@ -80,6 +80,7 @@ export {
   GameStatus,
   type ThemeName,
 } from './shell/StatusItems';
+export { HistoryStatus } from './shell/HistoryStatus';
 export { Explorer, openPath } from './shell/Explorer';
 export { ScenesSidebar } from './shell/ScenesSidebar';
 export { Projects } from './shell/Projects';

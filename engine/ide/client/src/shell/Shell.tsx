@@ -4,6 +4,7 @@ import type { Context } from 'cordis';
 import { diagnostic } from '@energy8engine/contracts';
 import type { ConnectionService } from '../plugins/connection';
 import type { SlotMeta } from '../plugins/slots';
+import { runHistoryKey } from './historyKeys';
 import {
   byOrder,
   useShell,
@@ -341,21 +342,28 @@ export function Shell({ ctx }: { ctx: Context }) {
   // saves only when its tab is active, so on any other tab the keystroke
   // reached the browser and opened its save-page dialog, which an IDE
   // never wants.
+  //
+  // Mod+Z / Mod+Shift+Z / Mod+Y are routed the same way, for the same
+  // reason: `runHistoryKey` decides who undoes/redoes (a text field, the
+  // Explorer, or the active tab — design doc §5) and answers whether it
+  // acted, so only then is the browser's own behavior (Safari's Edit menu
+  // shortcuts, in particular) prevented.
   useEffect(() => {
     const hold = (event: BeforeUnloadEvent) => {
       if (!ctx.shell.hasDirtyDocuments()) return;
       event.preventDefault();
       event.returnValue = '';
     };
-    const swallowSave = (event: KeyboardEvent) => {
+    const handleKeydown = (event: KeyboardEvent) => {
       if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 's')
         event.preventDefault();
+      if (runHistoryKey(ctx, event)) event.preventDefault();
     };
     window.addEventListener('beforeunload', hold);
-    window.addEventListener('keydown', swallowSave);
+    window.addEventListener('keydown', handleKeydown);
     return () => {
       window.removeEventListener('beforeunload', hold);
-      window.removeEventListener('keydown', swallowSave);
+      window.removeEventListener('keydown', handleKeydown);
     };
   }, [ctx]);
 

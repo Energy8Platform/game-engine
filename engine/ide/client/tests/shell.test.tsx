@@ -1184,6 +1184,29 @@ describe('Shell', () => {
     expect(fire({ key: 'a', metaKey: true })).toBe(false);
   });
 
+  it('a keydown with Mod+Z on document.body undoes the active tab and prevents default', () => {
+    const ctx = harness();
+    const undo = vi.fn(async () => ({ kind: 'undo' as const, ok: true as const, label: 'x' }));
+    ctx.provide('history', {
+      keysFor: (tabKey: string | undefined) => (tabKey === 'a' ? ['flow'] : []),
+      undo,
+      redo: vi.fn(),
+    });
+    ctx.shell.open({ key: 'a', title: 'A', component: Dummy, closable: true });
+    render(<Shell ctx={ctx} />);
+
+    const event = new KeyboardEvent('keydown', {
+      key: 'z',
+      metaKey: true,
+      bubbles: true,
+      cancelable: true,
+    });
+    document.body.dispatchEvent(event);
+
+    expect(undo).toHaveBeenCalledWith(['flow']);
+    expect(event.defaultPrevented).toBe(true);
+  });
+
   it('a reload with unsaved changes also sets returnValue, the form Safari listens to', () => {
     // jsdom's `Event` carries `returnValue` as the legacy boolean alias of
     // the canceled flag, so `= ''` would read back as `false` and a

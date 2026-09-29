@@ -6,6 +6,7 @@ import {
   DirtyStatus,
   Explorer,
   GameStatus,
+  HistoryStatus,
   Preview,
   ProjectStatus,
   Projects,
@@ -188,6 +189,10 @@ export function App({ ctx }: { ctx: Context }) {
       ctx.slots.register(
         { name: 'shell.status', key: 'dirty', side: 'left', order: 1 },
         DirtyStatus,
+      ),
+      ctx.slots.register(
+        { name: 'shell.status', key: 'history', side: 'left', order: 2 },
+        HistoryStatus,
       ),
       ctx.slots.register(
         { name: 'shell.status', key: 'session', side: 'right', order: 0 },

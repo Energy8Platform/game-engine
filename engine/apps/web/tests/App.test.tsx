@@ -201,7 +201,7 @@ describe('App', () => {
     );
   });
 
-  it('registers the five status items, two on the left and three on the right', async () => {
+  it('registers the six status items, three on the left and three on the right', async () => {
     const { ctx } = await harness();
     render(<App ctx={ctx} />);
     const items = ctx.slots.list<{ name: string; key: string; side: string; order: number }>(
@@ -210,6 +210,7 @@ describe('App', () => {
     expect(items.map((i) => [i.key, i.side, i.order])).toEqual([
       ['project', 'left', 0],
       ['dirty', 'left', 1],
+      ['history', 'left', 2],
       ['session', 'right', 0],
       ['theme', 'right', 1],
       ['game', 'right', -1],
