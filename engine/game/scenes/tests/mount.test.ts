@@ -628,9 +628,27 @@ describe('show / hide', () => {
     await scenes.show('base');
     await scenes.show('big');
     expect(byId(scenes, 'base', 'bw')!.visible).toBe(true);
-    expect(scenes.visible()).toEqual(['base']);
+    expect(scenes.visible()).toEqual(['base', 'big']);
     await scenes.hide('big');
     expect(byId(scenes, 'base', 'bw')!.visible).toBe(false);
+    expect(scenes.visible()).toEqual(['base']);
+  });
+
+  it('visible() lists a shown nested scene only while a host that nests it is shown', async () => {
+    const { scenes } = boot([
+      { id: 'big', nodes: [] },
+      { id: 'free', nodes: [] },
+      { id: 'base', nodes: [{ id: 'bw', type: 'scene', props: { scene: 'big', visible: false } }] },
+    ]);
+    await scenes.show('base');
+    await scenes.show('big');
+    await scenes.show('free');
+    // Top-level shows first, in show order; then the nested ones, in theirs.
+    expect(scenes.visible()).toEqual(['base', 'free', 'big']);
+    await scenes.hide('base');
+    expect(scenes.visible()).toEqual(['free']); // its host is gone from the screen
+    await scenes.show('base');
+    expect(scenes.visible()).toEqual(['free', 'base', 'big']); // never hidden itself: back with its host
   });
 
   it('an unknown scene is an error diagnostic, resolved; the same scene twice is a no-op', async () => {

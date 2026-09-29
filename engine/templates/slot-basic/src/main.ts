@@ -779,7 +779,7 @@ let nextViewId = 0;
       { get(url: string): unknown } | undefined;
     return loader?.get(path) != null;
   },
-  /** Visible top-level scenes, as `scenes.visible()`; `[]` with no scenes row. */
+  /** The scenes on screen, as `scenes.visible()` — top-level ones, then shown nested ones; `[]` with no scenes row. */
   scenesVisible(): string[] {
     return (
       (ctx.reflect.get('scenes', false) as { visible?(): string[] } | undefined)?.visible?.() ?? []

@@ -111,7 +111,11 @@ export interface ScenesService {
    */
   show(id: string, opts?: { transition?: string; preview?: boolean }): Promise<void>;
   hide(id: string): Promise<void>;
-  /** Top-level scenes shown, in show order; a nested show is not listed. */
+  /**
+   * What is on screen: the top-level scenes shown, in show order, then the
+   * nested scenes shown (`show` of a document a shown scene nests), in
+   * theirs — a nested one only while a host that nests it is shown.
+   */
   visible(): string[];
   docs(): ReadonlyMap<string, SceneDoc>;
   /** Swaps the documents; only changed ones (and the ones nesting them) remount. */
@@ -1212,7 +1216,10 @@ export function createScenes(options: CreateScenesOptions): ScenesService {
     ready: Promise.resolve(),
     show: (id, opts) => enqueue(() => show(id, opts)),
     hide: (id) => enqueue(() => hide(id)),
-    visible: () => [...visibleIds],
+    visible: () => [
+      ...visibleIds,
+      ...[...shownNested].filter((id) => nestingEntries(id).length > 0),
+    ],
     docs: () => docs,
     replace(next) {
       const nextById = new Map(next.map((d) => [d.id, d]));

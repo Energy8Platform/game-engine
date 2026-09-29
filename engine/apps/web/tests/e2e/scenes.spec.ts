@@ -9,11 +9,11 @@
  *
  * Same iframe, same readers as `hot-fork.spec.ts`: the Preview
  * document's game frame (`iframe[title="game preview"]`) and the game's own
- * `window.__e8` — here `scenesVisible()` (the top-level scenes shown, in
- * show order) and `nodeVisible(scene, node)` (a top-level node of a
- * mounted scene; `big_win` is nested INTO `base_game` as a `scene` node,
- * so "showing big_win" is that node flipping visible, not a second
- * top-level scene). The Scenes view is a sidebar beside that document,
+ * `window.__e8` — here `scenesVisible()` (the scenes on screen: top-level
+ * ones in show order, then shown nested ones) and `nodeVisible(scene,
+ * node)` (a top-level node of a mounted scene; `big_win` is nested INTO
+ * `base_game` as a `scene` node, so "showing big_win" is that node flipping
+ * visible, listed after its host). The Scenes view is a sidebar beside that document,
  * which stays in front the whole time.
  *
  * What lands in the game arrives asynchronously (a PUT → the host's
@@ -188,12 +188,13 @@ test('clicking a scene shows it in the preview; showing big_win flips its node v
   expect(await nodeVisible(frame, 'base_game', 'big_win')).toBe(false);
 
   // `big_win` is nested into `base_game`, so showing it is that node
-  // turning visible — the top-level list does not grow.
+  // turning visible — and `visible()` lists it after its host: it is on
+  // screen, nested or not.
   await page.getByTestId('scene-big_win').click();
   await expect
     .poll(() => nodeVisible(frame, 'base_game', 'big_win'), { timeout: 10_000 })
     .toBe(true);
-  expect(await scenesVisible(frame)).toEqual(['base_game']);
+  expect(await scenesVisible(frame)).toEqual(['base_game', 'big_win']);
 });
 
 test('a spin still presents, through the flow, on the scene shown at boot', async ({ page }) => {
