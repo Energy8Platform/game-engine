@@ -1,18 +1,20 @@
 /**
- * Mod+Z / Mod+Shift+Z / Mod+Y against a real project (slice 45, Task 6):
- * the undo/redo service (Task 1), the services that record into it
- * (Task 2), the key router and status line (Task 3), the canvas
- * forwarding (Task 4) and the Explorer's own steps (Task 5) — proven
- * together, in a real browser, the way every other document's own e2e
- * spec proves its document.
+ * Mod+Z / Mod+Shift+Z / Mod+Y against a real project: the undo/redo
+ * history that scenes, Flow, the Reels/Composition rows and the Explorer
+ * each record a step into, the keyboard router that sends Mod+Z/Y to the
+ * right one, the status line that reports what happened, and the scene
+ * canvas's own forwarding of those keys into the IDE — proven together,
+ * in a real browser, the way every other document's own e2e spec proves
+ * its document.
  *
  * Every scenario reads back what a removed feature would leave wrong: the
  * scene file's `x`, the patch's `cols`, the flow file's node list, or the
  * removed file's own bytes on disk — never only the status line, which
  * could say the right thing while nothing underneath moved. Each edit is
- * polled onto disk BEFORE the undo key is pressed (an undo raced against
- * a save in flight answers BUSY by design, per Task 2's ruling — a
- * scenario that presses too early would flake on that, not prove undo).
+ * polled onto disk BEFORE the undo key is pressed: a write still being
+ * saved answers "a save is still in flight" rather than undoing something
+ * stale, so a scenario that presses too early would flake on that, not
+ * prove undo.
  *
  * Same fixture and idioms as `canvas.spec.ts`, `reels.spec.ts`,
  * `flow.spec.ts` and `explorer.spec.ts` — a private `projectCopy()` served
@@ -145,8 +147,8 @@ test('a canvas move: Mod+Z with focus in the canvas puts the old x back on disk,
   // The drag's own press/move/up happened inside the iframe, which is what
   // gives it document focus — `canvas.spec.ts`'s own `]` key press test
   // relies on the same fact — so this key lands in `scene-edit`, which
-  // forwards `undo`/`redo` to the IDE (Task 4) rather than the browser
-  // ever seeing a Mod+Z of its own.
+  // forwards `undo`/`redo` into the IDE rather than the browser ever
+  // seeing a Mod+Z of its own.
   await page.keyboard.press(UNDO_KEY);
   await expect.poll(sceneLogoX, { timeout: 10_000 }).toBe(240);
   await expect(page.getByTestId('history-status')).toHaveText('Undo: scene base_game');
@@ -194,17 +196,16 @@ test('a Reels setting changed in the Reels tab is undone from the Composition ta
   await reelsRow.locator('header').click();
 
   await page.keyboard.press(UNDO_KEY);
-  // `keysFor('composition')` is every row currently on screen (`row:reels1`
-  // among them) — the same key the Reels tab's own write recorded under,
-  // so the Composition tab's Mod+Z reaches it (Task 2's Review Focus 3).
-  // `before` is the row's own FULL resolved config as of boot (`game-
-  // composition.tsx`'s `update`, captured off `service.rows` — already
-  // schema-defaulted, not the raw patch fragment), so the undo's write puts
-  // `cols: 5` back explicitly rather than omitting the key the way the
-  // Reels document's own "reset" button does (`reels.spec.ts`'s "reset
-  // cols" test) — either is "no cols: 6" per the brief; this project's
-  // patch carries no `cols` before this test's own edit, so 5 is exactly
-  // what the fixture's own schema default resolves to.
+  // Every row currently on screen undoes together in the Composition tab
+  // (`row:reels1` among them) — the same key the Reels tab's own write
+  // recorded under, so the Composition tab's Mod+Z reaches it.
+  // The write records the row's whole config, before and after, so the
+  // undo puts the whole previous object back rather than clearing just the
+  // one field: the fixture's own `e8.patch.yml` already sets
+  // `reels1.grid.cols: 5` before this test touches it, so that is exactly
+  // the value that comes back — not an absent key the way the Reels
+  // document's own "reset" button leaves it (`reels.spec.ts`'s "reset
+  // cols" test); either is "no cols: 6".
   await expect.poll(() => patchConfig('reels1')?.grid?.cols, { timeout: 10_000 }).toBe(5);
   await expect(page.getByTestId('history-status')).toHaveText('Undo: reels1 settings');
 });
@@ -286,9 +287,9 @@ test('removing a file from the Explorer is undone with Mod+Z, content and all', 
   await page.getByTestId('confirm-yes').click();
 
   await expect(row(page, 'game/spec.json')).toHaveCount(0);
-  // Landed on disk — the remove's own snapshot-then-remove resolved
-  // (Task 5's ruling: "yes" now waits for its own byte read) — before the
-  // undo key.
+  // Landed on disk before the undo key: a remove waits for its own byte
+  // read to finish before it actually removes the file, so "yes" having
+  // resolved already means the write happened, not just the dialog closing.
   await expect
     .poll(() => existsSync(join(dir, 'game', 'spec.json')), { timeout: 10_000 })
     .toBe(false);
