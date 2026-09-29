@@ -103,7 +103,7 @@ Sampled from the reference screenshot:
 | `yellow` | `#f8be45` | SPIN and BUY faces, labels, ± glyphs, active tab |
 | `yellowDot` | `#d8a63d` | halftone dots on yellow |
 | `plate` | `#0b0b0b` | slab face |
-| `plateDot` | `#1c1c1c` | halftone dots on black |
+| `plateDot` | `#2e2614` | halftone dots on black (warm olive) |
 | `shadow` | `rgba(0,0,0,.45)` | slab drop shadow |
 | `fg` | `#f4f2eb` | values, white glyphs |
 | `ink` | `#0b0b0b` | glyphs on yellow |
@@ -146,7 +146,7 @@ new Slab(w: number, h: number, opts: {
 | menu | black, 64×44 | white `menu` glyph |
 | WIN / BALANCE | black, 280×54 (label 15, value 26) | yellow caps label (`t('Win')` / `t('Balance')`), white value |
 | TOTAL WIN (FS) | as WIN | label `t('Total win')` |
-| BET | black, 290×46 (label 14, value 24) | yellow `minus` · white caps `t('Bet')` · white value · yellow `plus` |
+| BET | black, 290×46 (label 14, value 24) | yellow `minus` · yellow caps `t('Bet')` · white value · yellow `plus` |
 | BUY | yellow tab, 96×52 | black `mask` glyph; feature active: red face, white `close` |
 | SPIN | yellow, sawtooth, 260×136 | black `spin` glyph; busy: glyph spins (HB behaviour) |
 | FS counter (replaces SPIN) | yellow, sawtooth | black label `t('Free spins')` + value `3 / 10` (or `state.bonus` label/value) |
@@ -156,7 +156,7 @@ new Slab(w: number, h: number, opts: {
 Sizes are desktop design units, before the fit scale (section 5).
 
 Text: labels in Montserrat ExtraBold, uppercase, `S.yellow`. Values in Montserrat ExtraBold,
-`S.fg`, with no stroke. The BET label is `S.fg`, as in the reference.
+`S.fg`, with no stroke. The BET label is `S.yellow`, as in the reference.
 
 ### Behaviour kept from HB
 
@@ -190,7 +190,11 @@ code.
   between them is 10.
 - The right column is anchored bottom-right and stacks, from the top: BUY (right-aligned, base
   mode only), BET, SPIN (or the FS counter). The autoplay and turbo tabs hang off SPIN's left
-  edge, vertically centred on it.
+  edge, near its top (the first tab ≈ 9% of SPIN's body height below its top edge), inside SPIN's
+  vertical span.
+- **Wide readouts never grow.** WIN / BALANCE / TOTAL WIN and BET keep their design width; a label
+  or value that does not fit scales down (label and value by one factor). So the side insets do not
+  change with content — scenes read `safeArea` only on resize. (Mobile readouts may grow; see below.)
 - Outer padding is 16 from the screen edges.
 - **Fit scale.** `s = clamp(min(W / 1280, H / 720), 0.35, 1)`, applied to each column's inner
   container. The 0.35 floor keeps Stake popout S (400×225) readable, as in HB.
@@ -207,8 +211,8 @@ code.
 ┌──────────── 390 ────────────┐
 │          (reels)            │
 │ [≡]                         │
-│ [ВЫИГРЫШ $0.00] [− $1.00 +] │
-│ [БАЛАНС $1,000]             │
+│ [ВЫИГРЫШ $0.00]             │
+│ [БАЛАНС $1,000] [− $1.00 +] │
 │ ┌─────────┐   ▶ ┌─────────┐ │
 │ │   BUY   │   ⚡ │  SPIN   │ │
 │ └─────────┘     └─────────┘ │
@@ -224,7 +228,8 @@ code.
   hidden and both columns stay bottom-anchored.
 - Mobile design sizes: menu 52×38, readouts 172×44 (label 11, value 17), BET 186×40, SPIN and BUY
   150×90, tabs 42×34. Left column (172) + gap (12) + right column (186) = 370 = 390 − 2·10.
-  Readouts and BET grow when a value does not fit, and the block then scales down.
+  Readouts and BET grow when a value does not fit (the width rounds up to the 6px dot step), and
+  the block then scales down — that only shrinks the bottom inset, so it stays safe.
 - **Fit scale.** The block is designed at 370 wide (390 minus the side padding) and scaled by
   `min(1, (W − 20) / blockW)`, where `blockW = max(370, left + 12 + right)`. It is never wider than
   the screen, so it has no lower bound.

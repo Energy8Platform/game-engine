@@ -14,7 +14,7 @@
 
 - Package `@energy8platform/shell` (`packages/shell`). New code lives in `packages/shell/src/ui/pixi-s/`. The sub-path is `./pixi-s`. The public factories are `createPixiSShell` and `removePixiSShell`.
 - HB overlays (`src/ui/pixi-hb/components/{Menu,GameInfo,BuyBonus,Modal,ReplayModal,pickers}.ts`) are not modified. HB behaviour stays the same: every existing test in `tests/pixi-hb/` and `tests/pixi/` passes unchanged.
-- Palette values, verbatim: yellow `#f8be45`, yellowDot `#d8a63d`, plate `#0b0b0b`, plateDot `#1c1c1c`, shadow alpha `.45`, fg `#f4f2eb`, ink `#0b0b0b`, red `#e0301e`, disabled alpha `0.4`.
+- Palette values, verbatim: yellow `#f8be45`, yellowDot `#d8a63d`, plate `#0b0b0b`, plateDot `#2e2614`, shadow alpha `.45`, fg `#f4f2eb`, ink `#0b0b0b`, red `#e0301e`, disabled alpha `0.4`.
 - No new npm dependencies. No version bumps or releases. No game-engine re-export.
 - Font: Montserrat ExtraBold 800, Latin + Cyrillic subsets from `@fontsource/montserrat@5.3.0`, family name `MontserratS`.
 - Run a single test file from the package dir: `cd packages/shell && npx vitest run <path>`. Run the full suite from the repo root: `npm test --workspace @energy8platform/shell`. Typecheck: `npm run typecheck --workspace @energy8platform/shell`. (Root-level `npx vitest run <path>` gives false failures. Do not use it.)
