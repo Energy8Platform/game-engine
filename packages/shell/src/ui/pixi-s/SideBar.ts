@@ -35,13 +35,13 @@ interface Sizes {
 }
 
 const WIDE: Sizes = {
-  menu: [64, 44], menuGlyph: 24,
-  readout: [280, 54], labelSize: 15, valueSize: 26,
-  bet: [290, 46], betLabel: 14, betValue: 24,
-  buy: [96, 52], buyGlyph: 60,
-  spin: [260, 136], spinGlyph: 84,
-  tab: [52, 40], tabGlyph: 22, tabGap: 4, tabOverlap: 12,
-  gap: 10,
+  menu: [64, 40], menuGlyph: 20,
+  readout: [268, 56], labelSize: 15, valueSize: 23,
+  bet: [232, 38], betLabel: 14, betValue: 19,
+  buy: [90, 38], buyGlyph: 60,
+  spin: [248, 126], spinGlyph: 84,
+  tab: [56, 34], tabGlyph: 20, tabGap: 4, tabOverlap: 20,
+  gap: 4,
 };
 
 /** Left (172) + M_COL_GAP (12) + right (186) = M_REF_W (370) = a 390 phone minus the side padding.
@@ -52,7 +52,7 @@ const MOBILE: Sizes = {
   bet: [186, 40], betLabel: 11, betValue: 17,
   buy: [150, 90], buyGlyph: 76,
   spin: [150, 90], spinGlyph: 56,
-  tab: [42, 34], tabGlyph: 18, tabGap: 4, tabOverlap: 8,
+  tab: [50, 30], tabGlyph: 16, tabGap: 4, tabOverlap: 20,
   gap: 8,
 };
 

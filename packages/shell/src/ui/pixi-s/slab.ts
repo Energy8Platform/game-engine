@@ -15,14 +15,16 @@ export type Corners = readonly [
 
 export const FLAT: Corners = [[0, 0], [0, 0], [0, 0], [0, 0]];
 
-/** Skew presets per element, in design px (they scale with the bar). */
+/** Skew presets per element, in design px (they scale with the bar). As in the reference, every slab
+ *  leans right (top edge shifted right, ~0.2 of its height); the readouts also tilt up to the right,
+ *  SPIN down. The tabs lean on the left only: their right end hides under SPIN. */
 export const SKEW = {
-  menu: [[4, 0], [0, 3], [-2, 0], [0, -2]],
-  readout: [[6, 2], [0, 0], [-4, 0], [0, -3]],
-  bet: [[8, 0], [0, 3], [-2, 0], [0, -2]],
-  buy: [[6, 0], [0, 4], [-4, 0], [4, 0]],
-  spin: [[4, 3], [0, 0], [-6, -2], [0, 0]],
-  tab: [[3, 0], [0, 2], [0, 0], [0, -2]],
+  menu: [[7, 0], [0, 0], [-7, 0], [0, 0]],
+  readout: [[11, 6], [0, 0], [-11, -6], [0, 0]],
+  bet: [[7, 0], [0, 1], [-7, 0], [0, -3]],
+  buy: [[7, 0], [0, 0], [-7, 0], [0, 0]],
+  spin: [[21, 0], [0, 5], [-21, 0], [0, -10]],
+  tab: [[7, 0], [0, 0], [0, 0], [0, 0]],
 } as const satisfies Record<string, Corners>;
 
 export const DOT_STEP = 6;
@@ -67,14 +69,15 @@ function inside(pts: number[], x: number, y: number): boolean {
 }
 
 /** Halftone dot centres and radii. A dot is kept only when its four extreme points lie inside the
- *  body quad (so no mask is needed). `fade`: the radius shrinks from full at the bottom-left to
- *  nothing toward the top-right, as on the reference's black plates; otherwise every dot is DOT_R. */
+ *  body quad (so no mask is needed). `fade`: the radius shrinks from full at the left edge to nothing
+ *  about two thirds across (a little later along the bottom), as on the reference's black plates;
+ *  otherwise every dot is DOT_R. */
 export function halftone(w: number, h: number, corners: Corners, sawtooth: boolean, fade: boolean): Array<[number, number, number]> {
   const quad = slabPoints(w, sawtooth ? h - TOOTH_D : h, corners);
   const out: Array<[number, number, number]> = [];
   for (let y = DOT_STEP / 2; y < h; y += DOT_STEP) {
     for (let x = DOT_STEP / 2; x < w; x += DOT_STEP) {
-      const k = fade ? Math.min(1, Math.max(0, 0.15 + (y / h) * 1.1 - (x / w) * 0.35)) : 1;
+      const k = fade ? Math.min(1, Math.max(0, 1.25 + (y / h) * 0.1 - (x / w) * 1.5)) : 1;
       const r = DOT_R * k;
       if (r < 0.35) continue;
       if (inside(quad, x - r, y) && inside(quad, x + r, y) && inside(quad, x, y - r) && inside(quad, x, y + r)) {

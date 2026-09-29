@@ -3,15 +3,16 @@ import { Graphics, GraphicsContext } from 'pixi.js';
 // S glyphs: 24×24 fragments with one colour slot (`currentColor`). The rest of the bar's glyphs
 // (spin, stop, close, menu, minus, plus) come from HB's sheet through makeIcon.
 const SVGS = {
-  // The reference's mask: two eye outlines crossing in the middle, a pupil in the right eye and a
-  // small wedge on each side.
+  // The reference's mask (traced from it): two wide eyes pointed at the outer top corners, meeting in
+  // the middle — the left one open at the bottom-right (a C), the right one closed around a pupil —
+  // and a small wedge on each side. The miter joins make the pointed tips.
   mask:
-    `<path d="M19.5 6.5L9.8 17.5L7.5 17.5L5.5 15L4.5 6.5L14.2 17.5L16.5 17.5L18.5 15Z" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="miter"/>` +
-    `<path d="M16.6 11.5L17.5 12.4L16.6 13.3L15.7 12.4Z" fill="currentColor"/>` +
-    `<path d="M0.5 9.2L2.9 8.2L2.9 11.6Z" fill="currentColor"/>` +
-    `<path d="M23.5 9.2L21.1 8.2L21.1 11.6Z" fill="currentColor"/>`,
-  play: `<path d="M6 3.5L20 12L6 20.5Z" fill="currentColor"/>`,
-  bolt: `<path d="M14 2L5 13.5L11 13.5L9.5 22L19 9.5L13 9.5L14 2Z" fill="currentColor"/>`,
+    `<path d="M10.3 14.7L9.55 15.95L7 15.95L5.4 13.8L4.75 8.9L11.25 12.95L12.1 14.25L13.4 15.95L16.8 15.95L18.1 14.25L18.4 11.7L19.25 8.9L12.1 12.95" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="miter"/>` +
+    `<path d="M15.95 12.45L16.8 13.3L15.95 14.15L15.1 13.3Z" fill="currentColor"/>` +
+    `<path d="M0.6 10.2L2.3 9.2L3.1 11.9Z" fill="currentColor"/>` +
+    `<path d="M23.4 10.2L21.7 9.2L20.9 11.9Z" fill="currentColor"/>`,
+  play: `<path d="M5.5 2.5L21 12L5.5 21.5Z" fill="currentColor"/>`,
+  bolt: `<path d="M13.75 3.2L5.85 13.3L11.1 13.3L9.8 20.8L18.15 9.8L12.9 9.8L13.75 3.2Z" fill="currentColor"/>`,
 } as const;
 
 export type SIconName = keyof typeof SVGS;
