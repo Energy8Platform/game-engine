@@ -304,13 +304,15 @@ describe('S buy bonus: the fly-in confirm', () => {
     };
     return { ...page({ ticker }, FOUR), tick };
   }
-  /** Where the flyer lands at 1280×720 (spec §3). */
+  /** Where the flyer lands at 1280×720 (k = 1, spec §3): between the ✕ strip and the bottom margin. */
   function target(p: SBuyBonusPage) {
     const { w, h } = parts(p).cardSize();
     const em = parts(p).cardEm(h);
-    const m = stripMetrics(720).top;
-    const s = Math.min(1.3, (720 - 2 * m) / (h + em * 3.8), (1280 - 2 * m) / w);
-    return { w, h, s, gap: em * s, actH: em * 2.8 * s };
+    const strip = stripMetrics(720);
+    const m = strip.top;
+    const top = strip.top * 2 + strip.height;
+    const s = Math.min(1.3, (720 - top - m) / h, (1280 - 2 * m) / w);
+    return { w, h, s, em, pad: em * 1.2, top, m };
   }
   const flyer = (p: SBuyBonusPage) => byLabel(p, 'bb-flyer')[0];
   const actions = (p: SBuyBonusPage) => byLabel(p, 'bb-confirm-actions')[0];
@@ -341,16 +343,21 @@ describe('S buy bonus: the fly-in confirm', () => {
     expect(card.visible).toBe(false);
     expect(one(f, 'bb-cta-2').visible).toBe(false); // the copy's own CTA
     expect(p.ctas[2]).toBe(cta); // still the row card's
+    expect(Math.abs(f.y + (t.h * f.scale.x) / 2 - (t.top + 720 - t.m) / 2)).toBeLessThanOrEqual(1);
     const a = actions(p);
     expect([a.alpha, a.eventMode]).toEqual([1, 'passive']);
-    // CANCEL | BUY under the flyer, half its width minus half a gap each; the block centred vertically
+    // CANCEL | BUY replace the CTA inside the flyer, in card units: (cardW − 2·pad − em/2) / 2 each
+    const fcta = one(f, 'bb-cta-2');
+    expect(a.parent === f).toBe(true);
+    expect([a.x, a.y]).toEqual([fcta.x, fcta.y]);
     const [cancel, buy] = a.children as unknown as Array<{ x: number; measureSize(): { w: number; h: number }; kind: string }>;
-    expect(a.y).toBeCloseTo(f.y + t.h * t.s + t.gap, 5);
-    expect(Math.abs(cancel.measureSize().w - (t.w * t.s - t.gap) / 2)).toBeLessThanOrEqual(1); // slabs round their size
-    expect(buy.x).toBeCloseTo((t.w * t.s + t.gap) / 2, 5);
-    expect(Math.abs(cancel.measureSize().h - t.actH)).toBeLessThanOrEqual(1);
-    expect(Math.abs((f.y + a.y + t.actH) / 2 - 360)).toBeLessThanOrEqual(1);
+    const bw = (t.w - 2 * t.pad - t.em * 0.5) / 2;
+    expect(Math.abs(cancel.measureSize().w - bw)).toBeLessThanOrEqual(1); // slabs round their size
+    expect(buy.x).toBeCloseTo(bw + t.em * 0.5, 5);
+    expect(Math.abs(cancel.measureSize().h - t.em * 2.8)).toBeLessThanOrEqual(1);
     expect([cancel.kind, buy.kind]).toEqual(['ghost', 'accent']);
+    // the rest of the flyer takes no taps
+    expect(f.children.filter((c) => c !== a).every((c) => c.eventMode === 'none')).toBe(true);
   });
 
   it('cancel: Escape flies it back over 250ms; a second cancel mid-way is a no-op; the ✕ cancels, not closes', () => {
@@ -366,7 +373,8 @@ describe('S buy bonus: the fly-in confirm', () => {
     p.onKey({ code: 'Escape' } as KeyboardEvent);
     tick(150);
     expect(flyer(p)).toBeUndefined();
-    expect(card.visible).toBe(true);
+    expect(card.destroyed).toBe(true); // the end of a cancel rebuilds the page
+    expect(one(p, 'bb-card-2').visible).toBe(true);
     expect(alphas(p)).toEqual([1, 1, 1]);
     // the ✕ during the confirm
     p.ctas[2].emit('pointertap', {});
@@ -411,11 +419,24 @@ describe('S buy bonus: the fly-in confirm', () => {
     expect(actions(p)).toBeUndefined();
   });
 
+  it('a same-size resize (a bar refresh) keeps an open confirm and its tweens', () => {
+    const { page: p, tick } = animated();
+    p.ctas[2].emit('pointertap', {});
+    tick(150);
+    const f = flyer(p);
+    p.resize(1280, 720);
+    expect(flyer(p) === f).toBe(true);
+    tick(300);
+    expect(actions(p)?.eventMode).toBe('passive');
+    p.resize(1200, 675);
+    expect(byLabel(p, 'bb-flyer').length).toBe(0);
+  });
+
   it('resize while open drops the confirm without animation', () => {
     const { page: p, tick } = animated();
     p.ctas[2].emit('pointertap', {});
     tick(150);
-    p.resize(1280, 720);
+    p.resize(1200, 675);
     const check = () => {
       expect(byLabel(p, 'bb-flyer').length).toBe(0);
       expect(byLabel(p, 'bb-confirm-actions').length).toBe(0);
@@ -432,5 +453,40 @@ describe('S buy bonus: the fly-in confirm', () => {
     p.ctas[1].emit('pointertap', {});
     const ok = actions(p).children[1] as unknown as { kind: string; labelText: { text: string } };
     expect([ok.kind, ok.labelText.text]).toEqual(['red', 'ACTIVATE']);
+  });
+
+  it('on a phone the flyer clears the ✕ strip and stays on screen', () => {
+    const { page: p } = page({ screenW: 390, screenH: 844, layout: 'mobile' });
+    p.ctas[0].emit('pointertap', {});
+    const f = flyer(p).getBounds();
+    const x = parts(p).closeBtn.getBounds();
+    const hit = f.x < x.x + x.width && x.x < f.x + f.width && f.y < x.y + x.height && x.y < f.y + f.height;
+    expect(hit).toBe(false);
+    expect(f.x).toBeGreaterThanOrEqual(0);
+    expect(f.y + f.height).toBeLessThanOrEqual(844);
+  });
+
+  it('a custom hero borrowed by the flyer is back in its row card after a cancel', () => {
+    const node = new Container();
+    node.addChild(new Graphics().rect(0, 0, 40, 40).fill(0xffffff));
+    const { page: p } = page({}, [{ ...OPTIONS[2], custom: () => node }]);
+    p.ctas[0].emit('pointertap', {});
+    p.onKey({ code: 'Escape' } as KeyboardEvent);
+    const card = one(p, 'bb-card-0');
+    let n: Container | null = node;
+    while (n && n !== card) n = n.parent;
+    expect(n === card).toBe(true);
+  });
+});
+
+describe('S buy bonus: a rebuild keeps the row scrolled', () => {
+  it('a bet step keeps the row where it was', () => {
+    const { page: p } = page({ screenW: 390, screenH: 844, layout: 'mobile' }, FOUR);
+    p.onKey({ code: 'ArrowRight' } as KeyboardEvent);
+    p.onKey({ code: 'ArrowRight' } as KeyboardEvent);
+    const x = parts(p).scroll.content.x;
+    expect(x).toBeLessThan(0);
+    one(p, 'bb-bet-up').emit('pointertap', {});
+    expect(Math.abs(parts(p).scroll.content.x - x)).toBeLessThanOrEqual(1);
   });
 });

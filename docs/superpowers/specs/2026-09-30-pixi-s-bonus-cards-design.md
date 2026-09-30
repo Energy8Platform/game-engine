@@ -139,16 +139,17 @@ This replaces the `SCardModal` confirm.
 
 - A fresh copy of that card (`buildCard` for the slot, the same size), labelled `bb-flyer`, is
   placed on the page at the original card's page-local position. The original is hidden.
-- The copy's CTA is hidden.
+- The copy's CTA is hidden, and the rest of the copy takes no taps.
 - One `tween` (`ui/pixi/motion-pixi`, `easeOutCubic`) of 300ms, on the host ticker:
   - the flyer moves to the centre and scales up to
-    `s = min(1.3, (H − 2·m − actH − gap) / cardH, (W − 2·m) / cardW)`, where `m = strip.top`,
-    `actH = em · 2.8 · s` and `gap = em · s`;
-  - it is centred horizontally, and vertically as one block with the action row;
+    `s = min(1.3, (H − top − m) / cardH, (W − 2·m) / cardW)`, where `m = strip.top` and
+    `top = 2·strip.top + strip.height` (the ✕'s bottom plus one margin), so it clears the ✕ strip;
+  - it is centred horizontally, and vertically within `[top, H − m]`;
   - the scroll row, band and title plate fade from alpha 1 to 0. The ✕ stays.
 - Then the action row fades in, labelled `bb-confirm-actions`: CANCEL (`ghost`) and BUY (`accent`)
-  or ACTIVATE (`red`), side by side under the flyer. Each is half the flyer's width minus half a gap.
-  The row takes taps only once it is fully shown.
+  or ACTIVATE (`red`), side by side **in the copy's CTA slot**, a child of the flyer in card units
+  (so it scales with it). Each is `(cardW − 2·pad − em/2) / 2` wide and `2.8·em` tall, `em/2` apart,
+  label size `em` (the card's em and pad). The row takes taps only once it is fully shown.
 
 **Keys and taps while open:**
 - Enter / Space commit.
@@ -156,16 +157,21 @@ This replaces the `SCardModal` confirm.
 - Taps on the veil do nothing.
 
 **Cancel.** A 250ms reverse: the flyer goes back to the original card's spot and scale, the page parts
-fade back in, and the action row hides at once. At the end the flyer is destroyed and the original
-card shown.
+fade back in, and the action row hides at once. At the end the flyer is destroyed and the page
+rebuilds. That brings back a `custom` hero node the flyer borrowed, and catches up any state change a
+same-size resize skipped.
 
 **Commit.** As now: `activateFeature` or `selectBuyBonus`, then `closeLayer()`. No animation.
 
 **Reduced motion** (or no `matchMedia`, as in tests): `tween` jumps to the end synchronously, so open
 and cancel land in their final state at once.
 
-**Resize while open.** The confirm is removed without animation and the page rebuilds, as the
-current confirm does.
+**Resize while open.** A changed size removes the confirm without animation and the page rebuilds.
+A same-size resize keeps an open (or opening, or closing) confirm and does nothing else: the
+renderer re-sends the same size on every bar state change (balance, win, bet …).
+
+**The row's scroll offset survives every rebuild** (a bet step, a group flip, the end of a cancel):
+`ScrollBox.scrollPos` is read before the old box goes, and the new one is `scrollBy` that much.
 
 `SCardModal` stays: the replay and generic modals use it.
 
@@ -175,7 +181,14 @@ current confirm does.
   would otherwise take taps through the empty page. A CTA tap while a flyer is out does nothing.
 - On the way back, Enter, Escape and the ✕ do nothing: the confirm is already closing. The bonus
   being confirmed is cleared when the reverse starts, not when it ends.
-- Any rebuild (a bet step or a group flip, not only a resize) drops an open confirm without animation.
+- Any rebuild drops an open confirm without animation. Only a changed size or the end of a cancel
+  gets there while a confirm is out.
+
+**As built (Task 4, fix round 1).** These were ruled after the first screenshots and are folded
+into the text above: the actions sit in the CTA slot (there was an empty band where the CTA had
+been), the flyer clears the ✕ strip (on a phone the ✕ overlapped its top-right corner), a same-size
+resize keeps the confirm (any balance update used to close it), a cancel ends with a rebuild, and
+the scroll offset survives a rebuild.
 
 ## 4. `ScrollBox` gets an axis
 

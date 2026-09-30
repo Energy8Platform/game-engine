@@ -97,6 +97,12 @@ export class ScrollBox extends Container {
     this.syncAffordance();
   }
 
+  /** How far the content is scrolled along the axis (0 at the start) — read it before replacing the
+   *  box on a rebuild and `scrollBy` the new one to keep the place. */
+  get scrollPos(): number {
+    return this.scrollY;
+  }
+
   /** Max scrollable distance (0 when content fits) — exposed for tests. */
   get maxScrollY(): number {
     return this.maxScroll;
