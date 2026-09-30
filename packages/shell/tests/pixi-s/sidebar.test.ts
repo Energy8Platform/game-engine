@@ -83,6 +83,19 @@ describe('S side bar — wide', () => {
     near((win.x + win.r) / 2, (l.r + r.x) / 2, 4);
   });
 
+  it('SPIN, BUY and both tabs are 30% shorter than the first cut (the user, 2026-09-30)', () => {
+    const wide = parts(build(host(1280, 720)));
+    expect(wide.spin!.measureSize()).toEqual({ w: 174, h: 126 });
+    expect(wide.buy!.measureSize()).toEqual({ w: 174, h: 126 });
+    expect(wide.autoTab!.measureSize()).toEqual({ w: 34, h: 34 });
+    expect(wide.turboTab!.measureSize()).toEqual({ w: 34, h: 34 });
+    const phone = parts(build(host(390, 844)));
+    expect(phone.spin!.measureSize()).toEqual({ w: 105, h: 90 });
+    expect(phone.buy!.measureSize()).toEqual({ w: 105, h: 90 });
+    expect(phone.autoTab!.measureSize()).toEqual({ w: 29, h: 30 });
+    expect(phone.turboTab!.measureSize()).toEqual({ w: 29, h: 30 });
+  });
+
   it('BUY is SPIN-sized in the left column, level with SPIN (as on mobile)', () => {
     const { buy, spin, leftCol, rightCol } = parts(build(host(1280, 720)));
     expect(buy!.measureSize()).toEqual(spin!.measureSize());

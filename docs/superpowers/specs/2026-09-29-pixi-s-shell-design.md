@@ -138,9 +138,9 @@ new Slab(w: number, h: number, opts: {
 | TOTAL WIN (FS) | as WIN | label `t('Total win')` |
 | BET | black, 290×46 (label 14, value 24) | yellow `minus` · yellow caps `t('Bet')` · white value · yellow `plus` |
 | BUY | yellow, SPIN's size and shape | black `mask` glyph; feature active: red face, white `close` |
-| SPIN | yellow, 248×126 | black `spin` glyph; busy: glyph spins (HB behaviour) |
+| SPIN | yellow, 174×126 | black `spin` glyph; busy: glyph spins (HB behaviour) |
 | FS counter (replaces SPIN) | yellow, SPIN's size | black label `t('Free spins')` + value `3 / 10` (or `state.bonus` label/value) |
-| autoplay tab | black parallelogram, 48×34 (mobile 42×30), a 4px seam from SPIN's slanted left edge | white `play`; running: yellow face, black `stop` |
+| autoplay tab | black parallelogram, 34×34 (mobile 29×30), a 4px seam from SPIN's slanted left edge | white `play`; running: yellow face, black `stop` |
 | turbo tab | black, under the autoplay tab | `bolt`: L0 white; L1 yellow glyph; L2 yellow face, black glyph |
 
 Sizes are desktop design units, before the fit scale (section 5).
@@ -221,12 +221,13 @@ The bar is laid out in rows (the user's call after the second demo, 2026-09-29: 
 - The same rows as wide in one bottom block; WIN gets its own bottom row, centred under both
   columns (there is no gap between the columns to hold it). Side padding is 10 and bottom
   padding is 8.
-- **BUY is spin-sized.** On mobile BUY uses SPIN's slab size and lean (150×90),
+- **BUY is spin-sized.** On mobile BUY uses SPIN's slab size and lean (105×90),
   shows the mask glyph large (76), and sits left, level with SPIN. Outside base mode BUY is
   hidden; its slot stays (TOTAL WIN takes it in free spins).
 - Mobile design sizes: menu 52×38, readouts 172×44 (label 11, value 17), BET 186×40, SPIN and BUY
-  150×90, tabs 42×30. Left column (172) + gap (12) + right column (186) = 370 = 390 − 2·10.
+  105×90, tabs 29×30. Left column (172) + gap (12) + right column (186) = 370 = 390 − 2·10.
   Plates keep these sizes whatever the text (see wide).
+- SPIN, BUY and the tabs were cut 30% shorter on 2026-09-30 (the user: "укоротим процентов на 30").
 - **Fit scale.** The block is designed at 370 wide (390 minus the side padding) and scaled by
   `min(1, (W − 20) / blockW)`, where `blockW = max(370, left + 12 + right, WIN)`. It is never wider than
   the screen, so it has no lower bound.

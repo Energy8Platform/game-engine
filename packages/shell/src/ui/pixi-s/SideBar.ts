@@ -37,8 +37,8 @@ const WIDE: Sizes = {
   readout: [268, 56], labelSize: 15, valueSize: 23,
   bet: [232, 38], betLabel: 14, betValue: 19,
   buyGlyph: 96,
-  spin: [248, 126], spinGlyph: 84,
-  tab: [48, 34], tabGlyph: 20, tabGap: 4,
+  spin: [174, 126], spinGlyph: 84,
+  tab: [34, 34], tabGlyph: 20, tabGap: 4,
   gap: 4,
 };
 
@@ -48,8 +48,8 @@ const MOBILE: Sizes = {
   readout: [172, 44], labelSize: 11, valueSize: 17,
   bet: [186, 40], betLabel: 11, betValue: 17,
   buyGlyph: 66,
-  spin: [150, 90], spinGlyph: 56,
-  tab: [42, 30], tabGlyph: 16, tabGap: 4,
+  spin: [105, 90], spinGlyph: 56,
+  tab: [29, 30], tabGlyph: 16, tabGap: 4,
   gap: 8,
 };
 
