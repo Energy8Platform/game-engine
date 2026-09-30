@@ -26,7 +26,9 @@ export class SCardModal extends Container implements ShellLayer {
   readonly body: FlexBox;
   /** Absent when the title is empty. */
   readonly titlePlate?: STitlePlate;
-  readonly closeBtn?: Container;
+  /** Rebuilt by resize() so its size and inset follow the current screen. */
+  closeBtn?: Container;
+  private onClose?: () => void;
   private host: PixiComponentContext;
   private veil = new Graphics();
   private cardRoot = new Container();
@@ -55,10 +57,10 @@ export class SCardModal extends Container implements ShellLayer {
       this.cardRoot.addChild(this.titlePlate);
     }
     if (closable) {
-      this.closeBtn = sCloseButton(stripMetrics(host.screenH).height, () => opts.onClose!());
+      this.onClose = opts.onClose;
     }
     this.addChild(this.veil, this.cardRoot);
-    if (this.closeBtn) this.addChild(this.closeBtn);
+    this.placeClose(host.screenW, host.screenH);
   }
 
   get emSize(): number {
@@ -103,11 +105,18 @@ export class SCardModal extends Container implements ShellLayer {
   resize(w: number, h: number): void {
     this.veil.clear().rect(0, 0, w, h).fill(S.veil);
     this.veil.hitArea = new Rectangle(0, 0, w, h);
-    if (this.closeBtn) {
-      const strip = stripMetrics(h);
-      this.closeBtn.position.set(w - strip.top - strip.height, strip.top);
-    }
+    this.placeClose(w, h);
     this.fit();
+  }
+
+  private placeClose(w: number, h: number): void {
+    if (!this.onClose) return;
+    const onClose = this.onClose;
+    const strip = stripMetrics(h);
+    this.closeBtn?.destroy({ children: true });
+    this.closeBtn = sCloseButton(strip.height, () => onClose());
+    this.closeBtn.position.set(w - strip.top - strip.height, strip.top);
+    this.addChild(this.closeBtn);
   }
 
   /** Scale the card down to fit a short / narrow popout and keep it centred . */

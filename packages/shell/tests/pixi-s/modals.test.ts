@@ -27,6 +27,7 @@ describe('S card modal', () => {
     const panels = (root.children as Container[]).filter((c) => c instanceof Graphics && c.context.instructions.length > 0);
     expect(panels).toEqual([]);
     expect(m.titlePlate!.labelText.text).toBe('BET');
+    expect(m.body.children.length).toBe(0); // the title is not a body row (§5.6)
     const t = m.titlePlate!;
     expect(t.x + t.measureSize().w / 2).toBeCloseTo(m.cardWidth / 2, 0);
     const strip = stripMetrics(720);
@@ -46,6 +47,18 @@ describe('S card modal', () => {
     m.build();
     expect(m.titlePlate).toBeUndefined();
     expect(all(m, STitlePlate)).toEqual([]);
+  });
+
+  it('R3: resize() rebuilds ✕ at the new strip size and inset', () => {
+    const m = new SCardModal(makeContext({ screenW: 1280, screenH: 720 }), { title: 'Bet', onClose: () => {} });
+    m.build();
+    m.resize(390, 844);
+    const strip = stripMetrics(844);
+    const b = m.closeBtn as unknown as SButton;
+    expect(b.parent).toBe(m);
+    expect(b.measureSize().w).toBe(strip.height);
+    expect(b.x + strip.height).toBeCloseTo(390 - strip.top, 0);
+    expect(b.y).toBeCloseTo(strip.top, 0);
   });
 
   it('fit(): a tall body on a short screen scales the content block down and keeps it on screen', () => {
