@@ -302,18 +302,21 @@ export class SBuyBonusPage extends Container implements ShellLayer {
     const band = new Container();
     const { state } = this.host;
     const pad = clamp(10, h * 0.25, 20);
-    const rh = Math.round(h * 0.78);
+    const room = w - pad * 3;
+    // a band too narrow for the two wide plates (phone) lowers them (the mobile bar's 40 at most, less
+    // on a smaller phone) and splits the room 44 / 56 — the bet's ± squares are h wide, so it needs
+    // the larger share to stay readable
+    const narrow = room < h * 0.78 * 9.8;
+    const rh = Math.round(narrow ? Math.min(h * 0.78, 40, room * 0.13) : h * 0.78);
     const i = state.availableBets.indexOf(state.bet);
     const feature = state.activeFeature;
     const locked = state.busy || state.autoplay.active || !!feature;
     const labelSize = Math.round(rh * 0.27);
     const valueSize = Math.round(rh * 0.41);
-    // a narrow band (phone) halves itself between the two — the S widgets scale their text to fit
-    const half = (w - pad * 3) / 2;
     const bet = new SBet({
       label: feature ? feature.title : this.host.t('Bet'),
       value: this.host.fmt(feature ? state.bet * feature.priceMultiplier : state.bet),
-      w: Math.min(Math.round(rh * 5), half),
+      w: narrow ? Math.floor(room * 0.56) : Math.round(rh * 5),
       h: rh,
       labelSize,
       valueSize,
@@ -325,7 +328,7 @@ export class SBuyBonusPage extends Container implements ShellLayer {
     bet.up!.label = 'bb-bet-up';
     bet.down!.label = 'bb-bet-down';
     bet.position.set(w - pad - bet.measureSize().w, (h - rh) / 2);
-    const balance = new SReadout({ label: this.host.t('Balance'), value: this.host.fmt(state.balance), w: Math.min(Math.round(rh * 4.8), half), h: rh, labelSize, valueSize });
+    const balance = new SReadout({ label: this.host.t('Balance'), value: this.host.fmt(state.balance), w: narrow ? Math.floor(room * 0.44) : Math.round(rh * 4.8), h: rh, labelSize, valueSize });
     balance.position.set(pad, (h - rh) / 2);
     band.addChild(balance, bet);
     return band;
