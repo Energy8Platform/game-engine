@@ -110,13 +110,14 @@ export class SBuyBonusPage extends Container implements ShellLayer {
     const strip = stripMetrics(this.h);
     const contentW = Math.min(1100, this.w - pad * 2 - ScrollBox.GUTTER);
     const left = (this.w - ScrollBox.GUTTER - contentW) / 2;
-    // the S strip over the card column: the title plate at its left, the ✕ at its right
+    // the title plate and ✕ in the screen corners
     this.titlePlate?.destroy({ children: true });
     this.closeBtn?.destroy({ children: true });
-    this.titlePlate = new STitlePlate(this.host.t('Buy bonus'), strip.height, contentW - strip.height * 1.5);
-    this.titlePlate.position.set(left, strip.top);
+    const m = strip.top;
+    this.titlePlate = new STitlePlate(this.host.t('Buy bonus'), strip.height, this.w - m * 4 - strip.height - ScrollBox.GUTTER);
+    this.titlePlate.position.set(m, m);
     this.closeBtn = sCloseButton(strip.height, () => this.host.closeLayer());
-    this.closeBtn.position.set(left + contentW - strip.height, strip.top);
+    this.closeBtn.position.set(this.w - m - ScrollBox.GUTTER - strip.height, m);
     this.addChild(this.titlePlate, this.closeBtn);
     const top = strip.top + strip.height * 1.3;
     const betH = Math.min(BET_BAND_H, this.h * 0.16);

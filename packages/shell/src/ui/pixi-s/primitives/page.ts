@@ -30,8 +30,9 @@ export interface SPageOpts {
   build(width: number): Container;
 }
 
-/** The S full-screen page (game info): a veil over the frosted game, a yellow title plate at the
- *  column's left and a yellow ✕ at its right, and the column scrolling under them. Rebuilt on resize. */
+/** The S full-screen page (game info): a veil over the frosted game, a yellow title plate in the
+ *  top-left screen corner and a yellow ✕ in the top-right (clear of the scrollbar); the scroll area is the
+ *  whole screen with the content column centred in it. Rebuilt on resize. */
 export class SPage extends Container implements ShellLayer {
   readonly tag: string;
   readonly veil = new Graphics();
@@ -60,26 +61,28 @@ export class SPage extends Container implements ShellLayer {
     this.veil.hitArea = new Rectangle(0, 0, w, h);
     const col = pageColumn(w, h);
     const strip = stripMetrics(h);
+    const m = strip.top;
 
     this.titlePlate?.destroy({ children: true });
     this.closeBtn?.destroy({ children: true });
-    this.titlePlate = new STitlePlate(this.opts.title, strip.height, col.width - strip.height * 1.5);
-    this.titlePlate.position.set(col.x, strip.top);
+    this.titlePlate = new STitlePlate(this.opts.title, strip.height, w - m * 4 - strip.height - ScrollBox.GUTTER);
+    this.titlePlate.position.set(m, m);
     this.closeBtn = sCloseButton(strip.height, () => this.opts.onClose());
-    this.closeBtn.position.set(col.x + col.width - strip.height, strip.top);
-    this.addChild(this.titlePlate, this.closeBtn);
+    this.closeBtn.position.set(w - m - ScrollBox.GUTTER - strip.height, m);
 
-    const top = strip.top + strip.height * 1.3;
-    this.viewH = Math.max(0, h - top - 12);
-    this.scroll.position.set(col.x, top);
-    this.scroll.setViewport(col.width + ScrollBox.GUTTER, this.viewH);
+    // the scroll area is the whole screen (scrollbar on the right edge); the column sits centred in it
+    this.viewH = h;
+    this.scroll.position.set(0, 0);
+    this.scroll.setViewport(w, h);
     this.scroll.content.removeChildren().forEach((c) => c.destroy({ children: true }));
     const content = this.opts.build(col.width);
     if (content instanceof FlexBox) content.setLayoutSize(col.width, undefined);
+    content.position.set(Math.round((w - ScrollBox.GUTTER - col.width) / 2), Math.round(m + strip.height * 1.5));
     const tail = new Graphics().rect(0, 0, 1, 1).fill({ color: 0, alpha: 0 });
-    tail.position.set(0, content.y + content.height + 16);
+    tail.position.set(content.x, content.y + content.height + 16);
     this.scroll.content.addChild(content, tail);
     this.scroll.refresh();
+    this.addChild(this.titlePlate, this.closeBtn); // above the scroll box
   }
 
   fit(): void {

@@ -2,6 +2,8 @@ import '../pixi/setup-canvas'; // must be first — patches canvas getContext be
 import { describe, it, expect, vi } from 'vitest';
 import type { Container } from 'pixi.js';
 import { openSBuyBonus, SBuyBonusPage } from '@/ui/pixi-s/components/BuyBonus';
+import { stripMetrics } from '@/ui/pixi-s/primitives/page';
+import { ScrollBox } from '@/ui/pixi-hb/primitives/scroll';
 import { SReadout, SBet } from '@/ui/pixi-s/widgets';
 import { makeContext, defaultConfig } from '../pixi/_host';
 
@@ -27,6 +29,13 @@ function byLabel(n: Container, label: string, out: Container[] = []): Container[
 }
 
 describe('S buy bonus page', () => {
+  it('R1: the BUY BONUS plate and ✕ sit in the screen corners', () => {
+    const { page: p } = page();
+    const strip = stripMetrics(720);
+    expect(p.titlePlate!.x).toBeCloseTo(strip.top, 0);
+    expect((p as unknown as { closeBtn: { x: number } }).closeBtn.x + strip.height).toBeCloseTo(1280 - strip.top - ScrollBox.GUTTER, 0);
+  });
+
   it('one card per slot; a grouped slot flips through its members with wrap', () => {
     const { page: p } = page();
     expect(p.slots.length).toBe(2);

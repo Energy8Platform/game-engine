@@ -35,11 +35,11 @@ export function openSGameInfo(host: PixiComponentContext): ShellLayer {
   });
 }
 
-/** A section: its title in a yellow plate on the left, then the content centred as in HB's game info. */
+/** A section: its title in a yellow plate centred, then the content centred as in HB's game info. */
 function section(_host: PixiComponentContext, title: string | undefined, width: number): FlexBox {
   const sec = new FlexBox({ direction: 'column', align: 'center', gap: 12, padding: { top: 8, bottom: 8 } });
   if (title) {
-    const head = new FlexBox({ direction: 'row', justify: 'start', width });
+    const head = new FlexBox({ direction: 'row', justify: 'center', width });
     head.add(new STitlePlate(title, Math.round(giEm() * 2.6), width));
     sec.add(head);
   }
@@ -51,14 +51,13 @@ function paragraph(_host: PixiComponentContext, text: string, width: number, opt
   return sBody(text, opts.size ?? 15, opts.color ?? S.fg, width, opts.align ?? 'center');
 }
 
-/** A flat content panel — no border, sharp corners. */
+/** A content block — no backing (R2). */
 function card(opts: { padding?: number; gap?: number; align?: 'start' | 'center' | 'stretch'; direction?: 'row' | 'column' } = {}): FlexBox {
   return new FlexBox({
     direction: opts.direction ?? 'column',
     align: opts.align ?? 'center',
     gap: opts.gap ?? 8,
     padding: opts.padding ?? 12,
-    background: { fill: S.panel, radius: 0 },
   });
 }
 
@@ -237,12 +236,9 @@ function sectionControls(host: PixiComponentContext, title: string, width: numbe
   return sec;
 }
 
-function ctlBlock(host: PixiComponentContext, label: string, rows: CtlRow[], inner: number, _topBorder: boolean): FlexBox {
+function ctlBlock(host: PixiComponentContext, _label: string, rows: CtlRow[], inner: number, _topBorder: boolean): FlexBox {
   const block = card({ align: 'stretch', padding: 14, gap: 6 });
   block.setLayoutSize(inner, undefined);
-  const head = new FlexBox({ direction: 'row', justify: 'center', padding: { bottom: 4 } });
-  head.add(sLabel(host.t(label), 12, S.muted));
-  block.add(head);
   const w = inner - CARD_PAD;
   const visible = rows.filter((r) => r.on);
   visible.forEach((r) => {
@@ -396,7 +392,6 @@ function paytableCard(_host: PixiComponentContext, r: PaytableRow, w: number): F
     gap: 8,
     padding: { top: 14, bottom: 14, left: 12, right: 12 },
     width: w,
-    background: { fill: S.panel, radius: 0 },
   });
   card.label = 'pt-card';
   const sym = new FlexBox({ direction: 'column', align: 'center', gap: 5 });
@@ -427,7 +422,7 @@ function sectionWins(host: PixiComponentContext, s: WinSection, width: number): 
   const title = s.title ?? host.t(winFallbackTitle(s.kind));
   const sec = section(host, undefined, inner);
   // header (title plate + optional "min N" badge); the plate leaves the badge its room
-  const header = new FlexBox({ direction: 'row', align: 'center', gap: 10, width: inner });
+  const header = new FlexBox({ direction: 'row', align: 'center', justify: 'center', gap: 10, width: inner });
   const badge = (s.kind === 'cluster' || s.kind === 'anywhere') && 'minCount' in s ? badgePill(host, `min ${s.minCount}`) : null;
   header.add(new STitlePlate(title, Math.round(giEm() * 2.6), badge ? inner - badge.width - 10 : inner));
   if (badge) header.add(badge);

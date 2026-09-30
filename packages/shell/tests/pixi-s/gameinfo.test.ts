@@ -4,6 +4,7 @@ import type { Container } from 'pixi.js';
 import { openSGameInfo } from '@/ui/pixi-s/components/GameInfo';
 import { SPage, pageColumn, stripMetrics } from '@/ui/pixi-s/primitives/page';
 import { STitlePlate } from '@/ui/pixi-s/primitives/controls';
+import { ScrollBox } from '@/ui/pixi-hb/primitives/scroll';
 import { S } from '@/ui/pixi-s/theme';
 import { makeContext, defaultConfig } from '../pixi/_host';
 
@@ -27,13 +28,20 @@ function info(sections: unknown[], over: Record<string, unknown> = {}): SPage {
 }
 
 describe('S game info page', () => {
-  it('covers the whole screen; title plate at the column left, ✕ at the column right', () => {
+  it('R1: title plate top-left corner, ✕ top-right corner (clear of the scrollbar), scroll area the whole screen', () => {
     const p = info([PAYTABLE(3)]);
     expect(p.veil.hitArea).toMatchObject({ x: 0, y: 0, width: 1280, height: 720 });
-    const col = pageColumn(1280, 720);
-    expect(p.titlePlate!.x).toBeCloseTo(col.x, 0);
     expect(p.titlePlate!.labelText.text).toBe('GAME INFO');
-    expect(p.closeBtn!.x + stripMetrics(720).height).toBeCloseTo(col.x + col.width, 0);
+    const strip = stripMetrics(720);
+    expect(p.titlePlate!.x).toBeCloseTo(strip.top, 0);
+    expect(p.titlePlate!.y).toBeCloseTo(strip.top, 0);
+    expect(p.closeBtn!.x + strip.height).toBeCloseTo(1280 - strip.top - ScrollBox.GUTTER, 0);
+    expect([p.scrollContent.x, p.scrollContent.y]).toEqual([0, 0]);
+    expect(p.getChildIndex(p.closeBtn!)).toBeGreaterThan(p.getChildIndex(p.scrollContent));
+    const col = pageColumn(1280, 720);
+    const content = p.scrollContent.content.children[0] as Container;
+    expect(content.x).toBeCloseTo((1280 - ScrollBox.GUTTER - col.width) / 2, 0);
+    expect(content.y).toBeGreaterThanOrEqual(strip.top + strip.height);
   });
 
   it('section titles are yellow title plates', () => {
@@ -43,12 +51,50 @@ describe('S game info page', () => {
     for (const t of plates) expect(t.slab.face).toBe(S.yellow);
   });
 
-  it('a wins section title plate sits at the column left, like the paytable plate', () => {
-    const p = info([PAYTABLE(3), { type: 'wins', kind: 'classic', grid: { cols: 5, rows: 3 }, lines: [[1, 1, 1, 1, 1]] }]);
+  it('section title plates are centred in the column (wins too, with a cluster badge)', () => {
+    const p = info([
+      PAYTABLE(3),
+      { type: 'wins', kind: 'classic', grid: { cols: 5, rows: 3 }, lines: [[1, 1, 1, 1, 1]] },
+      { type: 'wins', kind: 'cluster', title: 'Clusters', grid: { cols: 6, rows: 5 }, minCount: 8 },
+    ]);
+    const col = pageColumn(1280, 720);
+    const cx = col.x + col.width / 2;
     const plates = all(p.scrollContent.content, STitlePlate);
-    const pay = plates.find((t) => t.labelText.text === 'PAYTABLE')!;
-    const wins = plates.find((t) => t.labelText.text === 'PAYLINES')!;
-    expect(wins.getGlobalPosition().x).toBeCloseTo(pay.getGlobalPosition().x, 0);
+    expect(plates.length).toBeGreaterThanOrEqual(3);
+    for (const t of plates) {
+      const g = t.getGlobalPosition().x;
+      const sibs = t.parent!.children as Container[];
+      const badge = t.labelText.text === 'CLUSTERS' ? sibs[sibs.indexOf(t) + 1] : undefined;
+      const left = g;
+      const right = badge ? badge.getGlobalPosition().x + badge.width : g + t.slab.w;
+      expect(Math.abs((left + right) / 2 - cx)).toBeLessThanOrEqual(1.5);
+    }
+  });
+
+  it('R2: no backing panels anywhere in the content', () => {
+    const p = info([PAYTABLE(3), { type: 'controls' }, { type: 'modes', modes: [{ title: 'Base', description: 'd' }] }]);
+    const bg: unknown[] = [];
+    const walk = (n: Container): void => {
+      const style = (n as unknown as { bgStyle?: { fill?: string } }).bgStyle;
+      if (style?.fill) bg.push(style.fill);
+      n.children.forEach((c) => walk(c as Container));
+    };
+    walk(p.scrollContent.content);
+    expect(bg).toEqual([]);
+  });
+
+  it('R2: controls has no GAME / MENU & INFO sub-headings', () => {
+    const p = info([{ type: 'controls' }]);
+    const texts: string[] = [];
+    const walk = (n: Container): void => {
+      const t = (n as unknown as { text?: string }).text;
+      if (typeof t === 'string') texts.push(t);
+      n.children.forEach((c) => walk(c as Container));
+    };
+    walk(p.scrollContent.content);
+    expect(texts).not.toContain('GAME');
+    expect(texts).not.toContain('MENU & INFO');
+    expect(texts).toContain('SPIN');
   });
 
   it('the paytable is always 3 per row across the column: 7 rows → 3, 3, 1, each card a third', () => {
