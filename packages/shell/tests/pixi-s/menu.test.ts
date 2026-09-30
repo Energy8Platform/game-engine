@@ -1,6 +1,6 @@
 import '../pixi/setup-canvas'; // must be first — patches canvas getContext before pixi.js loads
 import { describe, it, expect, vi } from 'vitest';
-import { Container as PixiContainer, EventBoundary, Matrix, type Container } from 'pixi.js';
+import { Container as PixiContainer, EventBoundary, Matrix, type Container, type Rectangle } from 'pixi.js';
 
 // Render-less tests: the renderer's EventSystem never installs the events mixin, and nothing updates
 // worldTransform. Polyfill the mixin's defaults and update transforms by hand (same as bet-picker-fit).
@@ -93,16 +93,22 @@ describe('S menu', () => {
     expect(openInfo).toHaveBeenCalled();
   });
 
-  it('toggle rows carry an S toggle; a long label scales to leave the control room', () => {
-    const host = makeContext({
-      menu: [{ id: 'lefty', type: 'toggle', label: 'A very very long left-hand mode label for testing', value: false }] as never,
-    });
-    const m = openSMenu(host, () => BURGER, () => null, () => 1) as SMenu;
-    const row = m.rows[0];
-    const toggle = all(row, SToggle)[0];
-    expect(toggle).toBeDefined();
-    const label = row.children.find((c) => (c as { text?: string }).text !== undefined) as { x: number; width: number };
-    expect(label.x + label.width).toBeLessThanOrEqual(toggle.x - 8);
+  it('toggle rows carry an S toggle: a short label sits beside it, a long one stacks above it (R5)', () => {
+    const open = (label: string) => openSMenu(makeContext({
+      menu: [{ id: 'lefty', type: 'toggle', label, value: false }] as never,
+    }), () => BURGER, () => null, () => 1) as SMenu;
+    const parts = (m: SMenu) => {
+      const row = m.rows[0];
+      const label = row.children.find((c) => (c as { text?: string }).text !== undefined) as Container;
+      return { toggle: all(row, SToggle)[0], label, hit: row.hitArea as Rectangle };
+    };
+    const short = parts(open('Turbo'));
+    expect(short.toggle).toBeDefined();
+    expect(short.label.x + short.label.width).toBeLessThanOrEqual(short.toggle.x - 8);
+    const long = parts(open('A very very long left-hand mode label for testing'));
+    expect(long.label.y + long.label.height).toBeLessThanOrEqual(long.toggle.y);
+    expect(long.label.x + long.label.width).toBeLessThanOrEqual(long.hit.width - 16 + 0.01);
+    expect(long.toggle.x + 44).toBeLessThanOrEqual(long.hit.width);
   });
 
   it('taps on a row body or in a gap are absorbed; only outside the stack dismisses', () => {
@@ -130,5 +136,38 @@ describe('S menu', () => {
     const xs = m.rows.map((r) => all(r, SSlider)[0].x);
     expect(xs.length).toBe(3);
     expect(new Set(xs).size).toBe(1);
+  });
+
+  it('R5: rows are narrower than SPIN (wide 248, mobile 150)', () => {
+    expect(menu().rows.every((r) => (r.hitArea as Rectangle).width < 248)).toBe(true);
+    const m = openSMenu(makeContext({ layout: 'mobile', screenW: 390, screenH: 844 }), () => ({ x: 10, y: 600, w: 52, h: 38 }), () => null, () => 1) as SMenu;
+    expect(m.rows.every((r) => (r.hitArea as Rectangle).width < 150)).toBe(true);
+  });
+
+  it('R5: on mobile a range row stacks its label above the slider, inside the row; rows stack by their own heights', () => {
+    const m = openSMenu(makeContext({ layout: 'mobile', screenW: 390, screenH: 844 }), () => ({ x: 10, y: 600, w: 52, h: 38 }), () => null, () => 1) as SMenu;
+    const row = m.rows[0];
+    const slider = all(row, SSlider)[0];
+    const label = row.children.find((c) => (c as { text?: string }).text !== undefined) as Container;
+    const hit = row.hitArea as Rectangle;
+    expect(slider.y).toBeGreaterThanOrEqual(label.y + label.height);
+    expect(slider.x + slider.measureSize().w).toBeLessThanOrEqual(hit.width);
+    expect(slider.y + 24).toBeLessThanOrEqual(hit.height);
+    expect(m.rows[1].y).toBeGreaterThanOrEqual(row.y + hit.height);
+  });
+
+  it('R5: a long toggle label on mobile stacks, the toggle inside the row', () => {
+    const host = makeContext({
+      layout: 'mobile',
+      screenW: 390,
+      screenH: 844,
+      menu: [{ id: 'lefty', type: 'toggle', label: 'Left-hand mode', value: false }] as never,
+    });
+    const m = openSMenu(host, () => ({ x: 10, y: 600, w: 52, h: 38 }), () => null, () => 1) as SMenu;
+    const row = m.rows[0];
+    const toggle = all(row, SToggle)[0];
+    const hit = row.hitArea as Rectangle;
+    expect(toggle.x + 44).toBeLessThanOrEqual(hit.width);
+    expect(toggle.y + 24).toBeLessThanOrEqual(hit.height);
   });
 });

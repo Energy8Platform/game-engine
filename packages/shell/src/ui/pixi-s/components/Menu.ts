@@ -8,9 +8,12 @@ import { SSlider, SToggle } from '../primitives/controls';
 import { sLabel } from '../text';
 import { S } from '../theme';
 
-/** Row sizes in design px (the bar's readouts are 56 tall — the rows are "чуть покороче"). */
-const WIDE_ROW = { w: 320, h: 44 };
-const MOBILE_ROW = { w: 370, h: 40 };
+/** Row sizes in design px (the bar's readouts are 56 tall — the rows are "чуть покороче"); the
+ *  width is just under SPIN's width (248 / 150), R5. */
+const WIDE_ROW = { w: 236, h: 44 };
+const MOBILE_ROW = { w: 142, h: 40 };
+/** A range row narrower than this beside its label stacks the label above the slider (R5). */
+const MIN_SLIDER = 90;
 const GAP = 6;
 const PAD = 16;
 const LABEL_SIZE = 13;
@@ -70,11 +73,13 @@ export class SMenu extends Container implements ShellLayer {
     }));
     const sliderX = PAD + Math.min(widest, z.w * 0.45) + PAD;
     this.rows = menuRows.map((row) => this.buildRow(row, z.w, z.h, sliderX));
-    this.rows.forEach((r, i) => {
-      r.position.set(0, i * (z.h + GAP));
+    let y = 0;
+    for (const r of this.rows) {
+      r.position.set(0, y);
       this.stack.addChild(r);
-    });
-    const stackH = this.rows.length * z.h + Math.max(0, this.rows.length - 1) * GAP;
+      y += (r.hitArea as Rectangle).height + GAP;
+    }
+    const stackH = Math.max(0, y - GAP);
     this.stack.hitArea = new Rectangle(0, 0, z.w, stackH);
 
     // above the burger, left-aligned to it; shrink further when the room above is short
@@ -96,17 +101,29 @@ export class SMenu extends Container implements ShellLayer {
     if (row.kind === 'separator') return node; // filtered out by hbRows; keeps the union total
     node.label = `menu-row-${row.id}`;
     node.eventMode = 'static'; // the row body absorbs taps (else they fall through to the dismiss layer)
-    node.hitArea = new Rectangle(0, 0, w, h);
-    const slab = new Slab(w, h, { face: S.plate, corners: SKEW.readout });
     const label = sLabel(row.label, LABEL_SIZE, S.fg);
-    node.addChild(slab, label);
+    let slab!: Slab;
     const place = (maxW: number): void => {
       if (label.width > maxW) label.scale.set(maxW / label.width);
       label.position.set(PAD, (h - label.height) / 2);
     };
+    // a stacked row (R5): the label on top across the row, the control below it
+    const stack = (): number => {
+      place(w - PAD * 2);
+      label.y = 10;
+      return 10 + label.height + 8; // the control's y
+    };
+    // the slab (and hit area) at the row's real height, once the layout knows it
+    const finish = (rowH: number): void => {
+      node.hitArea = new Rectangle(0, 0, w, rowH);
+      slab = new Slab(w, rowH, { face: S.plate, corners: SKEW.readout });
+      node.addChildAt(slab, 0);
+    };
+    node.addChild(label);
 
     if (row.kind === 'button') {
       place(w - PAD * 2);
+      finish(h);
       if (row.disabled) {
         node.alpha = 0.5;
         return node;
@@ -132,8 +149,15 @@ export class SMenu extends Container implements ShellLayer {
         row.set(v);
         toggle.setValue(v);
       });
-      toggle.position.set(w - PAD - 44, (h - 24) / 2);
-      place(toggle.x - 8 - PAD);
+      if (label.width > w - PAD * 2 - 44 - 8) {
+        const y = stack();
+        toggle.position.set(w - PAD - 44, y);
+        finish(y + 24 + 10);
+      } else {
+        toggle.position.set(w - PAD - 44, (h - 24) / 2);
+        place(toggle.x - 8 - PAD);
+        finish(h);
+      }
       node.addChild(toggle);
       this.updaters[row.id] = (v) => toggle.setValue(v === true);
       if (row.disabled) {
@@ -150,10 +174,18 @@ export class SMenu extends Container implements ShellLayer {
       const snapped = row.min + Math.round((raw - row.min) / row.step) * row.step;
       return Math.max(row.min, Math.min(row.max, snapped));
     };
-    place(sliderX - PAD * 2);
     const slider = new SSlider(toUnit(row.get()), row.disabled ? () => {} : (u) => row.set(fromUnit(u)));
-    slider.setLayoutSize(Math.max(120, w - PAD - sliderX));
-    slider.position.set(sliderX, (h - 24) / 2);
+    if (w - PAD - sliderX < MIN_SLIDER) {
+      const y = stack();
+      slider.setLayoutSize(w - PAD * 2);
+      slider.position.set(PAD, y);
+      finish(y + 24 + 10);
+    } else {
+      place(sliderX - PAD * 2);
+      slider.setLayoutSize(w - PAD - sliderX);
+      slider.position.set(sliderX, (h - 24) / 2);
+      finish(h);
+    }
     node.addChild(slider);
     this.updaters[row.id] = (v) => slider.setValue(toUnit(Number(v)));
     if (row.disabled) {

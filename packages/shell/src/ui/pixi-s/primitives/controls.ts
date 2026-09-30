@@ -176,7 +176,7 @@ const TRACK_H = 8;
 const THUMB_W = 12;
 
 /** The volume slider: a flat 8-thick track across its width, the yellow fill up to the thumb and a
- *  flat 12×24 fg rect thumb. Same drag / `setValue` API as HB `Slider`. */
+ *  flat 12×24 yellow rect thumb. Same drag / `setValue` API as HB `Slider`. */
 export class SSlider extends Container implements Sizable {
   private track = new Graphics();
   private fill = new Graphics();
@@ -233,7 +233,7 @@ export class SSlider extends Container implements Sizable {
     this.track.clear().rect(t.x, t.y, t.w, t.h).fill(S.track);
     this.fill.clear();
     if (x > 0) this.fill.rect(0, t.y, x + THUMB_W / 2, t.h).fill(S.yellow);
-    this.thumb.clear().rect(x, 0, THUMB_W, SLIDER_H).fill(S.fg);
+    this.thumb.clear().rect(x, 0, THUMB_W, SLIDER_H).fill(S.yellow);
     this.hitArea = new Rectangle(0, 0, this.w, SLIDER_H);
   }
 

@@ -1,5 +1,6 @@
 import '../pixi/setup-canvas'; // must be first — patches canvas getContext before pixi.js loads
 import { describe, it, expect, vi } from 'vitest';
+import type { Graphics } from 'pixi.js';
 import { STitlePlate, sCloseButton, STextButton, SChip, SSlider, SStepSlider, SToggle, S_SCROLL } from '@/ui/pixi-s/primitives/controls';
 import { sBody } from '@/ui/pixi-s/text';
 import { FONT_FAMILY } from '@/ui/pixi-hb/text';
@@ -60,7 +61,7 @@ describe('S overlay primitives', () => {
     expect(onTap).toHaveBeenCalledWith('2');
   });
 
-  it('the slider: an 8-thick full-width track and a 12×24 rect thumb; setValue moves it without firing', () => {
+  it('the slider: an 8-thick full-width track and a 12×24 yellow rect thumb; setValue moves it without firing', () => {
     const onInput = vi.fn();
     const s = new SSlider(0.5, onInput);
     s.setLayoutSize(212, undefined);
@@ -70,6 +71,8 @@ describe('S overlay primitives', () => {
     expect(s.thumbRect.x).toBe(200);
     expect(onInput).not.toHaveBeenCalled();
     expect(s.measureSize()).toEqual({ w: 212, h: 24 });
+    const thumbFill = (s as unknown as { thumb: Graphics }).thumb.context.instructions[0].data.style.color;
+    expect(thumbFill).toBe(Number.parseInt(S.yellow.slice(1), 16));
   });
 
   it('the toggle: a 44×24 rect track, an 18-square knob left when off, right when on', () => {
