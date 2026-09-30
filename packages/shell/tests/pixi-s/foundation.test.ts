@@ -29,12 +29,33 @@ describe('S foundations', () => {
 
   it('glyphs: the colour is substituted, the box scales to size, contexts are shared', () => {
     for (const n of S_ICON_NAMES) expect(sIconSVG(n, '#123456')).not.toContain('currentColor');
-    const a = sIcon('mask', 48, S.ink);
-    const b = sIcon('mask', 30, S.ink);
-    expect(a.context).toBe(b.context);
-    expect(a.scale.x).toBe(2);
-    expect(sIcon('mask', 24, S.yellow).context).not.toBe(a.context);
-    expect(a.getLocalBounds().width).toBeGreaterThan(20); // the mask spans most of its 24-unit box
+    const a = sIcon('bonus', 48, S.ink);
+    const b = sIcon('bonus', 30, S.ink);
+    expect(a.gfx.context).toBe(b.gfx.context);
+    expect(a.gfx.scale.x).toBe(2);
+    expect(sIcon('bonus', 24, S.yellow).gfx.context).not.toBe(a.gfx.context);
+    // every glyph fills most of its box, centred in it
+    for (const n of S_ICON_NAMES) {
+      const k = sIcon(n, 24, S.ink).getLocalBounds();
+      expect(Math.max(k.width, k.height), n).toBeGreaterThan(18);
+      expect(Math.abs(k.x + k.width / 2 - 12), n).toBeLessThan(1.5);
+      expect(Math.abs(k.y + k.height / 2 - 12), n).toBeLessThan(1.5);
+    }
+  });
+
+  it('the bonus mask\'s details are holes, so the button face shows through on hover and when disabled', () => {
+    const fills = sIcon('bonus', 48, S.ink).gfx.context.instructions.filter((i) => i.action === 'fill');
+    expect(fills.some((i) => (i.data as { hole?: unknown }).hole)).toBe(true);
+  });
+
+  it('spin turns a glyph about its own centre', () => {
+    const g = sIcon('spin', 40, S.ink);
+    const c = (k: { x: number; y: number; width: number; height: number }) => [k.x + k.width / 2, k.y + k.height / 2];
+    const [x0, y0] = c(g.getLocalBounds());
+    g.spin = Math.PI / 2;
+    const [x1, y1] = c(g.getLocalBounds());
+    expect(Math.abs(x1 - x0)).toBeLessThan(1);
+    expect(Math.abs(y1 - y0)).toBeLessThan(1);
   });
 
   it('panels are one step lighter than the black plates, so plates keep their shape inside panels', () => {

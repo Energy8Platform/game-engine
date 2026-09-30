@@ -2,12 +2,11 @@ import { Container, type Text } from 'pixi.js';
 import type { PixiComponentContext } from '../pixi/context';
 import type { HbBar } from '../pixi-hb/PixiHbRenderer';
 import { autoplayDiscMode } from '../pixi-hb/components/BottomBar';
-import { makeIcon, type IconView } from '../pixi-hb/pixi-icon';
 import type { Rect } from '@/core/popover';
 import type { SafeArea } from '@/core/renderer';
 import { bonusBuyLocked } from '@/core/state';
 import { SKEW, spinEdgeX, type Corners } from './slab';
-import { sIcon } from './icons';
+import { sIcon, type SGlyph } from './icons';
 import { S } from './theme';
 import { SButton, SReadout, SBet, SSpin, SFsCounter, type Sized } from './widgets';
 
@@ -37,7 +36,7 @@ const WIDE: Sizes = {
   menu: [64, 40], menuGlyph: 20,
   readout: [268, 56], labelSize: 15, valueSize: 23,
   bet: [232, 38], betLabel: 14, betValue: 19,
-  buyGlyph: 120,
+  buyGlyph: 96,
   spin: [248, 126], spinGlyph: 84,
   tab: [48, 34], tabGlyph: 20, tabGap: 4,
   gap: 4,
@@ -48,7 +47,7 @@ const MOBILE: Sizes = {
   menu: [52, 38], menuGlyph: 20,
   readout: [172, 44], labelSize: 11, valueSize: 17,
   bet: [186, 40], betLabel: 11, betValue: 17,
-  buyGlyph: 76,
+  buyGlyph: 66,
   spin: [150, 90], spinGlyph: 56,
   tab: [42, 30], tabGlyph: 16, tabGap: 4,
   gap: 8,
@@ -99,7 +98,7 @@ export class SideBar extends Container implements HbBar {
   private plate: Rect | null = null;
   private safe: SafeArea = { top: 0, right: 0, bottom: 0, left: 0 };
   private menuBtn!: SButton;
-  private menuClose!: IconView;
+  private menuClose!: SGlyph;
   private totalWin?: SReadout;
   private win!: SReadout;
   private balance?: SReadout;
@@ -204,12 +203,12 @@ export class SideBar extends Container implements HbBar {
       h: z.menu[1],
       face: 'plate',
       corners: SKEW.menu,
-      glyph: makeIcon('menu', z.menuGlyph, { ink: S.fg, fill: S.fg }),
+      glyph: sIcon('menu', z.menuGlyph, S.fg),
       glyphSize: z.menuGlyph,
       onTap: () => this.host.actions.openMenu(),
     });
     // the ✕ the burger shows while the menu is open (setMenuOpen), in the same glyph box
-    this.menuClose = makeIcon('close', z.menuGlyph, { ink: S.fg, fill: S.fg });
+    this.menuClose = sIcon('close', z.menuGlyph, S.fg);
     this.menuClose.position.copyFrom(this.menuBtn.glyph.position);
     this.menuClose.visible = false;
     this.menuBtn.addChild(this.menuClose);
@@ -292,7 +291,7 @@ export class SideBar extends Container implements HbBar {
       h: z.spin[1],
       face: feature ? 'red' : 'yellow',
       corners: SKEW.spin,
-      glyph: feature ? makeIcon('close', cross, { ink: S.fg, fill: S.fg }) : sIcon('mask', z.buyGlyph, S.ink),
+      glyph: feature ? sIcon('close', cross, S.fg) : sIcon('bonus', z.buyGlyph, S.ink),
       glyphSize: feature ? cross : z.buyGlyph,
       onTap: () => (feature ? this.host.actions.deactivateFeature() : this.host.actions.openBuyBonus()),
     });
@@ -374,7 +373,7 @@ export class SideBar extends Container implements HbBar {
       h: z.tab[1],
       face: running ? 'yellow' : 'plate',
       corners: this.tabCorners(),
-      glyph: running ? makeIcon('stop', g, { ink: S.ink, fill: S.ink }) : sIcon('play', g, S.fg),
+      glyph: running ? sIcon('stop', g, S.ink) : sIcon('play', g, S.fg),
       glyphSize: g,
       hoverFace: running ? undefined : 'yellow',
       hoverGlyph: running ? undefined : sIcon('play', g, S.ink),
@@ -398,10 +397,10 @@ export class SideBar extends Container implements HbBar {
       h: z.tab[1],
       face: level >= 2 ? 'yellow' : 'plate',
       corners: this.tabCorners(),
-      glyph: sIcon('bolt', g, color),
+      glyph: sIcon('turbo', g, color),
       glyphSize: g,
       hoverFace: level >= 2 ? undefined : 'yellow',
-      hoverGlyph: level >= 2 ? undefined : sIcon('bolt', g, S.ink),
+      hoverGlyph: level >= 2 ? undefined : sIcon('turbo', g, S.ink),
       onTap: () => this.host.actions.cycleTurbo(),
     });
   }

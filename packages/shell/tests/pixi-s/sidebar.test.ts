@@ -1,7 +1,7 @@
 import '../pixi/setup-canvas'; // must be first — patches canvas getContext before pixi.js loads
 import { describe, it, expect } from 'vitest';
 import type { Container, Graphics } from 'pixi.js';
-import type { IconView } from '@/ui/pixi-hb/pixi-icon';
+import type { SGlyph } from '@/ui/pixi-s/icons';
 import { SideBar, OUTER, SAFE_GAP } from '@/ui/pixi-s/SideBar';
 import type { SButton, SBet, SSpin, SFsCounter, SReadout } from '@/ui/pixi-s/widgets';
 import { sIcon } from '@/ui/pixi-s/icons';
@@ -294,7 +294,7 @@ describe('S side bar — modes and controls', () => {
     ctx.state.activeFeature = ANTE;
     const p = parts(build(ctx));
     expect(p.buy!.face).toBe('red');
-    expect((p.buy!.glyph as IconView).iconName).toBe('close');
+    expect((p.buy!.glyph as SGlyph).iconName).toBe('close');
     expect(p.bet.up!.disabled).toBe(true);
     expect(p.bet.down!.disabled).toBe(true);
     expect(p.bet.valueText.text).toBe('€1.25');
@@ -306,7 +306,7 @@ describe('S side bar — modes and controls', () => {
     run.state.autoplay = { active: true, remaining: 5 };
     const a = parts(build(run));
     expect(a.autoTab!.face).toBe('yellow');
-    expect((a.autoTab!.glyph as IconView).iconName).toBe('stop');
+    expect((a.autoTab!.glyph as SGlyph).iconName).toBe('stop');
     expect(a.spin!.mode).toBe('stop');
     expect(a.spin!.count).toBe('5');
     const halt = host(1280, 720);
@@ -322,7 +322,9 @@ describe('S side bar — modes and controls', () => {
       ctx.state.turbo = level;
       const t = parts(build(ctx)).turboTab!;
       expect(t.face).toBe(face);
-      expect((t.glyph as Graphics).context).toBe(sIcon('bolt', 1, color).context);
+      const g = t.glyph as SGlyph;
+      expect(g.iconName).toBe('turbo');
+      expect(g.gfx.context).toBe(sIcon('turbo', 1, color).gfx.context);
     };
     expectTab(0, 'plate', S.fg);
     expectTab(1, 'plate', S.yellow);
@@ -365,7 +367,7 @@ describe('S side bar — modes and controls', () => {
     bar.setMenuOpen(true);
     expect(b.menuBtn.glyph.visible).toBe(false);
     expect(b.menuClose.visible).toBe(true);
-    expect((b.menuClose as IconView).iconName).toBe('close');
+    expect((b.menuClose as SGlyph).iconName).toBe('close');
     bar.setMenuOpen(false);
     expect(b.menuBtn.glyph.visible).toBe(true);
     expect(b.menuClose.visible).toBe(false);

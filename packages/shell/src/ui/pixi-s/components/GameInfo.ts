@@ -17,10 +17,11 @@ import { SPage } from '../primitives/page';
 import { STitlePlate } from '../primitives/controls';
 import { Spacer, giEm, setGiEm } from '../../pixi-hb/primitives/controls';
 import { makeIcon } from '../../pixi-hb/pixi-icon';
+import type { HbIconName } from '../../pixi-hb/icons';
 import { FlexBox } from '../../pixi/primitives/flex';
 import { SButton } from '../widgets';
 import { SKEW } from '../slab';
-import { sIcon } from '../icons';
+import { sIcon, type SIconName } from '../icons';
 import { sLabel, sValue, sBody } from '../text';
 import { PACKAGE_VERSION } from '@/core/version';
 import { S } from '../theme';
@@ -213,21 +214,23 @@ function sectionControls(host: PixiComponentContext, title: string, width: numbe
     box.addChild(spacerBox(48, 48), b);
     return box;
   };
-  const fgIcon = (name: Parameters<typeof makeIcon>[0]) => badge('plate', makeIcon(name, 20, { ink: S.fg, fill: S.fg }), 20);
+  const fgIcon = (name: SIconName) => badge('plate', sIcon(name, 20, S.fg), 20);
+  /** Sound, music and info: the S sheet has none, so HB's glyphs. */
+  const hbIcon = (name: HbIconName) => badge('plate', makeIcon(name, 20, { ink: S.fg, fill: S.fg }), 20);
 
   const game: CtlRow[] = [
-    { vis: badge('yellow', makeIcon('spin', 26, { ink: S.ink, fill: S.ink }), 26), name: 'Spin', desc: 'Start a spin at the current bet.', on: true },
+    { vis: badge('yellow', sIcon('spin', 26, S.ink), 26), name: 'Spin', desc: 'Start a spin at the current bet.', on: true },
     { vis: fgIcon('plus'), name: 'Raise bet', desc: 'Increase your stake.', on: true },
     { vis: fgIcon('minus'), name: 'Lower bet', desc: 'Decrease your stake.', on: true },
     { vis: badge('plate', sIcon('play', 18, S.fg), 18), name: 'Autoplay', desc: 'Spin automatically a set number of times.', on: features.autoplay != null },
-    { vis: badge('plate', sIcon('bolt', 18, S.fg), 18), name: 'Turbo', desc: 'Speed up spin animations.', on: features.turbo > 0 },
-    { vis: badge('yellow', sIcon('mask', 30, S.ink), 30), name: 'Buy bonus', desc: 'Pay a fixed cost to enter a bonus feature.', on: features.buyBonus !== false },
+    { vis: badge('plate', sIcon('turbo', 18, S.fg), 18), name: 'Turbo', desc: 'Speed up spin animations.', on: features.turbo > 0 },
+    { vis: badge('yellow', sIcon('bonus', 26, S.ink), 26), name: 'Buy bonus', desc: 'Pay a fixed cost to enter a bonus feature.', on: features.buyBonus !== false },
   ];
   const menu: CtlRow[] = [
     { vis: fgIcon('menu'), name: 'Menu', desc: 'Open settings and game info.', on: true },
-    { vis: fgIcon('soundOn'), name: 'Sound', desc: 'Mute or unmute the game.', on: true },
-    { vis: fgIcon('musicOn'), name: 'Music', desc: 'Mute or unmute the music.', on: true },
-    { vis: fgIcon('info'), name: 'Game info', desc: 'Open the paytable and rules.', on: true },
+    { vis: hbIcon('soundOn'), name: 'Sound', desc: 'Mute or unmute the game.', on: true },
+    { vis: hbIcon('musicOn'), name: 'Music', desc: 'Mute or unmute the music.', on: true },
+    { vis: hbIcon('info'), name: 'Game info', desc: 'Open the paytable and rules.', on: true },
     { vis: fgIcon('close'), name: 'Close', desc: 'Dismiss the current overlay.', on: true },
   ];
 

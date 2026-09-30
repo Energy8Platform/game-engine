@@ -2,9 +2,9 @@ import { Container, Graphics, Rectangle, type FederatedPointerEvent, type Text }
 import type { Sizable } from '../../pixi/primitives/flex';
 import type { ScrollLook } from '../../pixi-hb/primitives/scroll-affordance';
 import { attachHover, attachPress } from '../../pixi-hb/primitives/widgets';
-import { makeIcon } from '../../pixi-hb/pixi-icon';
 import { Slab, SKEW, slabPoints } from '../slab';
 import { SButton } from '../widgets';
+import { sIcon } from '../icons';
 import { sLabel } from '../text';
 import { S, DISABLED_ALPHA } from '../theme';
 
@@ -46,7 +46,7 @@ export function sCloseButton(size: number, onTap: () => void): SButton {
     h: size,
     face: 'yellow',
     corners: SKEW.menu,
-    glyph: makeIcon('close', g, { ink: S.ink, fill: S.ink }),
+    glyph: sIcon('close', g, S.ink),
     glyphSize: g,
     onTap,
   });

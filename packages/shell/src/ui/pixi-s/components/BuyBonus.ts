@@ -6,7 +6,6 @@ import { groupBonusSlots } from '@/core/bonusGroups';
 import { betDir } from '@/core/keyboard';
 import { clamp } from '../../pixi-hb/primitives/overlay';
 import { ScrollBox } from '../../pixi-hb/primitives/scroll';
-import { makeIcon } from '../../pixi-hb/pixi-icon';
 import { SCardModal } from '../primitives/card';
 import { STitlePlate, STextButton, sCloseButton, S_SCROLL } from '../primitives/controls';
 import { stripMetrics, closeCorner } from '../primitives/page';
@@ -198,8 +197,8 @@ export class SBuyBonusPage extends Container implements ShellLayer {
     card.addChild(title);
     if (nav) {
       const g = Math.round(arrow * 0.5);
-      const prev = new SButton({ w: arrow, h: arrow, face: 'yellow', corners: SKEW.menu, glyph: makeIcon('back', g, { ink: S.ink, fill: S.ink }), glyphSize: g, onTap: () => this.step(slot, -1) });
-      const next = new SButton({ w: arrow, h: arrow, face: 'yellow', corners: SKEW.menu, glyph: makeIcon('chevronRight', g, { ink: S.ink, fill: S.ink }), glyphSize: g, onTap: () => this.step(slot, 1) });
+      const prev = new SButton({ w: arrow, h: arrow, face: 'yellow', corners: SKEW.menu, glyph: sIcon('chevronLeft', g, S.ink), glyphSize: g, onTap: () => this.step(slot, -1) });
+      const next = new SButton({ w: arrow, h: arrow, face: 'yellow', corners: SKEW.menu, glyph: sIcon('chevronRight', g, S.ink), glyphSize: g, onTap: () => this.step(slot, 1) });
       prev.label = `bb-prev-${slot}`;
       next.label = `bb-next-${slot}`;
       prev.position.set(colX, y + (rowH - arrow) / 2);
@@ -303,7 +302,7 @@ export class SBuyBonusPage extends Container implements ShellLayer {
       const face = new Graphics().rect(0, 0, w, h).fill(bonus.type === 'feature' ? S.red : S.yellow);
       face.label = bonus.type === 'feature' ? 'bb-hero-red' : 'bb-hero-yellow';
       const size = Math.round(Math.min(w, h) * 0.7);
-      const mask = sIcon('mask', size, bonus.type === 'feature' ? S.fg : S.ink);
+      const mask = sIcon('bonus', size, bonus.type === 'feature' ? S.fg : S.ink);
       mask.position.set((w - size) / 2, (h - size) / 2);
       hero.addChild(face, mask);
     }

@@ -1,8 +1,7 @@
 import { Container, Graphics, Polygon, Rectangle, type Text, type Ticker } from 'pixi.js';
 import { attachHover, attachPress, type SpinAutoplayMode } from '../pixi-hb/primitives/widgets';
-import { makeIcon, type IconView } from '../pixi-hb/pixi-icon';
 import { Slab, SKEW, slabPoints, type Corners } from './slab';
-import { sIcon } from './icons';
+import { sIcon, type SGlyph } from './icons';
 import { sLabel, sValue } from './text';
 import { S, DISABLED_ALPHA } from './theme';
 
@@ -33,7 +32,7 @@ export interface SButtonOpts {
   h: number;
   face: SFace;
   corners: Corners;
-  /** The glyph; its box is `glyphSize` square (an IconView or an sIcon). */
+  /** The glyph; its box is `glyphSize` square (an sIcon). */
   glyph: Container;
   glyphSize: number;
   /** Face shown on hover instead of the face's own hover shade (the tabs light up yellow). */
@@ -108,7 +107,7 @@ export class SStep extends Container {
 
   constructor(name: 'minus' | 'plus', glyph: number, box: number, onTap: () => void) {
     super();
-    const g = makeIcon(name, glyph, { ink: S.yellow, fill: S.yellow });
+    const g = sIcon(name, glyph, S.yellow);
     g.position.set((box - glyph) / 2, (box - glyph) / 2);
     this.addChild(g);
     this.eventMode = 'static';
@@ -244,7 +243,7 @@ export interface SSpinOpts {
  *  dark veil over the slab (not alpha — a half-transparent yellow hero would wash out over the game). */
 export class SSpin extends Container implements Sized {
   readonly slab: Slab;
-  private glyph: IconView;
+  private glyph: SGlyph;
   private veil: Graphics;
   private countText?: Text;
   private ticker: Ticker;
@@ -256,7 +255,7 @@ export class SSpin extends Container implements Sized {
     super();
     this.ticker = o.ticker;
     this.slab = new Slab(o.w, o.h, { face: S.yellow, corners: SKEW.spin });
-    this.glyph = makeIcon('spin', o.glyph, { ink: S.ink, fill: S.ink });
+    this.glyph = sIcon('spin', o.glyph, S.ink);
     this.glyph.position.set((o.w - o.glyph) / 2, (o.h - o.glyph) / 2);
     this.veil = new Graphics().poly(slabPoints(o.w, o.h, SKEW.spin)).fill({ color: 0x000000, alpha: 0.35 });
     this.veil.visible = false;
@@ -284,7 +283,7 @@ export class SSpin extends Container implements Sized {
     const sq = Math.round(body * 0.62);
     const top = (body - sq) / 2;
     if (running) {
-      const stop = makeIcon('stop', sq, { ink: S.ink, fill: S.ink });
+      const stop = sIcon('stop', sq, S.ink);
       stop.position.set((w - sq) / 2, top);
       this.addChild(stop);
     } else {
