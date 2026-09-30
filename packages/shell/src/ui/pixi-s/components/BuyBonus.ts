@@ -1,5 +1,5 @@
-// Fork of pixi-hb/components/BuyBonus.ts in the S look — behaviour unchanged.
-import { Assets, Container, Graphics, Rectangle, Sprite, Texture } from 'pixi.js';
+// Fork of pixi-hb/components/BuyBonus.ts in the S look.
+import { Assets, Container, FillGradient, Graphics, Rectangle, Sprite, Texture } from 'pixi.js';
 import type { PixiComponentContext, ShellLayer } from '../../pixi/context';
 import type { BonusOption } from '@/core/types';
 import { groupBonusSlots } from '@/core/bonusGroups';
@@ -10,16 +10,19 @@ import { SCardModal } from '../primitives/card';
 import { STitlePlate, STextButton, sCloseButton, S_SCROLL } from '../primitives/controls';
 import { stripMetrics, closeCorner } from '../primitives/page';
 import { SButton, SReadout, SBet } from '../widgets';
-import { SKEW } from '../slab';
+import { SKEW, SHADOW_OFFSET } from '../slab';
 import { sIcon } from '../icons';
 import { sLabel, sValue, sBody } from '../text';
-import { S } from '../theme';
+import { S, SHADOW_ALPHA } from '../theme';
 
-/** Buy-bonus: no frame — over the frosted game the S strip (a BUY BONUS title plate and a ✕ over the
- *  card column), a vertical, always-scrolling list of flat mode CARDS (two per row on a wide screen,
- *  one otherwise) and a balance / bet band pinned to the bottom. Each card: hero on its left third,
- *  then the title (with ‹ › when the slot is a `groupedBy` group), volatility, description and a
- *  bottom-pinned CTA. Returns null when there are no bonus options. */
+/** Buy-bonus: no frame — over the frosted game the S strip (a BUY BONUS title plate and a ✕ in the
+ *  top corners), one horizontal row of portrait "ticket" cards (centred when they fit, else scrolling
+ *  along x with the next card peeking in) and the BALANCE | BET plates at the bottom, with no panel
+ *  behind them. A screen under 440 tall lays the page out at 440 and draws it scaled down. Each card:
+ *  the hero fills the top and fades to black over the title zone (‹ › either side of the title when
+ *  the slot is a `groupedBy` group), then the description, a dashed separator between two side
+ *  notches, the volatility bars, the yellow price and a full-width CTA. Returns null when there are
+ *  no bonus options. */
 export function openSBuyBonus(host: PixiComponentContext): ShellLayer | null {
   const bonuses = host.config.features.buyBonus;
   if (bonuses === false || bonuses.length === 0) return null;
@@ -31,15 +34,30 @@ const BET_BAND_H = 64;
  *  the band goes narrow and each plate's height is at most this share of the room. */
 const WIDE_BAND_RH = 9.8;
 const NARROW_RH_SHARE = 0.13;
-const HERO_FRACTION = 0.33;
-const CARD_GAP = 12;
-/** Two cards per row from this content width up. */
-const TWO_UP_MIN_W = 640;
+/** The page is laid out at least this tall; a shorter screen draws it scaled down. */
+const MIN_PAGE_H = 440;
+/** Card width / height. */
+const ASPECT = 0.5;
+const CARD_GAP = 14;
+/** The hero's fade to black over the title zone — one shared gradient (local texture space fits it
+ *  to each rect), so rebuilds do not leave a gradient texture behind per card. */
+const FADE = new FillGradient({
+  type: 'linear',
+  start: { x: 0, y: 0 },
+  end: { x: 0, y: 1 },
+  colorStops: [
+    { offset: 0, color: 'rgba(11,11,11,0)' },
+    { offset: 1, color: S.plate },
+  ],
+  textureSpace: 'local',
+});
 
 export class SBuyBonusPage extends Container implements ShellLayer {
   readonly tag = 'buybonus';
   private host: PixiComponentContext;
   private veil = new Graphics();
+  /** Everything but the veil and the confirm, laid out at the page's logical size and scaled by k. */
+  private stage = new Container();
   titlePlate?: STitlePlate;
   private closeBtn?: Container;
   /** Card slots — a `groupedBy` group is one slot with several members. */
@@ -52,13 +70,16 @@ export class SBuyBonusPage extends Container implements ShellLayer {
   private confirmBonus?: BonusOption;
   /** CTA per slot, in slot order — for tests. */
   ctas: STextButton[] = [];
+  private cardW = 0;
+  private cardH = 0;
 
   constructor(host: PixiComponentContext, bonuses: BonusOption[]) {
     super();
     this.host = host;
     this.slots = groupBonusSlots(bonuses);
     this.veil.eventMode = 'static'; // swallow taps to the game behind
-    this.addChild(this.veil, this.band);
+    this.stage.addChild(this.band);
+    this.addChild(this.veil, this.stage);
     this.resize(host.screenW, host.screenH);
   }
 
@@ -74,6 +95,16 @@ export class SBuyBonusPage extends Container implements ShellLayer {
     if (n < 2) return;
     this.groupIndex.set(slot, ((((this.groupIndex.get(slot) ?? 0) + dir) % n) + n) % n);
     this.rebuild();
+  }
+
+  /** A card's em: 1/36 of its height. */
+  cardEm(h: number): number {
+    return h / 36;
+  }
+
+  /** The size the current cards were built at. */
+  private cardSize(): { w: number; h: number } {
+    return { w: this.cardW, h: this.cardH };
   }
 
   private w = 0;
@@ -104,173 +135,190 @@ export class SBuyBonusPage extends Container implements ShellLayer {
 
   // ── page ────────────────────────────────────────────────────────────────────
   private rebuild(): void {
-    const em = clamp(11, this.h / 36, 15);
+    // a short screen lays the page out at MIN_PAGE_H and draws it scaled down
+    const k = Math.min(1, this.h / MIN_PAGE_H);
+    const W = this.w / k;
+    const H = this.h / k;
+    this.stage.scale.set(k);
+    const em = clamp(11, H / 36, 15);
     const pad = clamp(12, em * 1.2, 20);
-    const strip = stripMetrics(this.h);
-    const contentW = Math.min(1100, this.w - pad * 2 - ScrollBox.GUTTER);
-    const left = (this.w - ScrollBox.GUTTER - contentW) / 2;
+    const strip = stripMetrics(H);
     // the title plate and ✕ in the screen corners
     this.titlePlate?.destroy({ children: true });
     this.closeBtn?.destroy({ children: true });
     const m = strip.top;
-    this.titlePlate = new STitlePlate(this.host.t('Buy bonus'), strip.height, this.w - m * 4 - strip.height - ScrollBox.GUTTER);
+    this.titlePlate = new STitlePlate(this.host.t('Buy bonus'), strip.height, W - m * 4 - strip.height - ScrollBox.GUTTER);
     this.titlePlate.position.set(m, m);
-    const c = closeCorner(this.w, this.h);
+    const c = closeCorner(W, H);
     this.closeBtn = sCloseButton(c.size, () => this.host.closeLayer());
     this.closeBtn.position.set(c.x, c.y);
-    this.addChild(this.titlePlate, this.closeBtn);
-    const top = strip.top + strip.height * 1.3;
-    const betH = Math.min(BET_BAND_H, this.h * 0.16);
-    const listH = this.h - top - betH - pad;
-    const r = new Rectangle(0, top, this.w, listH);
+    this.stage.addChild(this.titlePlate, this.closeBtn);
 
-    // the card list scrolls
+    // bet band — the two plates at the bottom edge, no backing
+    const betH = Math.min(BET_BAND_H, H * 0.16);
+    const bandW = Math.min(W - pad * 2, 900);
+    const bandTop = H - betH - pad * 0.5;
+    this.band.removeChildren().forEach((n) => n.destroy({ children: true }));
+    const band = this.buildBetBand(bandW, betH);
+    band.position.set((W - bandW) / 2, bandTop);
+    this.band.addChild(band);
+
+    // the card row, between the strip and the band; scrolls along x when it overflows
+    const rowTop = strip.top + strip.height * 1.3;
+    const rowBottom = bandTop - pad * 0.5;
+    const cardH = Math.min(rowBottom - rowTop - ScrollBox.GUTTER, (0.62 * W) / ASPECT, 640);
+    const cardW = Math.round(cardH * ASPECT);
+    this.cardW = cardW;
+    this.cardH = cardH;
     if (this.scroll) {
-      this.removeChild(this.scroll);
+      this.stage.removeChild(this.scroll);
       this.scroll.destroy({ children: true });
     }
-    const scroll = new ScrollBox(this.host.canvas, this.host.ticker, S_SCROLL);
+    const scroll = new ScrollBox(this.host.canvas, this.host.ticker, S_SCROLL, 'x');
     this.scroll = scroll;
-    this.addChildAt(scroll, 1);
-    scroll.position.set(r.x, r.y);
-    scroll.setViewport(r.width, listH);
-    const cols = contentW >= TWO_UP_MIN_W ? 2 : 1;
-    const cardW = (contentW - CARD_GAP * (cols - 1)) / cols;
-    // never taller than the viewport — a short popout shows a whole card, not a slice of one
-    const cardH = clamp(Math.min(150, listH), listH * (cols === 2 ? 0.6 : 0.55), 240);
+    this.stage.addChildAt(scroll, 0);
+    const viewW = W - 2 * pad;
+    const viewH = cardH + ScrollBox.GUTTER;
+    scroll.position.set(pad, rowTop + (rowBottom - rowTop - viewH) / 2);
+    scroll.setViewport(viewW, viewH);
+    const n = this.slots.length;
+    const total = n * cardW + (n - 1) * CARD_GAP;
+    const offset = total <= viewW ? (viewW - total) / 2 : 0;
     this.ctas = [];
     this.slots.forEach((_, i) => {
-      const card = this.buildCard(i, cardW, cardH, em);
-      card.position.set(left + (i % cols) * (cardW + CARD_GAP), Math.floor(i / cols) * (cardH + CARD_GAP));
+      const card = this.buildCard(i, cardW, cardH);
+      card.position.set(offset + i * (cardW + CARD_GAP), 0);
       scroll.content.addChild(card);
     });
-    // bottom padding so the last row clears the band
-    const tail = new Graphics().rect(0, 0, 1, 1).fill({ color: 0, alpha: 0 });
-    tail.position.set(0, Math.ceil(this.slots.length / cols) * (cardH + CARD_GAP));
-    scroll.content.addChild(tail);
     scroll.refresh();
-
-    // bet band — a flat panel pinned to the bottom edge
-    this.band.removeChildren().forEach((c) => c.destroy({ children: true }));
-    const bandW = Math.min(this.w - pad * 2, 900);
-    const bg = new Graphics().rect(0, 0, bandW, betH).fill(S.panel);
-    const band = this.buildBetBand(bandW, betH);
-    band.addChildAt(bg, 0);
-    band.position.set((this.w - bandW) / 2, this.h - betH - pad * 0.5);
-    this.band.addChild(band);
     this.showPage(!this.confirm);
   }
 
-  /** The confirm has no backing, so the page under it (list, band, plates) hides while it is open. */
+  /** The confirm has no backing, so the page under it (row, band, plates) hides while it is open. */
   private showPage(v: boolean): void {
     for (const n of [this.scroll, this.band, this.titlePlate, this.closeBtn]) if (n) n.visible = v;
   }
 
-  private buildCard(slot: number, w: number, h: number, em: number): Container {
+  /** A portrait ticket `w × h`: hero + fade + title zone on top, description, the notched dashed
+   *  separator, then volatility / price / CTA pinned to the bottom. Its CTA lands in `ctas[slot]`. */
+  buildCard(slot: number, w: number, h: number): Container {
     const bonus = this.current(slot);
-    const members = this.slots[slot];
+    const nav = this.slots[slot].length > 1;
     const price = bonus.priceMultiplier * this.host.state.bet;
     const affordable = this.isAffordable(bonus);
     const active = this.isActive(bonus);
+    const feature = bonus.type === 'feature';
+    const em = this.cardEm(h);
+    const pad = em * 1.2;
+    const inner = w - 2 * pad;
     const card = new Container();
     card.label = `bb-card-${slot}`;
-    card.addChild(new Graphics().rect(0, 0, w, h).fill(S.panel));
+    // a drag across the row ends with a tap on whatever is under the finger — ignore it
+    const tap = (fn: () => void) => () => {
+      if (!this.scroll?.didDrag) fn();
+    };
 
-    const heroW = Math.round(w * HERO_FRACTION);
-    card.addChild(this.buildHero(bonus, heroW, h, em, price, affordable));
-
-    const pad = clamp(8, em * 0.9, 14);
-    const colX = heroW + pad;
-    const colW = w - colX - pad;
-    let y = pad;
-
-    // right column, everything flush right: [‹ ›] … TITLE / bars / description … price / [CTA]
-    const nav = members.length > 1;
-    const arrow = clamp(24, em * 2, 30);
-    const right = colX + colW;
-    const title = sLabel(bonus.title, em * 1.3, S.fg);
-    const titleRoom = colW - (nav ? arrow * 2 + 6 + 10 : 0);
-    if (title.width > titleRoom) title.scale.set(titleRoom / title.width);
-    const rowH = Math.max(title.height, nav ? arrow : 0);
-    title.anchor.set(1, 0.5);
-    title.position.set(right, y + rowH / 2);
-    card.addChild(title);
-    if (nav) {
-      const g = Math.round(arrow * 0.5);
-      const prev = new SButton({ w: arrow, h: arrow, face: 'yellow', corners: SKEW.menu, glyph: sIcon('chevronLeft', g, S.ink), glyphSize: g, onTap: () => this.step(slot, -1) });
-      const next = new SButton({ w: arrow, h: arrow, face: 'yellow', corners: SKEW.menu, glyph: sIcon('chevronRight', g, S.ink), glyphSize: g, onTap: () => this.step(slot, 1) });
-      prev.label = `bb-prev-${slot}`;
-      next.label = `bb-next-${slot}`;
-      prev.position.set(colX, y + (rowH - arrow) / 2);
-      next.position.set(colX + arrow + 6, y + (rowH - arrow) / 2);
-      card.addChild(prev, next);
-    }
-    y += rowH + pad * 0.5;
-
-    if (bonus.volatility) {
-      const vol = sVolatilityRow(bonus.volatility, em);
-      vol.position.set(right - vol.width, y);
-      card.addChild(vol);
-      y += em * 1.1 + pad * 0.5;
-    }
-
-    // bottom-pinned: the price over the CTA, both flush right
-    const ctaH = clamp(30, em * 2.6, 40);
+    // bottom-up: pad, CTA, price, volatility, then the separator
+    const ctaH = em * 2.8;
     const ctaY = h - pad - ctaH;
-    const ctaLabel = bonus.type === 'feature' ? (active ? 'Deactivate' : 'Activate') : 'Buy';
-    const ctaText = this.host.t(ctaLabel);
-    const probe = sLabel(ctaText, em * 0.95, S.ink);
-    const ctaW = Math.min(colW, Math.max(120, probe.width + em * 2.4));
-    probe.destroy();
-    const cta = new STextButton(ctaText, {
-      w: ctaW,
+    const cta = new STextButton(this.host.t(feature ? (active ? 'Deactivate' : 'Activate') : 'Buy'), {
+      w: inner,
       h: ctaH,
-      kind: bonus.type === 'feature' ? 'red' : 'accent',
-      size: em * 0.95,
-      onTap: () => this.select(bonus),
+      kind: feature ? 'red' : 'accent',
+      size: em,
+      onTap: tap(() => this.select(bonus)),
     });
     cta.label = `bb-cta-${slot}`;
     cta.disabled = !affordable && !active;
-    cta.position.set(right - ctaW, ctaY);
-    card.addChild(cta);
-    this.ctas.push(cta);
-    const priceText = sValue(this.host.fmt(price), em * 1.3, S.fg);
-    if (priceText.width > colW) priceText.scale.set(colW / priceText.width);
-    priceText.position.set(right - priceText.width, ctaY - pad * 0.4 - priceText.height);
-    card.addChild(priceText);
-
-    // description fills what's left (clipped to the card), flush right
-    const descH = priceText.y - pad * 0.5 - y;
-    if (descH >= em * 1.3) {
-      const desc = sBody(bonus.description, em * 0.95, S.muted, colW, 'right');
-      const clip = new Graphics().rect(0, 0, colW, descH).fill(0xffffff);
-      const wrap = new Container();
-      wrap.position.set(colX, y);
-      desc.position.x = colW - desc.width;
-      wrap.addChild(desc, clip);
-      desc.mask = clip;
-      card.addChild(wrap);
+    cta.position.set(pad, ctaY);
+    this.ctas[slot] = cta;
+    const priceText = sValue(this.host.fmt(price), em * 2.2, S.yellow);
+    priceText.label = 'bb-price';
+    if (priceText.width > inner) priceText.scale.set(inner / priceText.width);
+    priceText.position.set((w - priceText.width) / 2, ctaY - em * 0.8 - priceText.height);
+    let above = priceText.y;
+    let vol: Container | undefined;
+    if (bonus.volatility) {
+      vol = sVolatilityRow(bonus.volatility, em);
+      vol.label = 'bb-vol';
+      vol.position.set((w - vol.width) / 2, priceText.y - em * 0.5 - vol.height);
+      above = vol.y;
     }
+    const sepY = above - em;
+
+    // body: one black plate with a notch either side at the separator, and the S drop shadow
+    const nd = em * 0.6;
+    const nh = em * 1.2;
+    const pts = [0, 0, w, 0, w, sepY - nh / 2, w - nd, sepY, w, sepY + nh / 2, w, h, 0, h, 0, sepY + nh / 2, nd, sepY, 0, sepY - nh / 2];
+    const shadow = new Graphics().poly(pts).fill({ color: S.shadow, alpha: SHADOW_ALPHA });
+    shadow.position.set(SHADOW_OFFSET, SHADOW_OFFSET);
+    const body = new Graphics().poly(pts).fill(S.plate);
+    body.label = 'bb-body';
+
+    // the title zone: two title lines from 40% down; the title wraps on words and shrinks (re-wrapped)
+    // when a word is too wide or it needs a third line
+    const titleTop = Math.round(0.4 * h);
+    const titleW = inner - (nav ? 2 * (em * 2 + em * 0.5) : 0);
+    const title = sLabel(bonus.title, em * 2, S.fg, titleW, 'center');
+    title.label = 'bb-title';
+    title.style.breakWords = false;
+    const zoneH = 2 * title.style.lineHeight;
+    const zoneBottom = titleTop + zoneH;
+    for (let s = 1; s > 0.3 && (title.width > titleW + 0.5 || title.height > zoneH + 0.5); ) {
+      s *= 0.9;
+      title.style.wordWrapWidth = titleW / s;
+      title.scale.set(s);
+    }
+    title.position.set((w - title.width) / 2, titleTop + (zoneH - title.height) / 2);
+
+    const fade = new Graphics().rect(0, titleTop, w, zoneH).fill(FADE);
+    fade.label = 'bb-fade';
+    card.addChild(shadow, body, this.buildHero(bonus, w, zoneBottom, titleTop, em, price, affordable), fade, title);
+
+    if (nav) {
+      const size = em * 2;
+      const g = Math.round(em);
+      const y = titleTop + zoneH / 2 - size / 2;
+      const prev = new SButton({ w: size, h: size, face: 'yellow', corners: SKEW.menu, glyph: sIcon('chevronLeft', g, S.ink), glyphSize: g, onTap: tap(() => this.step(slot, -1)) });
+      const next = new SButton({ w: size, h: size, face: 'yellow', corners: SKEW.menu, glyph: sIcon('chevronRight', g, S.ink), glyphSize: g, onTap: tap(() => this.step(slot, 1)) });
+      prev.label = `bb-prev-${slot}`;
+      next.label = `bb-next-${slot}`;
+      prev.position.set(pad, y);
+      next.position.set(w - pad - size, y);
+      card.addChild(prev, next);
+    }
+
+    // the description, clipped to the room above the separator (omitted when under 1.3 em)
+    const descTop = zoneBottom + em * 0.6;
+    const room = sepY - em * 0.6 - descTop;
+    if (room >= em * 1.3) {
+      const desc = sBody(bonus.description, em, S.muted, inner, 'center');
+      desc.position.set((w - desc.width) / 2, descTop);
+      const clip = new Graphics().rect(0, descTop, w, room).fill(0xffffff);
+      desc.mask = clip;
+      card.addChild(desc, clip);
+    }
+
+    // the dashed separator, notch tip to notch tip
+    const sep = new Graphics();
+    for (let x = nd; x + em * 0.5 <= w - nd; x += em * 0.9) sep.rect(x, sepY - 1, em * 0.5, 2);
+    sep.fill(S.track);
+    card.addChild(sep);
+    if (vol) card.addChild(vol);
+    card.addChild(priceText, cta);
     return card;
   }
 
-  /** The hero fills its whole third like `object-fit: cover` — the art keeps its aspect and is
-   *  cropped (top/bottom or sides) to the zone, clipped to it. A custom node is the game's own
-   *  layout and is fitted (contain) instead. */
-  private buildHero(bonus: BonusOption, w: number, h: number, em: number, price: number, affordable: boolean): Container {
+  /** The hero fills the card from the top to the title zone's bottom (`h`), clipped to it: a
+   *  thumbnail covers it like `object-fit: cover`; a custom node is the game's own layout and is
+   *  fitted (contain) above the title (`0..titleTop`); otherwise a yellow / red face with the bonus
+   *  mask. */
+  private buildHero(bonus: BonusOption, w: number, h: number, titleTop: number, em: number, price: number, affordable: boolean): Container {
     const hero = new Container();
-    hero.addChild(new Graphics().rect(0, 0, w, h).fill({ color: 0, alpha: 0 }));
-    const ix = 0;
-    const iw = w;
-    const ih = h;
+    hero.label = 'bb-hero';
     const clip = new Graphics().rect(0, 0, w, h).fill(0xffffff);
     hero.addChild(clip);
     hero.mask = clip;
-    const cover = (node: Container, nw: number, nh: number): void => {
-      const s = Math.max(iw / nw, ih / nh);
-      node.scale.set(s);
-      node.position.set(ix + (iw - nw * s) / 2, ix + (ih - nh * s) / 2);
-    };
     if (bonus.custom) {
       const node = bonus.custom({
         bonus,
@@ -283,27 +331,30 @@ export class SBuyBonusPage extends Container implements ShellLayer {
       }) as Container;
       const pad = em * 0.8;
       const b = node.getLocalBounds();
-      const s = b.width > 0 && b.height > 0 ? Math.min(1, (w - pad * 2) / b.width, (h - pad * 2) / b.height) : 1;
+      const s = b.width > 0 && b.height > 0 ? Math.min(1, (w - pad * 2) / b.width, (titleTop - pad * 2) / b.height) : 1;
       node.scale.set(s);
-      node.position.set((w - b.width * s) / 2 - b.x * s, (h - b.height * s) / 2 - b.y * s);
+      node.position.set((w - b.width * s) / 2 - b.x * s, (titleTop - b.height * s) / 2 - b.y * s);
       hero.addChild(persistent(node));
     } else if (bonus.thumbnail) {
       const slot = new Container();
+      slot.label = 'bb-thumb';
       hero.addChild(slot);
       Assets.load(bonus.thumbnail)
         .then((tex: Texture) => {
-          if (slot.destroyed) return;
+          if (slot.destroyed) return; // the page was rebuilt or closed while it loaded
           const sp = new Sprite(tex);
-          cover(sp, tex.width, tex.height);
+          const s = Math.max(w / tex.width, h / tex.height);
+          sp.scale.set(s);
+          sp.position.set((w - tex.width * s) / 2, (h - tex.height * s) / 2);
           slot.addChild(sp);
         })
         .catch(() => {});
     } else {
       const face = new Graphics().rect(0, 0, w, h).fill(bonus.type === 'feature' ? S.red : S.yellow);
       face.label = bonus.type === 'feature' ? 'bb-hero-red' : 'bb-hero-yellow';
-      const size = Math.round(Math.min(w, h) * 0.7);
+      const size = Math.round(0.6 * Math.min(w, titleTop));
       const mask = sIcon('bonus', size, bonus.type === 'feature' ? S.fg : S.ink);
-      mask.position.set((w - size) / 2, (h - size) / 2);
+      mask.position.set((w - size) / 2, (titleTop - size) / 2);
       hero.addChild(face, mask);
     }
     return hero;
@@ -375,7 +426,7 @@ export class SBuyBonusPage extends Container implements ShellLayer {
     ]);
     modal.build();
     this.confirm = modal;
-    this.addChild(modal);
+    this.addChild(modal); // over the stage, unscaled: the modal sizes itself to the screen
     this.showPage(false);
   }
 
@@ -417,11 +468,13 @@ export class SBuyBonusPage extends Container implements ShellLayer {
       return true;
     }
     switch (e.code) {
+      case 'ArrowRight':
       case 'ArrowDown':
-        this.scroll?.scrollBy(60);
+        this.scroll?.scrollBy(this.cardSize().w + CARD_GAP);
         return true;
+      case 'ArrowLeft':
       case 'ArrowUp':
-        this.scroll?.scrollBy(-60);
+        this.scroll?.scrollBy(-(this.cardSize().w + CARD_GAP));
         return true;
       case 'Equal':
         this.stepBetBy(1);

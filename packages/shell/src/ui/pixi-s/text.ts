@@ -29,9 +29,20 @@ export function installSFont(): void {
   }
 }
 
-/** An uppercase bar label (WIN / BALANCE / BET). */
-export function sLabel(str: string, size: number, color: string = S.yellow): Text {
-  return makeText(str, { size, family: S_FAMILY, weight: '800', color, upper: true, letterSpacing: size * 0.02 });
+/** An uppercase bar label (WIN / BALANCE / BET). Wraps, one line every `round(1.1 × size)`, when
+ *  `wrapWidth` is given (the buy-bonus card titles). */
+export function sLabel(str: string, size: number, color: string = S.yellow, wrapWidth?: number, align: 'left' | 'center' | 'right' = 'left'): Text {
+  return makeText(str, {
+    size,
+    family: S_FAMILY,
+    weight: '800',
+    color,
+    upper: true,
+    letterSpacing: size * 0.02,
+    wrapWidth,
+    lineHeight: wrapWidth != null ? Math.round(size * 1.1) : undefined,
+    align,
+  });
 }
 
 /** A money / counter value. */
