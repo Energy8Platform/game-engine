@@ -209,7 +209,7 @@ and say so in the report.
 
 **Row.**
 - `rowTop = strip.top + strip.height * 1.3`; `rowBottom = band top − pad * 0.5`.
-- `cardH = Math.min(rowBottom − rowTop − ScrollBox.GUTTER, 0.62 * W / ASPECT, 640)` with
+- `cardH = Math.min(rowBottom − rowTop − ScrollBox.GUTTER, 0.70 * W / ASPECT, 640)` with
   `ASPECT = 0.5`, `cardW = Math.round(cardH * ASPECT)`, `CARD_GAP = 14`.
 - Viewport: `x = pad`, width `W − 2·pad`, height `cardH + GUTTER`, vertically centred between
   `rowTop` and `rowBottom`.
@@ -277,7 +277,7 @@ and say so in the report.
 
   Replace the layout tests with:
   - **Aspect.** At 1280×720 and 390×844 every `bb-card-*` is `|w − h/2| ≤ 1`, measured on the
-    card body. At 390×844 the width is `≤ 0.62 · 390 + 1`.
+    card body. At 390×844 the width is `≤ 0.70 · 390 + 1`.
   - **Fits, so centred.** 1280×720 with the demo's 4 slots: `scroll.maxScrollY === 0`, and the row
     is centred (left and right margins within 1). Also one slot (Review Focus 1).
   - **Overflows, so it peeks.** 390×844: `maxScrollY > 0`; the second card's left edge is inside

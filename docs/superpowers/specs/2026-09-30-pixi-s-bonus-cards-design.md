@@ -135,18 +135,21 @@ The card keeps its label `bb-card-<slot>`, and `ctas[]` stays in slot order.
 
 This replaces the `SCardModal` confirm.
 
-**Open.** Tap an affordable, inactive CTA (or activate one from the keyboard):
+**Open.** Tap an affordable, inactive CTA:
 
 - A fresh copy of that card (`buildCard` for the slot, the same size), labelled `bb-flyer`, is
   placed on the page at the original card's page-local position. The original is hidden.
-- The copy's CTA is hidden, and the rest of the copy takes no taps.
+- The copy's CTA is hidden, and the rest of the copy takes no taps. Its ‹ › (a group slot) are
+  hidden too: on the copy they would be dead buttons.
+- The row's `ScrollBox` goes `eventMode = 'none'`: no drag and no wheel scroll under the confirm.
+  The rebuild's new box starts live again.
 - One `tween` (`ui/pixi/motion-pixi`, `easeOutCubic`) of 300ms, on the host ticker:
   - the flyer moves to the centre and scales up to
     `s = min(1.3, (H − top − m) / cardH, (W − 2·m) / cardW)`, where `m = strip.top` and
     `top = 2·strip.top + strip.height` (the ✕'s bottom plus one margin), so it clears the ✕ strip;
   - it is centred horizontally, and vertically within `[top, H − m]`;
   - the scroll row, band and title plate fade from alpha 1 to 0. The ✕ stays.
-- Then the action row fades in, labelled `bb-confirm-actions`: CANCEL (`ghost`) and BUY (`accent`)
+- Then the action row fades in, labelled `bb-confirm-actions`: CANCEL (`dim`) and BUY (`accent`)
   or ACTIVATE (`red`), side by side **in the copy's CTA slot**, a child of the flyer in card units
   (so it scales with it). Each is `(cardW − 2·pad − em/2) / 2` wide and `2.8·em` tall, `em/2` apart,
   label size `em` (the card's em and pad). The row takes taps only once it is fully shown.
@@ -168,7 +171,14 @@ and cancel land in their final state at once.
 
 **Resize while open.** A changed size removes the confirm without animation and the page rebuilds.
 A same-size resize keeps an open (or opening, or closing) confirm and does nothing else: the
-renderer re-sends the same size on every bar state change (balance, win, bet …).
+renderer re-sends the same size on every bar state change (balance, win, bet …). That holds only
+while the state the confirm opened with still holds: `bet`, `balance`, `busy`, `buyBonusEnabled` and
+`activeFeature?.id`, recorded at open. When any of them differs, the same-size resize drops the
+confirm without animation and rebuilds, as a changed size does. Otherwise the flyer would show the
+old price while BUY charged the new bet, or BUY and Enter would silently do nothing.
+
+`dim` is an `STextButton` kind: an `S.track` face with `S.fg` ink, going `S.plateHover` on hover.
+A `ghost` (an `S.plate` face) would be bare text on the black card.
 
 **The row's scroll offset survives every rebuild** (a bet step, a group flip, the end of a cancel):
 `ScrollBox.scrollPos` is read before the old box goes, and the new one is `scrollBy` that much.
@@ -194,7 +204,8 @@ the scroll offset survives a rebuild.
 
 `pixi-hb/primitives/scroll.ts`: `new ScrollBox(canvas, ticker, look?, axis: 'x' | 'y' = 'y')`.
 
-- With `'y'` the behaviour is unchanged (HB and every existing S page).
+- With `'y'` the behaviour is unchanged (HB and every existing S page), except the drag slop and
+  the wheel guard below, which now apply to every list.
 - With `'x'`:
   - content is laid out from x≈0 rightward and measured by width;
   - scrolling moves `content.x`;
@@ -207,6 +218,12 @@ the scroll offset survives a rebuild.
 - **Drag deltas** are measured in the box's parent space (`parent.toLocal(e.global)`), not in
   global px, so a scaled page drags 1:1 under the finger. For an unscaled parent this is identical
   to today.
+- **Drag slop**, on both axes: a press becomes a drag (`didDrag`, which the CTAs check) once the
+  pointer is more than 4 **global** px from the press along the axis, cumulative from the press, so
+  a slow drag counts. It is measured in screen px, so a scaled-down page (k ≈ 0.51) does not shrink
+  it to 2 px and let touch jitter eat CTA taps.
+- **Wheel guard**, on both axes: the wheel is still swallowed (`preventDefault`), but it scrolls
+  nothing while the box is `eventMode = 'none'` or hidden (any ancestor `visible = false`).
 
 ## 5. Demo
 

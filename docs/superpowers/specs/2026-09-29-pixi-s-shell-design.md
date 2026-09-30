@@ -36,13 +36,15 @@ packages/shell/
     ├── theme.ts        ← S palette (fixed, like HB)
     ├── fonts.ts        ← generated
     ├── text.ts         ← installSFont(), S text styles (label, value)
-    ├── icons.ts        ← S glyphs: mask, play, bolt (hand-written SVG fragments)
+    ├── icons-sheet.ts  ← generated from icons-s.svg by scripts/gen-s-icons.mjs
+    ├── icons.ts        ← sIcon → SGlyph: the sheet's glyphs + a hand-drawn `play`
     ├── slab.ts         ← the slab primitive (skewed quad + shadow)
     └── SideBar.ts      ← the bar: wide + mobile layouts, safe area, menu anchor
 ```
 
-Everything else comes from `../pixi-hb/` (renderer, overlays, `IconView`, HB icons for `spin` /
-`close` / `stop` / `menu` / `minus` / `plus`) and `../pixi/` (`FlexBox`, motion, context).
+Everything else comes from `../pixi-hb/` (renderer, overlays, and HB's `makeIcon` for the three
+glyphs the S sheet has none of — sound, music and info, in game info only) and `../pixi/`
+(`FlexBox`, motion, context).
 
 Exports:
 
@@ -137,11 +139,11 @@ new Slab(w: number, h: number, opts: {
 | WIN / BALANCE | black, 280×54 (label 15, value 26) | yellow caps label (`t('Win')` / `t('Balance')`), white value |
 | TOTAL WIN (FS) | as WIN | label `t('Total win')` |
 | BET | black, 290×46 (label 14, value 24) | yellow `minus` · yellow caps `t('Bet')` · white value · yellow `plus` |
-| BUY | yellow, SPIN's size and shape | black `mask` glyph; feature active: red face, white `close` |
+| BUY | yellow, SPIN's size and shape | black `bonus` glyph; feature active: red face, white `close` |
 | SPIN | yellow, 174×126 | black `spin` glyph; busy: glyph spins (HB behaviour) |
 | FS counter (replaces SPIN) | yellow, SPIN's size | black label `t('Free spins')` + value `3 / 10` (or `state.bonus` label/value) |
 | autoplay tab | black parallelogram, 34×34 (mobile 29×30), a 4px seam from SPIN's slanted left edge | white `play`; running: yellow face, black `stop` |
-| turbo tab | black, under the autoplay tab | `bolt`: L0 white; L1 yellow glyph; L2 yellow face, black glyph |
+| turbo tab | black, under the autoplay tab | `turbo`: L0 white; L1 yellow glyph; L2 yellow face, black glyph |
 
 Sizes are desktop design units, before the fit scale (section 5).
 
@@ -174,7 +176,7 @@ The bar is laid out in rows (the user's call after the second demo, 2026-09-29: 
 ```
 [≡]
 ┌──────────────────┐                ▶ ┌──────────────────┐
-│    BUY (mask)    │                ⚡ │       SPIN       │
+│   BUY (bonus)    │                ⚡ │       SPIN       │
 └──────────────────┘                   └──────────────────┘
 [БАЛАНС   $1,000.00  ]  [ВЫИГРЫШ $0.00]  [− СТАВКА $1.00 +]
 ```
@@ -222,7 +224,7 @@ The bar is laid out in rows (the user's call after the second demo, 2026-09-29: 
   columns (there is no gap between the columns to hold it). Side padding is 10 and bottom
   padding is 8.
 - **BUY is spin-sized.** On mobile BUY uses SPIN's slab size and lean (105×90),
-  shows the mask glyph large (76), and sits left, level with SPIN. Outside base mode BUY is
+  shows the `bonus` glyph large (66), and sits left, level with SPIN. Outside base mode BUY is
   hidden; its slot stays (TOTAL WIN takes it in free spins).
 - Mobile design sizes: menu 52×38, readouts 172×44 (label 11, value 17), BET 186×40, SPIN and BUY
   105×90, tabs 29×30. Left column (172) + gap (12) + right column (186) = 370 = 390 − 2·10.
@@ -253,18 +255,21 @@ The controller already picks the layout (`h > w` gives mobile). SideBar branches
 
 ## 7. Icons
 
-`icons.ts` holds three solid 24×24 SVG fragments with one colour slot (`currentColor`):
+The S glyphs come from the user's sheet, `packages/shell/icons-s.svg` (solid black glyphs on an
+Illustrator canvas). `node scripts/gen-s-icons.mjs` converts it into `src/ui/pixi-s/icons-sheet.ts`:
+24×24 fragments with one colour slot (`currentColor`), each fitted into the box and centred. The
+sheet gives `turbo`, `spin`, `plus`, `minus`, `stop`, `menu`, `close`, `bonus` (the mask; its white
+details are real holes) and `chevronLeft` / `chevronRight` (both rotated from the one authored
+`chevron`). The generator rejects a path command it does not handle. To change an icon, edit the
+sheet and re-run the script; never edit `icons-sheet.ts` by hand.
 
-- `mask`: the reference's stylised mask with two eye slits, drawn by hand to match the screenshot.
-- `play`: a solid triangle.
-- `bolt`: a single solid lightning bolt.
+`icons.ts` adds `play` (a solid triangle, hand-drawn — the sheet has none). `sIcon(name, size,
+color)` returns an `SGlyph`: a container with `iconName` and a `spin` angle, which turns the glyph
+about its own centre. It wraps the fragment in `<svg viewBox="0 0 24 24">`, parses it once per
+`name|color` into a cached, shared `GraphicsContext`, and scales it to `size`.
 
-`sIcon(name, size, color): Graphics` renders them: it wraps the fragment in `<svg viewBox="0 0 24
-24">`, parses it once per `name|color` into a cached `GraphicsContext`, and scales it to `size`.
-HB's `IconView` is typed to HB's names and stays untouched.
-
-`spin`, `stop`, `close`, `menu`, `minus` and `plus` come from HB's set through `makeIcon`. The mask
-is fixed in this slice. The config has no per-game icon override, and none is added.
+HB glyphs (`makeIcon`) appear only for sound, music and info, in game info's controls list, since
+the sheet has none of them. The config has no per-game icon override, and none is added.
 
 ## 8. Testing
 
