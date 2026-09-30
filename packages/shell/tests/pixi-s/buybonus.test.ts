@@ -64,6 +64,22 @@ describe('S buy bonus page', () => {
     expect(closeLayer).toHaveBeenCalled();
   });
 
+  it('I3: while the confirm is open the list, band, title plate and ✕ are hidden; Escape brings them back', () => {
+    const { page: p } = page();
+    const parts = p as unknown as { scroll: Container; band: Container; titlePlate: Container; closeBtn: Container; confirm?: unknown };
+    const shown = () => [parts.scroll.visible, parts.band.visible, parts.titlePlate.visible, parts.closeBtn.visible];
+    expect(shown()).toEqual([true, true, true, true]);
+    p.ctas[1].emit('pointertap', {});
+    expect(parts.confirm).toBeDefined();
+    expect(shown()).toEqual([false, false, false, false]);
+    p.onKey({ code: 'Escape' } as KeyboardEvent);
+    expect(parts.confirm).toBeUndefined();
+    expect(shown()).toEqual([true, true, true, true]);
+    p.ctas[1].emit('pointertap', {});
+    p.resize(1280, 720); // a resize drops the confirm and rebuilds the page — visible again
+    expect(shown()).toEqual([true, true, true, true]);
+  });
+
   it('an unaffordable option disables its CTA', () => {
     const { page: p, host } = page();
     host.state.balance = 1;

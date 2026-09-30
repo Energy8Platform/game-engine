@@ -1,10 +1,11 @@
 import '../pixi/setup-canvas'; // must be first — patches canvas getContext before pixi.js loads
 import { describe, it, expect, vi } from 'vitest';
-import { Graphics, type Container } from 'pixi.js';
+import { Container, Graphics, Point } from 'pixi.js';
 import { SButton } from '@/ui/pixi-s/widgets';
-import { stripMetrics } from '@/ui/pixi-s/primitives/page';
+import { stripMetrics, closeCorner, SPage } from '@/ui/pixi-s/primitives/page';
 import { SCardModal } from '@/ui/pixi-s/primitives/card';
-import { SChip, STextButton, STitlePlate } from '@/ui/pixi-s/primitives/controls';
+import { STextButton, STitlePlate } from '@/ui/pixi-s/primitives/controls';
+import { openSBuyBonus } from '@/ui/pixi-s/components/BuyBonus';
 import { openSBetPicker, openSAutoplayPicker, type SPicker } from '@/ui/pixi-s/components/pickers';
 import { buildSModal } from '@/ui/pixi-s/components/Modal';
 import { buildSReplayModal } from '@/ui/pixi-s/components/ReplayModal';
@@ -30,10 +31,10 @@ describe('S card modal', () => {
     expect(m.body.children.length).toBe(0); // the title is not a body row (§5.6)
     const t = m.titlePlate!;
     expect(t.x + t.measureSize().w / 2).toBeCloseTo(m.cardWidth / 2, 0);
-    const strip = stripMetrics(720);
+    const c = closeCorner(1280, 720);
     expect(m.closeBtn!.parent).toBe(m);
-    expect(m.closeBtn!.x + strip.height).toBeCloseTo(1280 - strip.top, 0);
-    expect(m.closeBtn!.y).toBeCloseTo(strip.top, 0);
+    expect(m.closeBtn!.x).toBeCloseTo(c.x, 0);
+    expect(m.closeBtn!.y).toBeCloseTo(c.y, 0);
   });
 
   it('R3: the ✕ plate is at least 44 (it is its own hit area)', () => {
@@ -53,12 +54,21 @@ describe('S card modal', () => {
     const m = new SCardModal(makeContext({ screenW: 1280, screenH: 720 }), { title: 'Bet', onClose: () => {} });
     m.build();
     m.resize(390, 844);
-    const strip = stripMetrics(844);
+    const c = closeCorner(390, 844);
     const b = m.closeBtn as unknown as SButton;
     expect(b.parent).toBe(m);
-    expect(b.measureSize().w).toBe(strip.height);
-    expect(b.x + strip.height).toBeCloseTo(390 - strip.top, 0);
-    expect(b.y).toBeCloseTo(strip.top, 0);
+    expect(b.measureSize().w).toBe(stripMetrics(844).height);
+    expect(b.x).toBeCloseTo(c.x, 0);
+    expect(b.y).toBeCloseTo(c.y, 0);
+  });
+
+  it('M2: resize() at the laid-out size keeps the ✕ (a bar-driven resize mid-press must not destroy it)', () => {
+    const m = new SCardModal(makeContext({ screenW: 1280, screenH: 720 }), { title: 'Bet', onClose: () => {} });
+    m.build();
+    const before = m.closeBtn;
+    m.resize(1280, 720);
+    expect(m.closeBtn === before).toBe(true); // identity (a failing toBe would serialise the pixi tree)
+    expect(before!.destroyed).toBe(false);
   });
 
   it('fit(): a tall body on a short screen scales the content block down and keeps it on screen', () => {
@@ -71,6 +81,8 @@ describe('S card modal', () => {
     const bb = root.getBounds();
     expect(bb.y).toBeGreaterThanOrEqual(0);
     expect(bb.y + bb.height).toBeLessThanOrEqual(225);
+    expect(bb.x).toBeGreaterThanOrEqual(0);
+    expect(bb.x + bb.width).toBeLessThanOrEqual(400);
   });
 
   it('not closable: no ✕', () => {
@@ -98,7 +110,6 @@ describe('S pickers, modal, replay', () => {
     const p = openSBetPicker(host) as unknown as SPicker;
     expect(p.slider.index).toBe(1);
     expect(p.valuePlate.labelText.text).toBe('€1.00');
-    expect(all(p, SChip).length).toBe(0); // no chips any more
     p.onKey({ code: 'ArrowRight' } as KeyboardEvent);
     expect(p.valuePlate.labelText.text).toBe('€2.00');
     p.onKey({ code: 'Enter' } as KeyboardEvent);
@@ -108,9 +119,9 @@ describe('S pickers, modal, replay', () => {
   it('picker layout (R4): title plate centred, ✕ in the corner, value plate over the thumb within the slider, no backing', () => {
     const host = makeContext({ screenW: 1280, screenH: 720, config: defaultConfig({ availableBets: [0.5, 1, 2, 5], defaultBet: 0.5 }) });
     const p = openSBetPicker(host) as unknown as SPicker;
-    expect(p.titlePlate.x + p.titlePlate.measureSize().w / 2).toBeCloseTo(640, 0);
-    const strip = stripMetrics(720);
-    expect(p.closeBtn.x + p.closeBtn.measureSize().w).toBeCloseTo(1280 - strip.top, 0);
+    expect(p.titlePlate.toGlobal(new Point(p.titlePlate.measureSize().w / 2, 0)).x).toBeCloseTo(640, 0);
+    expect(p.titlePlate.measureSize().h).toBe(Math.round(stripMetrics(720).height)); // M1: the ✕'s height
+    expect(p.closeBtn.x).toBeCloseTo(closeCorner(1280, 720).x, 0);
     const s = p.slider.getBounds();
     const v = p.valuePlate.getBounds();
     expect(v.x).toBeGreaterThanOrEqual(s.x - 0.5); // index 0: clamped to the slider's left end
@@ -121,13 +132,74 @@ describe('S pickers, modal, replay', () => {
     expect(v2.x + v2.width).toBeLessThanOrEqual(s.x + s.width + 3.5); // last index: clamped (+ shadow)
   });
 
+  it('I1: on a 400×226 screen the picker block fit-scales — CONFIRM and the title are on screen', () => {
+    const host = makeContext({ screenW: 400, screenH: 226, config: defaultConfig({ availableBets: [0.5, 1, 2, 5], defaultBet: 1 }) });
+    const p = openSBetPicker(host) as unknown as SPicker;
+    for (const n of [p.confirm, p.titlePlate, p.slider, p.valuePlate]) {
+      const b = n.getBounds();
+      expect(b.x).toBeGreaterThanOrEqual(0);
+      expect(b.y).toBeGreaterThanOrEqual(0);
+      expect(b.x + b.width).toBeLessThanOrEqual(400);
+      expect(b.y + b.height).toBeLessThanOrEqual(226);
+    }
+    const s = p.slider.getBounds();
+    const v = p.valuePlate.getBounds();
+    expect(v.y + v.height).toBeLessThanOrEqual(s.y + 0.5); // the plate still rides above the slider
+    const t = p.titlePlate.getBounds();
+    expect(t.x + t.width).toBeLessThanOrEqual(p.closeBtn.x); // level with the ✕, the title keeps clear of it
+    // on a phone the title sits well below the ✕, so it keeps its full 3h width
+    const phone = openSBetPicker(makeContext({ screenW: 390, screenH: 844 })) as unknown as SPicker;
+    expect(phone.titlePlate.measureSize().w).toBe(Math.round(3 * stripMetrics(844).height));
+  });
+
+  it('I2: an off-list bet shows the nearest level; Confirm without moving keeps the bet; a step then confirms the level', () => {
+    const emit = vi.fn();
+    const config = defaultConfig({ availableBets: [0.2, 0.5, 1, 2, 5], defaultBet: 1 });
+    const host = makeContext({ emit, screenW: 1280, screenH: 720, config });
+    host.state.bet = 1_000_000;
+    const p = openSBetPicker(host) as unknown as SPicker;
+    expect(p.slider.index).toBe(4);
+    expect(p.valuePlate.labelText.text).toBe('€5.00');
+    p.onKey({ code: 'Enter' } as KeyboardEvent);
+    expect(emit).not.toHaveBeenCalledWith('betChange', expect.anything());
+    expect(host.state.bet).toBe(1_000_000);
+    const q = openSBetPicker(host) as unknown as SPicker;
+    q.onKey({ code: 'ArrowRight' } as KeyboardEvent); // already at the end — still a deliberate step
+    q.onKey({ code: 'Enter' } as KeyboardEvent);
+    expect(emit).toHaveBeenCalledWith('betChange', 5);
+    host.state.bet = 0.7; // nearest is 0.5
+    const r = openSBetPicker(host) as unknown as SPicker;
+    expect(r.valuePlate.labelText.text).toBe('€0.50');
+  });
+
+  it('I2: the autoplay picker shows the nearest count; ∞ only when the remaining count is ∞', () => {
+    const host = makeContext({ screenW: 1280, screenH: 720, config: defaultConfig({ features: { turbo: 0, autoplay: {}, buyBonus: false } }) });
+    host.state.autoplay = { active: true, remaining: 37 };
+    expect((openSAutoplayPicker(host) as unknown as SPicker).valuePlate.labelText.text).toBe('25');
+    host.state.autoplay = { active: true, remaining: 5000 };
+    expect((openSAutoplayPicker(host) as unknown as SPicker).valuePlate.labelText.text).toBe('2000');
+    host.state.autoplay = { active: true, remaining: Infinity };
+    expect((openSAutoplayPicker(host) as unknown as SPicker).valuePlate.labelText.text).toBe('∞');
+  });
+
+  it('M2: resize() at the laid-out size keeps the slider (a bar-driven resize mid-drag must not destroy it)', () => {
+    const host = makeContext({ screenW: 1280, screenH: 720 });
+    const p = openSBetPicker(host) as unknown as SPicker;
+    const slider = p.slider;
+    p.resize(1280, 720);
+    expect(p.slider === slider).toBe(true);
+    expect(slider.destroyed).toBe(false);
+    p.resize(390, 844);
+    expect(p.slider === slider).toBe(false);
+  });
+
   it('autoplay picker: counts incl. ∞ on the slider; START confirms', () => {
     const emit = vi.fn();
     const host = makeContext({ emit, screenW: 1280, screenH: 720, config: defaultConfig({ features: { turbo: 0, autoplay: {}, buyBonus: false } }) });
     const p = openSAutoplayPicker(host) as unknown as SPicker;
     expect(p.titlePlate.labelText.text).toBe('AUTOPLAY');
-    p.slider.setIndex(8);
-    (p as unknown as { sync(): void }).sync();
+    (p.slider as unknown as { setFromX(x: number): void }).setFromX(1e6); // a drag to the far end
+    expect(p.slider.index).toBe(8);
     expect(p.valuePlate.labelText.text).toBe('∞');
     p.confirm.emit('pointertap', {});
     expect(emit).toHaveBeenCalledWith('autoplayStart', { active: true, remaining: Infinity });
@@ -165,5 +237,33 @@ describe('S pickers, modal, replay', () => {
     await Promise.resolve();
     await Promise.resolve();
     expect(reopen).toHaveBeenCalled();
+  });
+});
+
+describe('the shared ✕ corner (I4)', () => {
+  it('card modal, pickers, the page and buy bonus put ✕ at closeCorner(), inboard of the scrollbar gutter', () => {
+    for (const [W, H] of [[1280, 720], [390, 844], [400, 226]]) {
+      const host = makeContext({
+        screenW: W,
+        screenH: H,
+        config: defaultConfig({ balance: 1000, features: { turbo: 0, autoplay: {}, buyBonus: [{ id: 'fs', type: 'bonus', title: 'FS', description: 'd', priceMultiplier: 10 }] } }),
+      });
+      const card = new SCardModal(host, { title: 'Bet', onClose: () => {} });
+      card.build();
+      const page = new SPage(host, { tag: 'p', title: 'Info', onClose: () => {}, build: () => new Container() });
+      const btns = [
+        card.closeBtn!,
+        (openSBetPicker(host) as unknown as SPicker).closeBtn,
+        (openSAutoplayPicker(host) as unknown as SPicker).closeBtn,
+        page.closeBtn!,
+        (openSBuyBonus(host) as unknown as { closeBtn: Container }).closeBtn,
+      ];
+      const c = closeCorner(W, H);
+      for (const b of btns) {
+        expect(b.x).toBeCloseTo(c.x, 5);
+        expect(b.y).toBeCloseTo(c.y, 5);
+        expect((b as SButton).measureSize().w).toBe(Math.round(c.size));
+      }
+    }
   });
 });

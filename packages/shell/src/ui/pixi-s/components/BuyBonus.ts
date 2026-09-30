@@ -9,7 +9,7 @@ import { ScrollBox } from '../../pixi-hb/primitives/scroll';
 import { makeIcon } from '../../pixi-hb/pixi-icon';
 import { SCardModal } from '../primitives/card';
 import { STitlePlate, STextButton, sCloseButton, S_SCROLL } from '../primitives/controls';
-import { stripMetrics } from '../primitives/page';
+import { stripMetrics, closeCorner } from '../primitives/page';
 import { SButton, SReadout, SBet } from '../widgets';
 import { SKEW } from '../slab';
 import { sIcon } from '../icons';
@@ -116,8 +116,9 @@ export class SBuyBonusPage extends Container implements ShellLayer {
     const m = strip.top;
     this.titlePlate = new STitlePlate(this.host.t('Buy bonus'), strip.height, this.w - m * 4 - strip.height - ScrollBox.GUTTER);
     this.titlePlate.position.set(m, m);
-    this.closeBtn = sCloseButton(strip.height, () => this.host.closeLayer());
-    this.closeBtn.position.set(this.w - m - ScrollBox.GUTTER - strip.height, m);
+    const c = closeCorner(this.w, this.h);
+    this.closeBtn = sCloseButton(c.size, () => this.host.closeLayer());
+    this.closeBtn.position.set(c.x, c.y);
     this.addChild(this.titlePlate, this.closeBtn);
     const top = strip.top + strip.height * 1.3;
     const betH = Math.min(BET_BAND_H, this.h * 0.16);
@@ -158,6 +159,12 @@ export class SBuyBonusPage extends Container implements ShellLayer {
     band.addChildAt(bg, 0);
     band.position.set((this.w - bandW) / 2, this.h - betH - pad * 0.5);
     this.band.addChild(band);
+    this.showPage(!this.confirm);
+  }
+
+  /** The confirm has no backing, so the page under it (list, band, plates) hides while it is open. */
+  private showPage(v: boolean): void {
+    for (const n of [this.scroll, this.band, this.titlePlate, this.closeBtn]) if (n) n.visible = v;
   }
 
   private buildCard(slot: number, w: number, h: number, em: number): Container {
@@ -370,6 +377,7 @@ export class SBuyBonusPage extends Container implements ShellLayer {
     modal.build();
     this.confirm = modal;
     this.addChild(modal);
+    this.showPage(false);
   }
 
   private commit(bonus: BonusOption): void {
@@ -385,6 +393,7 @@ export class SBuyBonusPage extends Container implements ShellLayer {
       this.confirm.destroy({ children: true });
       this.confirm = undefined;
       this.confirmBonus = undefined;
+      this.showPage(true);
     }
   }
 

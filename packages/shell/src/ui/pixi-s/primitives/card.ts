@@ -4,7 +4,7 @@ import { FlexBox } from '../../pixi/primitives/flex';
 import type { CardAction, CardOpts } from '../../pixi-hb/primitives/card';
 import { STitlePlate, STextButton, sCloseButton, type SButtonKind } from './controls';
 import { S } from '../theme';
-import { stripMetrics } from './page';
+import { closeCorner } from './page';
 
 /** Fraction of the screen a card modal may occupy (HB's MODAL_FIT). */
 const MODAL_FIT = 0.86;
@@ -39,6 +39,8 @@ export class SCardModal extends Container implements ShellLayer {
   private cardH = 0;
   /** Title plate height. */
   private headH: number;
+  /** The screen size the ✕ was last placed for. */
+  private closeFor = '';
 
   constructor(host: PixiComponentContext, opts: CardOpts) {
     super();
@@ -109,17 +111,20 @@ export class SCardModal extends Container implements ShellLayer {
     this.fit();
   }
 
+  /** (Re)build ✕ at the shared corner — skipped at an unchanged size, so a same-size resize mid-press
+   *  doesn't destroy it. */
   private placeClose(w: number, h: number): void {
-    if (!this.onClose) return;
+    if (!this.onClose || this.closeFor === `${w}x${h}`) return;
+    this.closeFor = `${w}x${h}`;
     const onClose = this.onClose;
-    const strip = stripMetrics(h);
+    const c = closeCorner(w, h);
     this.closeBtn?.destroy({ children: true });
-    this.closeBtn = sCloseButton(strip.height, () => onClose());
-    this.closeBtn.position.set(w - strip.top - strip.height, strip.top);
+    this.closeBtn = sCloseButton(c.size, () => onClose());
+    this.closeBtn.position.set(c.x, c.y);
     this.addChild(this.closeBtn);
   }
 
-  /** Scale the card down to fit a short / narrow popout and keep it centred . */
+  /** Scale the card down to fit a short / narrow popout and keep it centred. */
   fit(): void {
     const W = this.host.screenW;
     const H = this.host.screenH;

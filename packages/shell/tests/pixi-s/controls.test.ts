@@ -1,11 +1,10 @@
 import '../pixi/setup-canvas'; // must be first — patches canvas getContext before pixi.js loads
 import { describe, it, expect, vi } from 'vitest';
 import type { Graphics } from 'pixi.js';
-import { STitlePlate, sCloseButton, STextButton, SChip, SSlider, SStepSlider, SToggle, S_SCROLL } from '@/ui/pixi-s/primitives/controls';
+import { STitlePlate, sCloseButton, STextButton, SSlider, SStepSlider, SToggle, S_SCROLL } from '@/ui/pixi-s/primitives/controls';
 import { sBody } from '@/ui/pixi-s/text';
 import { FONT_FAMILY } from '@/ui/pixi-hb/text';
 import { S, DISABLED_ALPHA } from '@/ui/pixi-s/theme';
-import { makeContext } from '../pixi/_host';
 
 const tap = (n: { emit(e: string, ...a: unknown[]): unknown }) => n.emit('pointertap', {});
 
@@ -46,19 +45,6 @@ describe('S overlay primitives', () => {
     tap(a);
     expect(onTap).not.toHaveBeenCalled();
     expect(a.alpha).toBe(DISABLED_ALPHA);
-  });
-
-  it('a chip is a plate with an fg value; selected turns it yellow with ink; it resizes to its column', () => {
-    const onTap = vi.fn();
-    const c = new SChip(makeContext(), '2', '€2.00', false, 14, onTap);
-    expect(c.labelText.style.fill).toBe(S.fg);
-    c.setSelected(true);
-    expect(c.selected).toBe(true);
-    expect(c.labelText.style.fill).toBe(S.ink);
-    c.setLayoutSize(90, undefined);
-    expect(c.measureSize().w).toBe(90);
-    tap(c);
-    expect(onTap).toHaveBeenCalledWith('2');
   });
 
   it('the slider: an 8-thick full-width track and a 12×24 yellow rect thumb; setValue moves it without firing', () => {
@@ -107,5 +93,13 @@ describe('S overlay primitives', () => {
     one.layout(300, 40);
     expect(Number.isFinite(one.thumbCenterX)).toBe(true);
     expect(one.thumbCenterX).toBeCloseTo(tw / 2, 5);
+  });
+
+  it('M3: SStepSlider hit area is at least 44 tall, centred on the track', () => {
+    const s = new SStepSlider(3, 0, () => {});
+    s.layout(300, 30);
+    expect(s.hitArea).toMatchObject({ x: 0, y: -7, width: 300, height: 44 });
+    s.layout(300, 60);
+    expect(s.hitArea).toMatchObject({ x: 0, y: 0, width: 300, height: 60 });
   });
 });

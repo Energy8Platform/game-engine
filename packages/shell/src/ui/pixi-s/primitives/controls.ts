@@ -1,13 +1,12 @@
 import { Container, Graphics, Rectangle, type FederatedPointerEvent, type Text } from 'pixi.js';
 import type { Sizable } from '../../pixi/primitives/flex';
-import type { PixiComponentContext } from '../../pixi/context';
 import type { ScrollLook } from '../../pixi-hb/primitives/scroll-affordance';
 import { attachHover, attachPress } from '../../pixi-hb/primitives/widgets';
 import { makeIcon } from '../../pixi-hb/pixi-icon';
-import { Slab, SKEW, slabPoints, SHADOW_OFFSET } from '../slab';
+import { Slab, SKEW, slabPoints } from '../slab';
 import { SButton } from '../widgets';
-import { sLabel, sValue } from '../text';
-import { S, SHADOW_ALPHA, DISABLED_ALPHA } from '../theme';
+import { sLabel } from '../text';
+import { S, DISABLED_ALPHA } from '../theme';
 
 // S overlay controls: every surface a flat or leaning plate, sharp corners, no outlines.
 
@@ -113,61 +112,6 @@ export class STextButton extends Container implements Sizable {
   }
   setLayoutSize(): void {
     /* fixed size */
-  }
-}
-
-/** A picker chip — same API as HB `Chip`: a plate with the value in fg; selected = yellow + ink.
- *  The picker sets every chip to its column width, so the slab is redrawn on resize. */
-export class SChip extends Container implements Sizable {
-  readonly id: string;
-  readonly labelText: Text;
-  private shadow = new Graphics();
-  private face = new Graphics();
-  private _on: boolean;
-  private hovering = false;
-  private w: number;
-  private h: number;
-
-  constructor(_host: PixiComponentContext, id: string, label: string, selected: boolean, em: number, onTap: (id: string) => void) {
-    super();
-    this.id = id;
-    this._on = selected;
-    this.labelText = sValue(label, em, S.fg);
-    this.w = Math.ceil(this.labelText.width + em * 2);
-    this.h = Math.round(em * 2.6);
-    this.shadow.position.set(SHADOW_OFFSET, SHADOW_OFFSET);
-    this.addChild(this.shadow, this.face, this.labelText);
-    this.eventMode = 'static';
-    this.cursor = 'pointer';
-    attachHover(this, () => { this.hovering = true; this.paint(); }, () => { this.hovering = false; this.paint(); });
-    this.on('pointertap', () => onTap(this.id));
-    this.paint();
-  }
-
-  get selected(): boolean {
-    return this._on;
-  }
-  setSelected(v: boolean): void {
-    this._on = v;
-    this.paint();
-  }
-
-  private paint(): void {
-    const pts = slabPoints(this.w, this.h, SKEW.menu);
-    this.shadow.clear().poly(pts).fill({ color: S.shadow, alpha: SHADOW_ALPHA });
-    this.face.clear().poly(pts).fill(this._on ? S.yellow : this.hovering ? S.plateHover : S.plate);
-    this.labelText.style.fill = this._on ? S.ink : S.fg;
-    this.labelText.position.set((this.w - this.labelText.width) / 2, (this.h - this.labelText.height) / 2);
-    this.hitArea = new Rectangle(0, 0, this.w, this.h);
-  }
-
-  setLayoutSize(w: number | undefined, h?: number | undefined): void {
-    if (w != null) this.w = w;
-    if (h != null) this.h = h;
-    this.paint();
-  }
-  measureSize(): { w: number; h: number } {
-    return { w: this.w, h: this.h };
   }
 }
 
@@ -370,7 +314,8 @@ export class SStepSlider extends Container implements Sizable {
     const tw = this.thumbW;
     const x = this.thumbCenterX - tw / 2;
     this.thumb.clear().poly(slabPoints(tw, this.h, SKEW.menu).map((v, i) => (i % 2 === 0 ? v + x : v))).fill(S.yellow);
-    this.hitArea = new Rectangle(0, 0, this.w, this.h);
+    const hitH = Math.max(this.h, 44); // a 44 touch target even when the slider is drawn thinner
+    this.hitArea = new Rectangle(0, (this.h - hitH) / 2, this.w, hitH);
   }
 
   measureSize(): { w: number; h: number } {

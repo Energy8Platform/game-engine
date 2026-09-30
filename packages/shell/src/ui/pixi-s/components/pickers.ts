@@ -3,12 +3,13 @@ import type { PixiComponentContext, ShellLayer } from '../../pixi/context';
 import { Slab, SKEW } from '../slab';
 import type { SButton } from '../widgets';
 import { STitlePlate, STextButton, SStepSlider, sCloseButton } from '../primitives/controls';
-import { stripMetrics } from '../primitives/page';
+import { stripMetrics, closeCorner } from '../primitives/page';
 import { sValue } from '../text';
 import { S } from '../theme';
 
 // The S bet / autoplay pickers (R4): a full-screen layer with no card — a centred title plate, ✕ in the
-// corner, a yellow value plate riding above a stepped slider, and a confirm button. Keys as HB's.
+// shared corner, a yellow value plate riding above a stepped slider, and a confirm button; the block
+// fit-scales to a short screen. Keys as HB's.
 
 interface Choice {
   id: string;
@@ -44,6 +45,21 @@ class ValuePlate extends Container {
   }
 }
 
+/** The choice matching `selected`, else the numerically nearest one (ids are numbers; ∞ is only
+ *  nearest to ∞). */
+function nearestIndex(choices: Choice[], selected: string): number {
+  const exact = choices.findIndex((c) => c.id === selected);
+  if (exact >= 0) return exact;
+  const v = Number(selected);
+  let best = 0;
+  let bestD = Infinity;
+  choices.forEach((c, i) => {
+    const d = Math.abs(Number(c.id) - v);
+    if (d < bestD) [best, bestD] = [i, d];
+  });
+  return best;
+}
+
 function clampEm(w: number, h: number): number {
   return Math.max(11, Math.min(15, Math.min(w, h) * 0.02));
 }
@@ -59,60 +75,77 @@ export class SPicker extends Container implements ShellLayer {
   private host: PixiComponentContext;
   private opts: PickerOpts;
   private index: number;
+  /** Set by any slider / keyboard step; until then Confirm keeps the current value (HB's no-op). */
+  private moved = false;
+  /** The screen size last laid out for. */
+  private laidOut = '';
 
   constructor(host: PixiComponentContext, opts: PickerOpts) {
     super();
     this.host = host;
     this.opts = opts;
     this.tag = opts.tag;
-    const i = opts.choices.findIndex((c) => c.id === opts.selected);
-    this.index = i < 0 ? 0 : i;
+    this.index = nearestIndex(opts.choices, opts.selected);
     this.veil.eventMode = 'static'; // swallow taps to the game behind
     this.addChild(this.veil);
     this.resize(host.screenW, host.screenH);
   }
 
   resize(w: number, h: number): void {
-    if (this.children.length > 1) this.removeChildren(1).forEach((c) => c.destroy({ children: true }));
     this.veil.clear().rect(0, 0, w, h).fill(S.veil);
     this.veil.hitArea = new Rectangle(0, 0, w, h);
+    // a same-size resize (the bar re-rendering) must not rebuild the slider out from under a drag
+    if (this.laidOut === `${w}x${h}`) return;
+    this.laidOut = `${w}x${h}`;
+    if (this.children.length > 1) this.removeChildren(1).forEach((c) => c.destroy({ children: true }));
     const em = clampEm(w, h);
     const strip = stripMetrics(h);
+    const corner = closeCorner(w, h);
 
-    this.closeBtn = sCloseButton(strip.height, () => this.host.closeLayer());
-    this.closeBtn.position.set(w - strip.top - strip.height, strip.top);
+    this.closeBtn = sCloseButton(corner.size, () => this.host.closeLayer());
+    this.closeBtn.position.set(corner.x, corner.y);
 
-    const titleH = Math.round(em * 3);
-    this.titlePlate = new STitlePlate(this.opts.title, titleH, w - strip.height * 2 - strip.top * 4);
+    const titleH = strip.height; // the title plate is one strip tall (≈ the ✕)
     const sliderW = Math.round(Math.min(620, w * 0.7));
     const sliderH = Math.round(em * 3.2);
     const plateH = Math.round(em * 3.6);
+    const btnW = Math.round(Math.min(sliderW, em * 16));
+    const btnH = Math.round(em * 3);
+    const gapA = em * 3;
+    const gapB = em * 0.5;
+    const gapC = em * 2;
+    // the block (title · gap · value plate · slider · gap · confirm) is laid out in its own units, then
+    // fit-scaled to the screen height inside the strip margins and centred
+    const blockH = titleH + gapA + plateH + gapB + sliderH + gapC + btnH;
+    const k = Math.min(1, (h - 2 * strip.top) / blockH);
+    const top = (h - blockH * k) / 2;
+    // a title level with the ✕ keeps clear of it on both sides; lower down it only keeps the margins
+    const titleMaxW = top < corner.y + corner.size ? w - 2 * (w - corner.x) - 2 * strip.top : w - 2 * strip.top;
+    this.titlePlate = new STitlePlate(this.opts.title, titleH, titleMaxW / k);
     const widest = this.opts.choices.reduce((a, c) => (c.label.length > a.length ? c.label : a), '');
     this.valuePlate = new ValuePlate(widest, plateH);
     this.slider = new SStepSlider(this.opts.choices.length, this.index, (i) => {
       this.index = i;
+      this.moved = true;
       this.sync();
     });
     this.slider.layout(sliderW, sliderH);
-    const btnW = Math.round(Math.min(sliderW, em * 16));
-    const btnH = Math.round(em * 3);
     this.confirm = new STextButton(this.opts.confirmLabel, { w: btnW, h: btnH, kind: 'accent', size: em, onTap: () => this.doConfirm() });
 
-    // the block: title · gap · value plate · slider · gap · confirm — centred vertically
-    const gapA = em * 3;
-    const gapB = em * 0.5;
-    const gapC = em * 2;
-    const blockH = titleH + gapA + plateH + gapB + sliderH + gapC + btnH;
-    let y = Math.max(strip.top + strip.height, (h - blockH) / 2);
-    this.titlePlate.position.set((w - this.titlePlate.measureSize().w) / 2, y);
+    const blockW = Math.max(sliderW, btnW, this.titlePlate.measureSize().w);
+    const block = new Container();
+    let y = 0;
+    this.titlePlate.position.set((blockW - this.titlePlate.measureSize().w) / 2, y);
     y += titleH + gapA;
-    const sliderX = (w - sliderW) / 2;
     this.valuePlate.y = y;
     y += plateH + gapB;
-    this.slider.position.set(sliderX, y);
+    this.slider.position.set((blockW - sliderW) / 2, y);
     y += sliderH + gapC;
-    this.confirm.position.set((w - btnW) / 2, y);
-    this.addChild(this.titlePlate, this.valuePlate, this.slider, this.confirm, this.closeBtn);
+    this.confirm.position.set((blockW - btnW) / 2, y);
+    block.addChild(this.titlePlate, this.valuePlate, this.slider, this.confirm);
+    block.scale.set(k);
+    block.position.set((w - blockW * k) / 2, top);
+    this.addChild(block, this.closeBtn);
     this.sync();
   }
 
@@ -127,6 +160,7 @@ export class SPicker extends Container implements ShellLayer {
   }
 
   private step(dir: 1 | -1): void {
+    this.moved = true;
     const n = Math.max(0, Math.min(this.opts.choices.length - 1, this.index + dir));
     if (n === this.index) return;
     this.index = n;
@@ -136,7 +170,8 @@ export class SPicker extends Container implements ShellLayer {
 
   private doConfirm(): void {
     const c = this.opts.choices[this.index];
-    if (c) this.opts.onConfirm(c.id);
+    if (!this.moved) this.opts.onConfirm(this.opts.selected); // untouched: keep the current (maybe off-list) value
+    else if (c) this.opts.onConfirm(c.id);
     this.host.closeLayer();
   }
 

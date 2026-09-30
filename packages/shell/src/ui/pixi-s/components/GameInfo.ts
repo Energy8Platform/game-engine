@@ -398,7 +398,9 @@ function paytableCard(_host: PixiComponentContext, r: PaytableRow, w: number): F
   if (r.symbol.image) sym.add(imageBox(r.symbol.image, 56, 56));
   if (r.symbol.text) sym.add(sLabel(r.symbol.text, 13, S.fg));
   card.add(sym);
-  const wins = new FlexBox({ direction: 'column', align: 'stretch', gap: 2, width: w - 24 });
+  // capped so each "count … ×N" pair stays together; the card's align:center centres it under the symbol
+  const wins = new FlexBox({ direction: 'column', align: 'stretch', gap: 2, width: Math.min(w - 24, 120) });
+  wins.label = 'pt-wins';
   for (const win of r.wins) {
     const wr = new FlexBox({ direction: 'row', align: 'center', justify: 'space-between' });
     wr.add(sBody(win.count ? String(win.count) : '', 13.5, S.muted));

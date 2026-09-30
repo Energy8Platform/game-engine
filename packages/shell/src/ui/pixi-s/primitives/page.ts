@@ -13,6 +13,13 @@ export function stripMetrics(h: number): { top: number; height: number } {
   return { top: clamp(12, h * 0.03, 24), height: clamp(44, h * 0.09, 72) };
 }
 
+/** The ✕'s place, shared by every S overlay: the top-right screen corner, inboard of the scrollbar
+ *  gutter, one strip tall. */
+export function closeCorner(w: number, h: number): { x: number; y: number; size: number } {
+  const { top: m, height: size } = stripMetrics(h);
+  return { x: w - m - ScrollBox.GUTTER - size, y: m, size };
+}
+
 /** The page column: HB game info's body width, centred — "по ширине и позиционированию оставить
  *  также". HB: inner = frame − 2·border; body = min(760, inner − 2·sidePad − gutter). */
 export function pageColumn(w: number, h: number): { x: number; width: number } {
@@ -67,8 +74,9 @@ export class SPage extends Container implements ShellLayer {
     this.closeBtn?.destroy({ children: true });
     this.titlePlate = new STitlePlate(this.opts.title, strip.height, w - m * 4 - strip.height - ScrollBox.GUTTER);
     this.titlePlate.position.set(m, m);
-    this.closeBtn = sCloseButton(strip.height, () => this.opts.onClose());
-    this.closeBtn.position.set(w - m - ScrollBox.GUTTER - strip.height, m);
+    const c = closeCorner(w, h);
+    this.closeBtn = sCloseButton(c.size, () => this.opts.onClose());
+    this.closeBtn.position.set(c.x, c.y);
 
     // the scroll area is the whole screen (scrollbar on the right edge); the column sits centred in it
     this.viewH = h;

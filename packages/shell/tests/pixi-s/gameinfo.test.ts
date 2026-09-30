@@ -106,6 +106,20 @@ describe('S game info page', () => {
     for (const c of cards) expect(c.measureSize().w).toBeCloseTo((width - 24) / 3, 1);
   });
 
+  it('I5: each paytable wins column is at most 120 wide and centred in its card', () => {
+    for (const [W, H] of [[1280, 720], [390, 844]]) {
+      const p = info([PAYTABLE(4)], { screenW: W, screenH: H });
+      const cards = byLabel(p.scrollContent.content, 'pt-card') as unknown as Array<Container & { measureSize(): { w: number } }>;
+      expect(cards.length).toBe(4);
+      for (const card of cards) {
+        const [wins] = byLabel(card, 'pt-wins') as unknown as Array<Container & { measureSize(): { w: number } }>;
+        const ww = wins.measureSize().w;
+        expect(ww).toBeLessThanOrEqual(120);
+        expect(Math.abs(wins.x + ww / 2 - card.measureSize().w / 2)).toBeLessThanOrEqual(1);
+      }
+    }
+  });
+
   it('a 2-row paytable keeps third-width cards, left-aligned', () => {
     const p = info([PAYTABLE(2)]);
     const width = pageColumn(1280, 720).width;
