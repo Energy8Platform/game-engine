@@ -1,6 +1,23 @@
 import '../pixi/setup-canvas'; // must be first — patches canvas getContext before pixi.js loads
 import { describe, it, expect, vi } from 'vitest';
-import type { Container } from 'pixi.js';
+import { Container as PixiContainer, EventBoundary, Matrix, type Container } from 'pixi.js';
+
+// Render-less tests: the renderer's EventSystem never installs the events mixin, and nothing updates
+// worldTransform. Polyfill the mixin's defaults and update transforms by hand (same as bet-picker-fit).
+{
+  const proto = PixiContainer.prototype as unknown as { isInteractive?: () => boolean; interactiveChildren?: boolean };
+  if (typeof proto.isInteractive !== 'function') {
+    proto.isInteractive = function (this: Container) {
+      return this.eventMode === 'static' || this.eventMode === 'dynamic';
+    };
+  }
+  if (proto.interactiveChildren === undefined) proto.interactiveChildren = true;
+}
+function updateWorld(node: Container, parent: Matrix): void {
+  node.updateLocalTransform();
+  node.worldTransform.copyFrom(parent).append(node.localTransform);
+  for (const c of node.children) updateWorld(c as Container, node.worldTransform);
+}
 import { openSMenu, SMenu } from '@/ui/pixi-s/components/Menu';
 import { SSlider, SToggle } from '@/ui/pixi-s/primitives/controls';
 import { Slab } from '@/ui/pixi-s/slab';
@@ -86,5 +103,22 @@ describe('S menu', () => {
     expect(toggle).toBeDefined();
     const label = row.children.find((c) => (c as { text?: string }).text !== undefined) as { x: number; width: number };
     expect(label.x + label.width).toBeLessThanOrEqual(toggle.x - 8);
+  });
+
+  it('taps on a row body or in a gap are absorbed; only outside the stack dismisses', () => {
+    const m = menu();
+    m.eventMode = 'static';
+    updateWorld(m, Matrix.IDENTITY);
+    const b = new EventBoundary(m);
+    const r0 = m.rows[0].getBounds();
+    const r1 = m.rows[1].getBounds();
+    const hit = (x: number, y: number) => b.hitTest(x, y);
+    const label = hit(r0.x + 20, r0.y + r0.height / 2);
+    expect(label).not.toBeNull();
+    expect(label).not.toBe(m.dismissLayer);
+    const gap = hit(r0.x + 20, (r0.y + r0.height + r1.y) / 2);
+    expect(gap).not.toBeNull();
+    expect(gap).not.toBe(m.dismissLayer);
+    expect(hit(1200, 100)).toBe(m.dismissLayer);
   });
 });

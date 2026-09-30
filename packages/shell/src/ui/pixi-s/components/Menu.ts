@@ -45,8 +45,7 @@ export class SMenu extends Container implements ShellLayer {
     this.getScale = getScale;
     this.dismissLayer.eventMode = 'static';
     this.dismissLayer.on('pointertap', () => host.closeLayer());
-    this.stack.eventMode = 'static';
-    this.stack.on('pointertap', (e?: { stopPropagation?: () => void }) => e?.stopPropagation?.());
+    this.stack.eventMode = 'static'; // its hitArea (set in resize) absorbs taps in the gaps between rows
     this.addChild(this.dismissLayer, this.stack);
     host.setMenuRefresh((id, v) => this.updaters[id]?.(v));
     this.resize(host.screenW, host.screenH);
@@ -65,6 +64,7 @@ export class SMenu extends Container implements ShellLayer {
       this.stack.addChild(r);
     });
     const stackH = this.rows.length * z.h + Math.max(0, this.rows.length - 1) * GAP;
+    this.stack.hitArea = new Rectangle(0, 0, z.w, stackH);
 
     // above the burger, left-aligned to it; shrink further when the room above is short
     const a = this.getAnchor();
@@ -84,6 +84,8 @@ export class SMenu extends Container implements ShellLayer {
     const node = new Container();
     if (row.kind === 'separator') return node; // filtered out by hbRows; keeps the union total
     node.label = `menu-row-${row.id}`;
+    node.eventMode = 'static'; // the row body absorbs taps (else they fall through to the dismiss layer)
+    node.hitArea = new Rectangle(0, 0, w, h);
     const slab = new Slab(w, h, { face: S.plate, corners: SKEW.readout });
     const label = sLabel(row.label, 13, S.fg);
     node.addChild(slab, label);
@@ -98,9 +100,7 @@ export class SMenu extends Container implements ShellLayer {
         node.alpha = 0.5;
         return node;
       }
-      node.eventMode = 'static';
       node.cursor = 'pointer';
-      node.hitArea = new Rectangle(0, 0, w, h);
       node.on('pointerover', () => {
         slab.setFace(S.yellow);
         label.style.fill = S.ink;
