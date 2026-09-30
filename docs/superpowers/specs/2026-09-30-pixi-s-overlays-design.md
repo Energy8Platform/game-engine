@@ -104,10 +104,12 @@ PixiHbRendererOptions.overlays?: Partial<HbOverlays>;
 
 | token | value | use |
 |---|---|---|
-| `panel` | `#0b0b0b` | flat panels: menu rows, modal cards, content cards |
+| `panel` | `#161616` | flat panels: modal cards, content cards, buy-bonus cards, the bet band — one step lighter than the plates (`#0b0b0b`) so black plates read on panels; menu rows are plates, not panels |
 | `track` | `#2a2a2a` | slider/toggle/scroll tracks, empty volatility bars, off grid cells |
 | `muted` | `rgba(244,242,235,.6)` | secondary text (descriptions, stat labels, version) |
 | `veil` | `rgba(0,0,0,.55)` | the dark layer over the frosted game under a modal |
+| `winOk` | `#4ade80` | game info "✓ wins" tag |
+| `winNo` | `#f87171` | game info "✗ no win" tag |
 
 ### Rules
 
@@ -125,7 +127,7 @@ PixiHbRendererOptions.overlays?: Partial<HbOverlays>;
   - the bet band.
 - **Type:**
   - labels, titles and values: Montserrat ExtraBold (`sLabel` / `sValue`);
-  - body copy (descriptions, rules, paragraphs): Inter 400/600 through the new `sBody(str, size,
+  - body copy (descriptions, rules, paragraphs): Inter 400 through the new `sBody(str, size,
     color, wrapWidth?)`, because long text in 800 caps is unreadable.
 - **Backdrop.** Modal layers keep the renderer's frosted snapshot (the blur) with `S.veil` over it.
   The menu is light-dismiss: no veil and no blur, as in HB.
@@ -134,7 +136,7 @@ PixiHbRendererOptions.overlays?: Partial<HbOverlays>;
 
 | primitive | look |
 |---|---|
-| `sTitlePlate(text, h)` | yellow slab (lean as `SKEW.readout`), ink caps text, width = text + 2·0.6h, min 3h |
+| `sTitlePlate(text, h, maxW?)` | yellow slab (lean as `SKEW.readout`), ink caps text, width = text + 2·0.6h, min 3h, capped at `maxW` (a longer text scales in) |
 | `sCloseButton(size, onTap)` | yellow square slab `size × size`, ink HB `close` glyph (ink/ink), hover `S.yellowHover` |
 | `STextButton(label, { w, h, kind })` | slab: `accent` = yellow/ink, `red` = red/fg, `ghost` = plate/fg; caps label; disabled alpha 0.4; hover darkens (yellow/red) or turns yellow with ink text (ghost) |
 | `SChip(id, label, selected)` | slab: plate + fg value; selected = yellow + ink; hover on an unselected chip = `S.plateHover` |
@@ -194,8 +196,9 @@ Game info and buy bonus share it.
 
 - **Base.** A fork of HB `GameInfo.ts` inside an `SPage` titled `t('Game info')`. The sections,
   their order, the auto-injected hotkeys and the version footer are all unchanged.
-- **Section title.** `sTitlePlate(title, 1.8em)` — yellow, ink caps — left-aligned at the top of
-  each section. It replaces HB's centred heading text.
+- **Section title.** `STitlePlate(title, 2.6em, maxW = column width)` — yellow, ink caps —
+  left-aligned at the top of each section (the wins header caps it at the column minus the "min N"
+  badge and its 10px gap, so the badge stays in the column). It replaces HB's centred heading text.
 - **Cards.** Every HB `card()` becomes a flat `S.panel` rect (padding as HB) with no border.
 - **Modes.** Title `sLabel` fg. Stats: label `sLabel` muted caps + value `sValue` yellow.
   Description in `sBody` muted.
@@ -205,7 +208,7 @@ Game info and buy bonus share it.
     - ± / menu / autoplay (▶) / turbo (⚡): black slabs with fg glyphs;
     - buy: yellow slab with ink `mask`.
   - Name in `sLabel` fg, description in `sBody` muted.
-- **Hotkeys.** Keycaps become flat `S.panel` rects with `sValue` fg text, sharp.
+- **Hotkeys.** Keycaps become flat `S.track` rects with `sValue` fg text, sharp.
 - **Paytable** — full column width, **always 3 per row**:
   - card width `(width − 2·gap) / 3`, gap 12, rows of 3 (the last row may hold fewer; its cards
     keep the same width, left-aligned);
@@ -227,16 +230,24 @@ Game info and buy bonus share it.
 - **Grid.** Two cards per row from a content width of 640, else one (HB's rule), gap 12.
 - **Card.** A flat panel.
   - **Hero:** the left third is a flat rect, yellow (bonus) or red (feature), with the `mask`
-    glyph in ink, contained at 70% of the zone. A `thumbnail` covers the zone instead, a `custom`
-    node is contained as HB does, and either is clipped to the zone rect.
+    glyph — ink on yellow, fg on red — contained at 70% of the zone. A `thumbnail` covers the zone
+    instead, a `custom` node is contained as HB does, and either is clipped to the zone rect.
   - **Title and group flip:** title `sLabel` fg. Group arrows are two small yellow slabs with ink
     `back` / `chevronRight`.
   - **Volatility:** 5 flat bars `0.5em × 1.1em`, filled `S.yellow`, empty `S.track`.
   - **Description:** `sBody` muted.
   - **Price and CTA:** the price (`sValue` fg) sits bottom-right over the CTA. The CTA is an
     `STextButton`: `accent` "BUY", or `red` "ACTIVATE" for a feature.
-- **Bet band.** A flat `S.panel` band pinned to the bottom. It holds an S `SReadout` BALANCE on
-  the left and an S `SBet` (stepper) on the right — the bar's widgets at the band's height.
+- **Bet band.** A flat `S.panel` band pinned to the bottom (height h = min(64, 16% of the screen
+  height), width min(screen width − 2 × the page pad, 900), centred). It holds an S `SReadout`
+  BALANCE on the left and an S `SBet` (stepper) on the right — the bar's widgets. With the band pad p = clamp(10, 0.25h, 20) and
+  the room = band width − 3p:
+  - **wide** (room ≥ 9.8·0.78h): plate height rh = 0.78h, BALANCE 4.8·rh wide, BET 5·rh wide;
+  - **narrow** (room < 9.8·0.78h — 9.8 = 4.8 + 5, the two wide plates): rh = min(0.78h, 40,
+    0.13·room); BALANCE takes 44% of the room and BET 56% (its ± squares are rh wide, so it needs
+    the larger share).
+  In both, BALANCE sits p from the left edge, BET p from the right, both centred vertically; labels
+  are 0.27·rh, values 0.41·rh.
 - **Confirm.** `SCardModal` (5.6).
 
 ### 5.6 SCardModal and the small modals
@@ -249,7 +260,9 @@ Game info and buy bonus share it.
 - **Header.**
   - `sTitlePlate(title, 2.4em)` at the card's top-left, overhanging the card top by 0.6em
     (a plate on the panel's edge, like the bar).
-  - `sCloseButton(2.4em)` at the top-right when closable.
+  - `sCloseButton(max(32, 2.4em))` at the top-right when closable, top-aligned with the title
+    plate; its hit area is padded symmetrically to at least 44×44.
+  - An empty (or whitespace) title shows no title plate.
   - The title is no longer the first body row.
 - **Actions.** `STextButton`s, `accent` / `red` / `ghost` mapped from `CardAction.kind`.
 
