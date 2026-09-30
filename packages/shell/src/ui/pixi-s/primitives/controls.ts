@@ -27,7 +27,7 @@ export class STitlePlate extends Container implements Sizable {
     const w = Math.min(Math.floor(maxW), Math.round(Math.max(h * 3, this.labelText.width + pad * 2)));
     if (this.labelText.width > w - pad * 2) this.labelText.scale.set((w - pad * 2) / this.labelText.width);
     this.slab = new Slab(w, h, { face: S.yellow, corners: SKEW.readout });
-    this.labelText.position.set(pad, (h - this.labelText.height) / 2);
+    this.labelText.position.set((w - this.labelText.width) / 2, (h - this.labelText.height) / 2); // centred in a min-width plate
     this.addChild(this.slab, this.labelText);
   }
 

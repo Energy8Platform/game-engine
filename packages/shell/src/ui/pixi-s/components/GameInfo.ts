@@ -40,7 +40,7 @@ function section(_host: PixiComponentContext, title: string | undefined, width: 
   const sec = new FlexBox({ direction: 'column', align: 'center', gap: 12, padding: { top: 8, bottom: 8 } });
   if (title) {
     const head = new FlexBox({ direction: 'row', justify: 'center', width });
-    head.add(new STitlePlate(title, Math.round(giEm() * 2.6), width));
+    head.add(new STitlePlate(title, Math.round(giEm() * 3.2), width));
     sec.add(head);
   }
   return sec;
@@ -424,7 +424,7 @@ function sectionWins(host: PixiComponentContext, s: WinSection, width: number): 
   // header (title plate + optional "min N" badge); the plate leaves the badge its room
   const header = new FlexBox({ direction: 'row', align: 'center', justify: 'center', gap: 10, width: inner });
   const badge = (s.kind === 'cluster' || s.kind === 'anywhere') && 'minCount' in s ? badgePill(host, `min ${s.minCount}`) : null;
-  header.add(new STitlePlate(title, Math.round(giEm() * 2.6), badge ? inner - badge.width - 10 : inner));
+  header.add(new STitlePlate(title, Math.round(giEm() * 3.2), badge ? inner - badge.width - 10 : inner));
   if (badge) header.add(badge);
   sec.add(header);
 

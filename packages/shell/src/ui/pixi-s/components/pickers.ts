@@ -99,7 +99,7 @@ export class SPicker extends Container implements ShellLayer {
     this.confirm = new STextButton(this.opts.confirmLabel, { w: btnW, h: btnH, kind: 'accent', size: em, onTap: () => this.doConfirm() });
 
     // the block: title · gap · value plate · slider · gap · confirm — centred vertically
-    const gapA = em * 2;
+    const gapA = em * 3;
     const gapB = em * 0.5;
     const gapC = em * 2;
     const blockH = titleH + gapA + plateH + gapB + sliderH + gapC + btnH;
