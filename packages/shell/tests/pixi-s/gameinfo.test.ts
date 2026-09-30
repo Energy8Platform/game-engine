@@ -85,3 +85,29 @@ describe('S game info page', () => {
     expect(p.onKey({ code: 'Escape' } as KeyboardEvent)).toBe(false);
   });
 });
+
+describe('S game info on a phone', () => {
+  const LONG = 'An extraordinarily long section title that cannot possibly fit on a phone';
+  it('a long section title plate stays inside the column; a cluster badge too', () => {
+    const host = makeContext({
+      screenW: 390,
+      screenH: 844,
+      layout: 'mobile',
+      config: defaultConfig({
+        gameInfo: { sections: [{ type: 'custom', title: LONG, html: 'x' }, { type: 'wins', kind: 'cluster', title: LONG, grid: { cols: 6, rows: 5 }, minCount: 8 }] },
+        features: { turbo: 2, autoplay: {}, buyBonus: [], hotkeys: false },
+      }),
+    });
+    const p = openSGameInfo(host) as SPage;
+    const col = pageColumn(390, 844);
+    const right = col.x + col.width;
+    const plates = all(p.scrollContent.content, STitlePlate).filter((t) => t.labelText.text === LONG.toUpperCase());
+    expect(plates.length).toBe(2);
+    for (const t of plates) expect(t.getGlobalPosition().x + t.slab.w).toBeLessThanOrEqual(right);
+    const wins = plates[1];
+    const header = wins.parent!;
+    const badge = header.children[header.children.indexOf(wins) + 1] as Container;
+    expect(badge).toBeDefined();
+    expect(badge.getGlobalPosition().x + badge.width).toBeLessThanOrEqual(right);
+  });
+});

@@ -13,6 +13,7 @@ const WIDE_ROW = { w: 320, h: 44 };
 const MOBILE_ROW = { w: 370, h: 40 };
 const GAP = 6;
 const PAD = 16;
+const LABEL_SIZE = 13;
 /** Gap between the stack's bottom and the burger's top, and the screen margin it keeps. */
 const LIFT = 8;
 const MARGIN = 8;
@@ -58,7 +59,17 @@ export class SMenu extends Container implements ShellLayer {
     this.stack.removeChildren().forEach((c) => c.destroy({ children: true }));
     this.updaters = {};
     const z = this.host.layout === 'mobile' ? MOBILE_ROW : WIDE_ROW;
-    this.rows = hbRows(resolveMenu(this.host)).map((row) => this.buildRow(row, z.w, z.h));
+    const menuRows = hbRows(resolveMenu(this.host));
+    // one slider column for every range row: past the widest range label (capped at 0.45·w)
+    const widest = Math.max(0, ...menuRows.map((r) => {
+      if (r.kind !== 'range') return 0;
+      const t = sLabel(r.label, LABEL_SIZE);
+      const lw = t.width;
+      t.destroy();
+      return lw;
+    }));
+    const sliderX = PAD + Math.min(widest, z.w * 0.45) + PAD;
+    this.rows = menuRows.map((row) => this.buildRow(row, z.w, z.h, sliderX));
     this.rows.forEach((r, i) => {
       r.position.set(0, i * (z.h + GAP));
       this.stack.addChild(r);
@@ -80,14 +91,14 @@ export class SMenu extends Container implements ShellLayer {
     this.resize(this.host.screenW, this.host.screenH);
   }
 
-  private buildRow(row: MenuRow, w: number, h: number): Container {
+  private buildRow(row: MenuRow, w: number, h: number, sliderX: number): Container {
     const node = new Container();
     if (row.kind === 'separator') return node; // filtered out by hbRows; keeps the union total
     node.label = `menu-row-${row.id}`;
     node.eventMode = 'static'; // the row body absorbs taps (else they fall through to the dismiss layer)
     node.hitArea = new Rectangle(0, 0, w, h);
     const slab = new Slab(w, h, { face: S.plate, corners: SKEW.readout });
-    const label = sLabel(row.label, 13, S.fg);
+    const label = sLabel(row.label, LABEL_SIZE, S.fg);
     node.addChild(slab, label);
     const place = (maxW: number): void => {
       if (label.width > maxW) label.scale.set(maxW / label.width);
@@ -132,18 +143,17 @@ export class SMenu extends Container implements ShellLayer {
       return node;
     }
 
-    // range: label, then the slider to the right edge (0 on the slider is mute — no icons)
+    // range: label, then the slider from the shared column to the right edge (0 is mute — no icons)
     const toUnit = (v: number): number => (row.max === row.min ? 0 : (v - row.min) / (row.max - row.min));
     const fromUnit = (u: number): number => {
       const raw = row.min + u * (row.max - row.min);
       const snapped = row.min + Math.round((raw - row.min) / row.step) * row.step;
       return Math.max(row.min, Math.min(row.max, snapped));
     };
-    place(w * 0.45);
-    const x = PAD + label.width + PAD;
+    place(sliderX - PAD * 2);
     const slider = new SSlider(toUnit(row.get()), row.disabled ? () => {} : (u) => row.set(fromUnit(u)));
-    slider.setLayoutSize(Math.max(120, w - PAD - x));
-    slider.position.set(x, (h - 24) / 2);
+    slider.setLayoutSize(Math.max(120, w - PAD - sliderX));
+    slider.position.set(sliderX, (h - 24) / 2);
     node.addChild(slider);
     this.updaters[row.id] = (v) => slider.setValue(toUnit(Number(v)));
     if (row.disabled) {

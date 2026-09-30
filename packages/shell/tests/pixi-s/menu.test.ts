@@ -121,4 +121,14 @@ describe('S menu', () => {
     expect(gap).not.toBe(m.dismissLayer);
     expect(hit(1200, 100)).toBe(m.dismissLayer);
   });
+
+  it('range rows: every slider starts at one x, whatever the label width', () => {
+    const host = makeContext({
+      menu: [{ id: 'music' }, { id: 'sfx' }, { id: 'speed', type: 'range', label: 'Reel speed', min: 0, max: 1, step: 0.1, value: 0.5 }] as never,
+    });
+    const m = openSMenu(host, () => BURGER, () => null, () => 1) as SMenu;
+    const xs = m.rows.map((r) => all(r, SSlider)[0].x);
+    expect(xs.length).toBe(3);
+    expect(new Set(xs).size).toBe(1);
+  });
 });

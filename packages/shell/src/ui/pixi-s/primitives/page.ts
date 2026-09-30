@@ -6,6 +6,7 @@ import { clamp, frameRect } from '../../pixi-hb/primitives/overlay';
 import type { SButton } from '../widgets';
 import { STitlePlate, sCloseButton, S_SCROLL } from './controls';
 import { S } from '../theme';
+import { BORDER } from '../../pixi-hb/theme';
 
 /** Where the page's top strip sits on a screen `h` tall: its top edge and height. */
 export function stripMetrics(h: number): { top: number; height: number } {
@@ -15,7 +16,7 @@ export function stripMetrics(h: number): { top: number; height: number } {
 /** The page column: HB game info's body width, centred — "по ширине и позиционированию оставить
  *  также". HB: inner = frame − 2·border; body = min(760, inner − 2·sidePad − gutter). */
 export function pageColumn(w: number, h: number): { x: number; width: number } {
-  const inner = frameRect(w, h).width - 4;
+  const inner = frameRect(w, h).width - 2 * BORDER;
   const sidePad = clamp(12, inner * 0.04, 24);
   const width = Math.min(760, inner - sidePad * 2 - ScrollBox.GUTTER);
   return { x: Math.round((w - width - ScrollBox.GUTTER) / 2), width };
@@ -36,7 +37,6 @@ export class SPage extends Container implements ShellLayer {
   readonly veil = new Graphics();
   titlePlate?: STitlePlate;
   closeBtn?: SButton;
-  private host: PixiComponentContext;
   private opts: SPageOpts;
   private scroll: ScrollBox;
   private viewH = 0;
@@ -47,7 +47,6 @@ export class SPage extends Container implements ShellLayer {
 
   constructor(host: PixiComponentContext, opts: SPageOpts) {
     super();
-    this.host = host;
     this.opts = opts;
     this.tag = opts.tag;
     this.veil.eventMode = 'static'; // swallow taps to the game behind

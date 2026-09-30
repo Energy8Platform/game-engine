@@ -10,7 +10,8 @@ export const S = {
   shadow: '#000000',
   fg: '#f4f2eb', // values, white glyphs
   ink: '#0b0b0b', // glyphs and text on yellow
-  panel: '#0b0b0b', // flat panels: menu rows, modal cards, content cards
+  panel: '#161616', // flat panels: modal cards, page / paytable / buy-bonus cards, the bet band — one step
+  // lighter than the plates so black plates keep their shape on them (menu rows are plates, not panels)
   track: '#2a2a2a', // slider / toggle / scroll tracks, empty volatility bars, off grid cells
   muted: 'rgba(244,242,235,.6)', // secondary text: descriptions, stat labels, version
   veil: 'rgba(0,0,0,.55)', // the dark layer over the frosted game under a modal

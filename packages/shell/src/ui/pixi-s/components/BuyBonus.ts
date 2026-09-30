@@ -28,6 +28,10 @@ export function openSBuyBonus(host: PixiComponentContext): ShellLayer | null {
 }
 
 const BET_BAND_H = 64;
+/** The band's two wide plates need 4.8 + 5 = 9.8 plate heights (BALANCE + BET widths); under that
+ *  the band goes narrow and each plate's height is at most this share of the room. */
+const WIDE_BAND_RH = 9.8;
+const NARROW_RH_SHARE = 0.13;
 const HERO_FRACTION = 0.33;
 const CARD_GAP = 12;
 /** Two cards per row from this content width up. */
@@ -149,7 +153,7 @@ export class SBuyBonusPage extends Container implements ShellLayer {
     this.band.removeChildren().forEach((c) => c.destroy({ children: true }));
     const bandW = Math.min(this.w - pad * 2, 900);
     const bg = new Graphics().rect(0, 0, bandW, betH).fill(S.panel);
-    const band = this.buildBetBand(bandW, betH, em);
+    const band = this.buildBetBand(bandW, betH);
     band.addChildAt(bg, 0);
     band.position.set((this.w - bandW) / 2, this.h - betH - pad * 0.5);
     this.band.addChild(band);
@@ -298,7 +302,7 @@ export class SBuyBonusPage extends Container implements ShellLayer {
     return hero;
   }
 
-  private buildBetBand(w: number, h: number, _em: number): Container {
+  private buildBetBand(w: number, h: number): Container {
     const band = new Container();
     const { state } = this.host;
     const pad = clamp(10, h * 0.25, 20);
@@ -306,8 +310,8 @@ export class SBuyBonusPage extends Container implements ShellLayer {
     // a band too narrow for the two wide plates (phone) lowers them (the mobile bar's 40 at most, less
     // on a smaller phone) and splits the room 44 / 56 — the bet's ± squares are h wide, so it needs
     // the larger share to stay readable
-    const narrow = room < h * 0.78 * 9.8;
-    const rh = Math.round(narrow ? Math.min(h * 0.78, 40, room * 0.13) : h * 0.78);
+    const narrow = room < h * 0.78 * WIDE_BAND_RH;
+    const rh = Math.round(narrow ? Math.min(h * 0.78, 40, room * NARROW_RH_SHARE) : h * 0.78);
     const i = state.availableBets.indexOf(state.bet);
     const feature = state.activeFeature;
     const locked = state.busy || state.autoplay.active || !!feature;

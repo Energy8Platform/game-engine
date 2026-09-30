@@ -24,7 +24,8 @@ function kindOf(kind: CardAction['kind']): SButtonKind {
 export class SCardModal extends Container implements ShellLayer {
   readonly tag?: string;
   readonly body: FlexBox;
-  readonly titlePlate: STitlePlate;
+  /** Absent when the title is empty. */
+  readonly titlePlate?: STitlePlate;
   readonly closeBtn?: Container;
   private host: PixiComponentContext;
   private veil = new Graphics();
@@ -35,9 +36,11 @@ export class SCardModal extends Container implements ShellLayer {
   private em: number;
   private cardW: number;
   private cardH = 0;
-  /** Title / ✕ plate height, and how far they overhang the card's top edge. */
+  /** Title plate height, and how far the plates overhang the card's top edge. */
   private headH: number;
   private lift: number;
+  /** The ✕ plate: 2.4em but never under 32 (a thumb target), its hit area padded to ≥ 44. */
+  private closeSize: number;
 
   constructor(host: PixiComponentContext, opts: CardOpts) {
     super();
@@ -47,14 +50,21 @@ export class SCardModal extends Container implements ShellLayer {
     this.cardW = Math.min((opts.maxEm ?? 28) * this.em, host.screenW * MODAL_FIT);
     this.headH = Math.round(2.4 * this.em);
     this.lift = Math.round(0.6 * this.em);
+    this.closeSize = Math.max(32, this.headH);
     const closable = opts.closable !== false && !!opts.onClose;
-    const titleMax = this.cardW - 2.4 * this.em - (closable ? this.headH + 0.6 * this.em : 0);
-    this.titlePlate = new STitlePlate(opts.title, this.headH, titleMax);
     this.body = new FlexBox({ direction: 'column', align: 'center', gap: 1.05 * this.em, padding: 1.2 * this.em });
     this.veil.eventMode = 'static'; // swallow taps to the game behind
-    this.cardRoot.addChild(this.bg, this.body, this.actionsRow, this.titlePlate);
+    this.cardRoot.addChild(this.bg, this.body, this.actionsRow);
+    if (opts.title.trim()) {
+      const titleMax = this.cardW - 2.4 * this.em - (closable ? this.closeSize + 0.6 * this.em : 0);
+      this.titlePlate = new STitlePlate(opts.title, this.headH, titleMax);
+      this.cardRoot.addChild(this.titlePlate);
+    }
     if (closable) {
-      this.closeBtn = sCloseButton(this.headH, () => opts.onClose!());
+      const size = this.closeSize;
+      const p = Math.max(0, (44 - size) / 2);
+      this.closeBtn = sCloseButton(size, () => opts.onClose!());
+      this.closeBtn.hitArea = new Rectangle(-p, -p, size + 2 * p, size + 2 * p);
       this.cardRoot.addChild(this.closeBtn);
     }
     this.addChild(this.veil, this.cardRoot);
@@ -94,8 +104,8 @@ export class SCardModal extends Container implements ShellLayer {
     const bodyH = this.body.outerHeight;
     this.cardH = top + bodyH + this.actionsH;
     this.bg.clear().rect(0, 0, this.cardW, this.cardH).fill(S.panel);
-    this.titlePlate.position.set(1.2 * this.em, -this.lift);
-    this.closeBtn?.position.set(this.cardW - 1.2 * this.em - this.headH, -this.lift);
+    this.titlePlate?.position.set(1.2 * this.em, -this.lift);
+    this.closeBtn?.position.set(this.cardW - 1.2 * this.em - this.closeSize, -this.lift);
     this.body.position.set(0, top);
     this.actionsRow.position.set(0, top + bodyH);
     this.resize(this.host.screenW, this.host.screenH);

@@ -40,7 +40,7 @@ function section(_host: PixiComponentContext, title: string | undefined, width: 
   const sec = new FlexBox({ direction: 'column', align: 'center', gap: 12, padding: { top: 8, bottom: 8 } });
   if (title) {
     const head = new FlexBox({ direction: 'row', justify: 'start', width });
-    head.add(new STitlePlate(title, Math.round(giEm() * 2.6)));
+    head.add(new STitlePlate(title, Math.round(giEm() * 2.6), width));
     sec.add(head);
   }
   return sec;
@@ -426,10 +426,11 @@ function sectionWins(host: PixiComponentContext, s: WinSection, width: number): 
   const inner = width - SECTION_PAD;
   const title = s.title ?? host.t(winFallbackTitle(s.kind));
   const sec = section(host, undefined, inner);
-  // header (title plate + optional "min N" badge)
+  // header (title plate + optional "min N" badge); the plate leaves the badge its room
   const header = new FlexBox({ direction: 'row', align: 'center', gap: 10, width: inner });
-  header.add(new STitlePlate(title, Math.round(giEm() * 2.6)));
-  if ((s.kind === 'cluster' || s.kind === 'anywhere') && 'minCount' in s) header.add(badgePill(host, `min ${s.minCount}`));
+  const badge = (s.kind === 'cluster' || s.kind === 'anywhere') && 'minCount' in s ? badgePill(host, `min ${s.minCount}`) : null;
+  header.add(new STitlePlate(title, Math.round(giEm() * 2.6), badge ? inner - badge.width - 10 : inner));
+  if (badge) header.add(badge);
   sec.add(header);
 
   if (s.kind === 'classic') {

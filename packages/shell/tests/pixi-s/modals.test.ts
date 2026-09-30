@@ -1,12 +1,13 @@
 import '../pixi/setup-canvas'; // must be first — patches canvas getContext before pixi.js loads
 import { describe, it, expect, vi } from 'vitest';
-import type { Container } from 'pixi.js';
+import type { Container, Rectangle } from 'pixi.js';
 import { SCardModal } from '@/ui/pixi-s/primitives/card';
 import { SChip, STextButton, STitlePlate } from '@/ui/pixi-s/primitives/controls';
 import { openSBetPicker, openSAutoplayPicker } from '@/ui/pixi-s/components/pickers';
 import { buildSModal } from '@/ui/pixi-s/components/Modal';
 import { buildSReplayModal } from '@/ui/pixi-s/components/ReplayModal';
 import { S } from '@/ui/pixi-s/theme';
+import { sBody } from '@/ui/pixi-s/text';
 import { makeContext, defaultConfig } from '../pixi/_host';
 
 function all<T>(n: Container, cls: abstract new (...a: never[]) => T, out: T[] = []): T[] {
@@ -20,11 +21,51 @@ describe('S card modal', () => {
     const host = makeContext();
     const m = new SCardModal(host, { title: 'Bet', onClose: () => {} });
     m.build();
-    expect(m.titlePlate.labelText.text).toBe('BET');
-    expect(m.titlePlate.y).toBeLessThan(0); // overhangs the card's top edge
+    expect(m.titlePlate!.labelText.text).toBe('BET');
+    expect(m.titlePlate!.y).toBeLessThan(0); // overhangs the card's top edge
     expect(m.closeBtn).toBeDefined();
-    expect(m.closeBtn!.x).toBeGreaterThan(m.titlePlate.x);
+    expect(m.closeBtn!.x).toBeGreaterThan(m.titlePlate!.x);
     expect(m.body.children.length).toBe(0);
+  });
+
+  it('the ✕ plate is at least 32 and its hit area at least 44×44', () => {
+    for (const [w, h] of [[1280, 720], [390, 844], [400, 225]]) {
+      const m = new SCardModal(makeContext({ screenW: w, screenH: h }), { title: 'Bet', onClose: () => {} });
+      m.build();
+      const b = m.closeBtn as unknown as { measureSize(): { w: number; h: number }; hitArea: Rectangle };
+      expect(b.measureSize().w).toBeGreaterThanOrEqual(32);
+      expect(b.hitArea.width).toBeGreaterThanOrEqual(44);
+      expect(b.hitArea.height).toBeGreaterThanOrEqual(44);
+      // padded symmetrically around the plate
+      expect(b.hitArea.x + b.hitArea.width / 2).toBeCloseTo(b.measureSize().w / 2, 5);
+      expect(b.hitArea.y + b.hitArea.height / 2).toBeCloseTo(b.measureSize().h / 2, 5);
+      expect(m.closeBtn!.y).toBe(m.titlePlate!.y); // top-aligned at -lift
+    }
+  });
+
+  it('an empty title draws no title plate', () => {
+    const m = new SCardModal(makeContext(), { title: '  ', onClose: () => {} });
+    m.build();
+    expect(m.titlePlate).toBeUndefined();
+    expect(all(m, STitlePlate)).toEqual([]);
+  });
+
+  it('fit(): a tall card on a short screen scales below 1 and stays on screen, plates included', () => {
+    const W = 400;
+    const H = 225;
+    const m = new SCardModal(makeContext({ screenW: W, screenH: H }), { title: 'Bet', onClose: () => {} });
+    for (let i = 0; i < 6; i++) m.body.add(sBody('A line of body copy that takes room', 14, S.fg, 200));
+    m.setActions([{ label: 'OK', kind: 'accent', onTap: () => {} }]);
+    m.build();
+    const root = m.titlePlate!.parent!;
+    const k = root.scale.y;
+    expect(k).toBeLessThan(1);
+    const lift = -m.titlePlate!.y;
+    const cardH = (root.children[0] as Container).height; // the card panel
+    expect(root.y - lift * k).toBeGreaterThanOrEqual(0);
+    expect(root.y + cardH * k).toBeLessThanOrEqual(H);
+    expect(root.x).toBeGreaterThanOrEqual(0);
+    expect(root.x + m.cardWidth * k).toBeLessThanOrEqual(W);
   });
 
   it('not closable: no ✕', () => {

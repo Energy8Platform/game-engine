@@ -4,8 +4,6 @@ import { makeText, FONT_FAMILY } from '../pixi-hb/text';
 import { S_FONT_CSS, S_FONT_FAMILY } from './fonts';
 import { S } from './theme';
 
-export { FONT_FAMILY } from '../pixi-hb/text';
-
 // The S bar draws every label and value in Montserrat ExtraBold. HB's overlays keep their own faces
 // (installed by the HB renderer); this module only adds the S face and two text styles.
 
