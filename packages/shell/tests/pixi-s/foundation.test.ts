@@ -52,10 +52,19 @@ describe('S foundations', () => {
     const g = sIcon('spin', 40, S.ink);
     const c = (k: { x: number; y: number; width: number; height: number }) => [k.x + k.width / 2, k.y + k.height / 2];
     const [x0, y0] = c(g.getLocalBounds());
+    // an off-centre point of the glyph (its top-left box corner), in the glyph's own space
+    const corner = () => g.toLocal(g.gfx.toGlobal({ x: 0, y: 0 }));
+    const p0 = corner();
     g.spin = Math.PI / 2;
+    expect(g.gfx.rotation).toBe(Math.PI / 2);
     const [x1, y1] = c(g.getLocalBounds());
     expect(Math.abs(x1 - x0)).toBeLessThan(1);
     expect(Math.abs(y1 - y0)).toBeLessThan(1);
+    // a quarter turn about the centre (20, 20) takes the top-left corner to the top-right
+    const p1 = corner();
+    expect(Math.hypot(p1.x - p0.x, p1.y - p0.y)).toBeGreaterThan(20);
+    expect(p1.x).toBeCloseTo(40, 5);
+    expect(p1.y).toBeCloseTo(0, 5);
   });
 
   it('panels are one step lighter than the black plates, so plates keep their shape inside panels', () => {

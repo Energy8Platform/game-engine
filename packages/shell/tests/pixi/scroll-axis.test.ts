@@ -54,6 +54,31 @@ describe('ScrollBox axis', () => {
     box.emit('globalpointermove', ptr(150, 20));
     expect(box.content.x).toBe(-100);
   });
+  it('x: the drag slop is 4 global px, whatever the parent scale', () => {
+    const drag = (to: number) => {
+      const parent = new Container();
+      parent.scale.set(0.5);
+      const box = make('x', 900, 80);
+      parent.addChild(box);
+      box.emit('pointerdown', ptr(200, 20));
+      box.emit('globalpointermove', ptr(200 - to, 20));
+      return box.didDrag;
+    };
+    expect(drag(3)).toBe(false); // 6 parent units, but only 3 screen px
+    expect(drag(5)).toBe(true);
+  });
+  it('x: a press at the right end of the bottom gutter drags the thumb to the end', () => {
+    const box = make('x', 900, 80);
+    const t = box.affordance.trackBounds!;
+    box.emit('pointerdown', ptr(t.x + t.w, t.y + t.h / 2));
+    expect(box.content.x).toBe(-box.maxScrollY);
+  });
+  it('x: a deltaX-dominant wheel scrolls by deltaX', () => {
+    const canvas = document.createElement('canvas');
+    const box = make('x', 900, 80, canvas);
+    canvas.dispatchEvent(new WheelEvent('wheel', { deltaX: 90, deltaY: 10 }));
+    expect(box.content.x).toBe(-90);
+  });
   it('y default scrolls content.y only', () => {
     const box = make('y', 80, 900);
     box.scrollBy(50);

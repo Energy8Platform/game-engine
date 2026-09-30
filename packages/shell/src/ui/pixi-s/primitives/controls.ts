@@ -52,15 +52,18 @@ export function sCloseButton(size: number, onTap: () => void): SButton {
   });
 }
 
-export type SButtonKind = 'accent' | 'red' | 'ghost';
+export type SButtonKind = 'accent' | 'red' | 'ghost' | 'dim';
 
 const KIND: Record<SButtonKind, { fill: string; hover: string; ink: string; hoverInk: string }> = {
   accent: { fill: S.yellow, hover: S.yellowHover, ink: S.ink, hoverInk: S.ink },
   red: { fill: S.red, hover: S.redHover, ink: S.fg, hoverInk: S.fg },
   ghost: { fill: S.plate, hover: S.yellow, ink: S.fg, hoverInk: S.ink },
+  dim: { fill: S.track, hover: S.plateHover, ink: S.fg, hoverInk: S.fg },
 };
 
-/** A caps label on a slab: `accent` yellow/ink, `red` red/fg, `ghost` plate/fg (yellow on hover). */
+/** A caps label on a slab: `accent` yellow/ink, `red` red/fg, `ghost` plate/fg (yellow on hover),
+ *  `dim` track/fg (a step darker on hover) — a secondary action on a black plate, where a ghost
+ *  would be bare text. */
 export class STextButton extends Container implements Sizable {
   readonly labelText: Text;
   readonly slab: Slab;

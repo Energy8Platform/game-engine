@@ -295,14 +295,14 @@ describe('S buy bonus: the fly-in confirm', () => {
     (globalThis as { matchMedia?: unknown }).matchMedia = realMM;
   });
   /** FOUR at 1280×720 (k = 1) on a manual ticker, with motion on. */
-  function animated() {
+  function animated(over: Record<string, unknown> = {}) {
     (globalThis as { matchMedia?: unknown }).matchMedia = () => ({ matches: false });
     const fns = new Set<(t: { deltaMS: number }) => void>();
     const ticker = { add: (f: never) => fns.add(f), remove: (f: never) => fns.delete(f) } as unknown as Ticker;
     const tick = (ms: number) => {
       for (let t = 0; t < ms; t += 50) for (const f of [...fns]) f({ deltaMS: 50 });
     };
-    return { ...page({ ticker }, FOUR), tick };
+    return { ...page({ ticker, ...over }, FOUR), tick };
   }
   /** Where the flyer lands at 1280×720 (k = 1, spec §3): between the ✕ strip and the bottom margin. */
   function target(p: SBuyBonusPage) {
@@ -355,7 +355,7 @@ describe('S buy bonus: the fly-in confirm', () => {
     expect(Math.abs(cancel.measureSize().w - bw)).toBeLessThanOrEqual(1); // slabs round their size
     expect(buy.x).toBeCloseTo(bw + t.em * 0.5, 5);
     expect(Math.abs(cancel.measureSize().h - t.em * 2.8)).toBeLessThanOrEqual(1);
-    expect([cancel.kind, buy.kind]).toEqual(['ghost', 'accent']);
+    expect([cancel.kind, buy.kind]).toEqual(['dim', 'accent']); // a ghost is bare text on the black card
     // the rest of the flyer takes no taps
     expect(f.children.filter((c) => c !== a).every((c) => c.eventMode === 'none')).toBe(true);
   });
@@ -430,6 +430,60 @@ describe('S buy bonus: the fly-in confirm', () => {
     expect(actions(p)?.eventMode).toBe('passive');
     p.resize(1200, 675);
     expect(byLabel(p, 'bb-flyer').length).toBe(0);
+  });
+
+  it('F1: a same-size resize after a state change drops the stale confirm and rebuilds', () => {
+    const cases: Array<[string, (s: Record<string, unknown>) => void]> = [
+      ['bet', (s) => (s.bet = 2)],
+      ['balance', (s) => (s.balance = 5)],
+      ['busy', (s) => (s.busy = true)],
+      ['buyBonusEnabled', (s) => (s.buyBonusEnabled = false)],
+      ['activeFeature', (s) => (s.activeFeature = FOUR[4])],
+    ];
+    for (const [name, mutate] of cases) {
+      const { page: p, host, tick } = animated();
+      p.ctas[2].emit('pointertap', {});
+      tick(450);
+      expect(flyer(p), name).toBeDefined();
+      mutate(host.state as unknown as Record<string, unknown>);
+      p.resize(1280, 720);
+      expect(byLabel(p, 'bb-flyer').length, name).toBe(0);
+      expect(byLabel(p, 'bb-confirm-actions').length, name).toBe(0);
+      expect(alphas(p), name).toEqual([1, 1, 1]);
+      for (const c of byLabel(p, /^bb-card-/)) expect(c.visible, name).toBe(true);
+      expect(() => tick(600)).not.toThrow();
+      expect(byLabel(p, 'bb-flyer').length, name).toBe(0);
+    }
+  });
+
+  it('F2: the wheel does not scroll the hidden row during a confirm', () => {
+    const canvas = document.createElement('canvas');
+    const { page: p, tick } = animated({ screenW: 390, screenH: 844, layout: 'mobile', canvas });
+    expect(parts(p).scroll.maxScrollY).toBeGreaterThan(0);
+    p.ctas[1].emit('pointertap', {});
+    const wheel = () => {
+      const e = new WheelEvent('wheel', { deltaY: 120, cancelable: true });
+      canvas.dispatchEvent(e);
+      return e;
+    };
+    tick(150); // mid-flight: the row still draws at half alpha
+    const x = parts(p).scroll.content.x;
+    expect(wheel().defaultPrevented).toBe(true);
+    expect(parts(p).scroll.content.x).toBe(x);
+    tick(300); // fully open: the row is hidden
+    wheel();
+    expect(parts(p).scroll.content.x).toBe(x);
+  });
+
+  it('F4: the flyer shows no ‹ › and its CANCEL is a dim plate', () => {
+    const { page: p } = page({}, FOUR);
+    p.ctas[0].emit('pointertap', {}); // the four-member ante group has ‹ ›
+    const f = flyer(p);
+    const shown = (n: Container | null): boolean => !n || (n.visible && shown(n.parent));
+    expect(byLabel(f, /^bb-(prev|next)-/).length).toBeGreaterThan(0); // built, then hidden
+    expect(byLabel(f, /^bb-(prev|next)-/).filter((n) => shown(n)).length).toBe(0);
+    const [cancel] = actions(p).children as unknown as Array<{ kind: string }>;
+    expect(cancel.kind).toBe('dim');
   });
 
   it('resize while open drops the confirm without animation', () => {

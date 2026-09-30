@@ -73,6 +73,8 @@ export class SBuyBonusPage extends Container implements ShellLayer {
   flyer?: Container;
   actions?: Container;
   confirmBonus?: BonusOption;
+  /** The state the open confirm was drawn for (see `stateSig`). */
+  private confirmSig?: string;
   /** Puts the flyer `p` of the way from its card to the centre and the page parts at alpha 1 − p. */
   private flyAt?: (p: number) => void;
   private flyP = 0;
@@ -127,8 +129,8 @@ export class SBuyBonusPage extends Container implements ShellLayer {
     this.veil.clear().rect(0, 0, w, h).fill(S.veil);
     this.veil.hitArea = new Rectangle(0, 0, w, h);
     // the bar re-sends the same size on every state change (balance, win, bet …): keep an open
-    // confirm; the rebuild at the end of a cancel catches the page up
-    if (same && this.flyer) return;
+    // confirm while what it shows and charges still holds; otherwise drop it (unanimated) and rebuild
+    if (same && this.flyer && this.confirmSig === this.stateSig()) return;
     this.rebuild();
   }
 
@@ -144,6 +146,12 @@ export class SBuyBonusPage extends Container implements ShellLayer {
 
   private isActive(bonus: BonusOption): boolean {
     return this.host.state.activeFeature?.id === bonus.id;
+  }
+
+  /** What a confirm's price and its BUY depend on. */
+  private stateSig(): string {
+    const s = this.host.state;
+    return [s.bet, s.balance, s.busy, s.buyBonusEnabled, s.activeFeature?.id].join('|');
   }
 
   // ── page ────────────────────────────────────────────────────────────────────
@@ -446,13 +454,18 @@ export class SBuyBonusPage extends Container implements ShellLayer {
     const cta = this.ctas[slot]; // the copy's own CTA, which the actions replace
     this.ctas[slot] = rowCta;
     cta.visible = false;
-    for (const c of flyer.children) c.eventMode = 'none'; // taps on the copy do nothing
+    for (const c of flyer.children) {
+      c.eventMode = 'none'; // taps on the copy do nothing
+      if (/^bb-(prev|next)-/.test(c.label)) c.visible = false; // so its ‹ › would be dead buttons
+    }
     flyer.label = 'bb-flyer';
     flyer.position.copyFrom(from);
     this.stage.addChild(flyer); // the ✕ is added after the stage, so it stays on top
     card.visible = false;
+    this.scroll!.eventMode = 'none'; // no drag or wheel under the confirm; the rebuild's new box is live
     this.flyer = flyer;
     this.confirmBonus = bonus;
+    this.confirmSig = this.stateSig();
     const parts = [this.scroll!, this.band, this.titlePlate!];
     this.flyAt = (p) => {
       if (this.destroyed || flyer.destroyed) return;
@@ -476,7 +489,7 @@ export class SBuyBonusPage extends Container implements ShellLayer {
           const bw = (cw - 2 * cta.x - em * 0.5) / 2;
           const actions = new Container();
           actions.label = 'bb-confirm-actions';
-          const cancel = new STextButton(this.host.t('Cancel'), { w: bw, h: em * 2.8, kind: 'ghost', size: em, onTap: () => this.cancelConfirm() });
+          const cancel = new STextButton(this.host.t('Cancel'), { w: bw, h: em * 2.8, kind: 'dim', size: em, onTap: () => this.cancelConfirm() });
           const ok = new STextButton(this.host.t(feature ? 'Activate' : 'Buy'), { w: bw, h: em * 2.8, kind: feature ? 'red' : 'accent', size: em, onTap: () => this.commit(bonus) });
           ok.x = bw + em * 0.5;
           actions.addChild(cancel, ok);
@@ -537,7 +550,7 @@ export class SBuyBonusPage extends Container implements ShellLayer {
     if (!this.flyer) return;
     this.flyAt?.(0);
     this.flyer.destroy({ children: true });
-    this.flyer = this.actions = this.flyAt = this.confirmBonus = undefined;
+    this.flyer = this.actions = this.flyAt = this.confirmBonus = this.confirmSig = undefined;
   }
 
   // ── keyboard ────────────────────────────────────────────────────────────────

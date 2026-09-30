@@ -30,7 +30,7 @@ describe('S overlay primitives', () => {
     expect(onTap).toHaveBeenCalled();
   });
 
-  it('text buttons: accent yellow/ink, red red/fg, ghost plate/fg; long labels fit; disabled is inert', () => {
+  it('text buttons: accent yellow/ink, red red/fg, ghost plate/fg, dim track/fg; long labels fit; disabled is inert', () => {
     const onTap = vi.fn();
     const a = new STextButton('Buy', { w: 120, h: 40, kind: 'accent', onTap });
     expect([a.slab.face, a.labelText.style.fill, a.labelText.text]).toEqual([S.yellow, S.ink, 'BUY']);
@@ -39,6 +39,10 @@ describe('S overlay primitives', () => {
     expect([g.slab.face, g.labelText.style.fill]).toEqual([S.plate, S.fg]);
     g.emit('pointerover', {});
     expect([g.slab.face, g.labelText.style.fill]).toEqual([S.yellow, S.ink]);
+    const d = new STextButton('Cancel', { w: 80, h: 30, kind: 'dim', onTap });
+    expect([d.slab.face, d.labelText.style.fill]).toEqual([S.track, S.fg]); // a face on a black plate
+    d.emit('pointerover', {});
+    expect([d.slab.face, d.labelText.style.fill]).toEqual([S.plateHover, S.fg]);
     const long = new STextButton('Deactivate the legendary feature now', { w: 100, h: 30, kind: 'accent', onTap });
     expect(long.labelText.width).toBeLessThanOrEqual(100 - 16);
     a.disabled = true;
