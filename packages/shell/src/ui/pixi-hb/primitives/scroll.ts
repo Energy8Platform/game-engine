@@ -2,6 +2,9 @@ import { Container, Graphics, Rectangle, type FederatedPointerEvent, type Ticker
 import { scrollHint } from '@/core/scrollHint';
 import { ScrollAffordanceView, THUMB_THICK, THUMB_INSET, type ScrollLook } from './scroll-affordance';
 
+/** How far (px, along the axis) the pointer travels from the press before it is a drag, not a tap. */
+const DRAG_SLOP = 4;
+
 /** A scrolling viewport (vertical by default, or horizontal) — mask + drag + mouse-wheel, the Pixi
  *  analogue of the overlay's `overflow:auto` scroll region. Add content to `.content`; call `refresh()`
  *  after content changes or a resize. */
@@ -20,6 +23,8 @@ export class ScrollBox extends Container {
   private dragging = false;
   private lastX = 0;
   private lastY = 0;
+  /** The press point along the axis, in the parent's space. */
+  private pressAt = 0;
   private axis: 'x' | 'y';
   private moved = false;
   private canvas?: HTMLCanvasElement;
@@ -134,6 +139,7 @@ export class ScrollBox extends Container {
     const p = this.parentPoint(e);
     this.lastX = p.x;
     this.lastY = p.y;
+    this.pressAt = this.axis === 'x' ? p.x : p.y;
     const local = this.toLocal(e.global);
     const t = this.affordance.trackBounds;
     if (this.axis === 'x') {
@@ -156,7 +162,8 @@ export class ScrollBox extends Container {
     const p = this.parentPoint(e);
     const x = this.axis === 'x';
     const d = x ? p.x - this.lastX : p.y - this.lastY;
-    if (Math.abs(d) > 2) this.moved = true;
+    // a drag once the finger is more than 4px from the press along the axis — a slow drag too
+    if (Math.abs((x ? p.x : p.y) - this.pressAt) > DRAG_SLOP) this.moved = true;
     this.lastX = p.x;
     this.lastY = p.y;
     if (this.maxScroll <= 0) return;

@@ -2,10 +2,10 @@ import '../pixi/setup-canvas'; // must be first — patches canvas getContext be
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { Assets, Container, FillGradient, Graphics, Point, Sprite, Texture } from 'pixi.js';
 import { openSBuyBonus, SBuyBonusPage } from '@/ui/pixi-s/components/BuyBonus';
-import { stripMetrics } from '@/ui/pixi-s/primitives/page';
+import { stripMetrics, closeCorner } from '@/ui/pixi-s/primitives/page';
 import { ScrollBox } from '@/ui/pixi-hb/primitives/scroll';
 import { SReadout, SBet } from '@/ui/pixi-s/widgets';
-import { Slab } from '@/ui/pixi-s/slab';
+import { Slab, SHADOW_OFFSET } from '@/ui/pixi-s/slab';
 import { makeContext, defaultConfig } from '../pixi/_host';
 
 const OPTIONS = [
@@ -136,7 +136,7 @@ describe('S buy bonus page', () => {
   });
 
   // ── the portrait row ──────────────────────────────────────────────────────
-  it('aspect: every card body is half as wide as it is tall (and ≤ 0.62 of a phone)', () => {
+  it('aspect: every card body is half as wide as it is tall (and ≤ 0.70 of a phone)', () => {
     for (const [w, h] of [[1280, 720], [390, 844]]) {
       const { page: p } = page({ screenW: w, screenH: h }, FOUR);
       const bodies = byLabel(p, 'bb-body');
@@ -144,7 +144,7 @@ describe('S buy bonus page', () => {
       for (const b of bodies) {
         const r = b.getLocalBounds();
         expect(Math.abs(r.width - r.height / 2)).toBeLessThanOrEqual(1);
-        if (w === 390) expect(r.width).toBeLessThanOrEqual(0.62 * 390 + 1);
+        if (w === 390) expect(Math.abs(r.width - 0.7 * 390)).toBeLessThanOrEqual(1); // the width cap binds on a phone
       }
     }
   });
@@ -256,6 +256,22 @@ describe('S buy bonus page', () => {
     const bet = host.state.bet;
     p.onKey({ code: 'ArrowUp', shiftKey: true } as KeyboardEvent);
     expect(host.state.bet).toBeGreaterThan(bet);
+  });
+
+  it('short screen: the ✕ and the BUY BONUS plate stay at screen size, in the screen corners', () => {
+    const { page: p } = page({ screenW: 400, screenH: 225 }, FOUR);
+    const q = p as unknown as { closeBtn: Container; titlePlate: Container; stage: Container };
+    const c = closeCorner(400, 225);
+    const b = q.closeBtn.getBounds();
+    expect(b.x).toBeCloseTo(c.x, 5);
+    expect(b.y).toBeCloseTo(c.y, 5);
+    expect(b.width - SHADOW_OFFSET).toBeCloseTo(Math.round(c.size), 5);
+    const plate = q.titlePlate.getBounds();
+    expect(plate.y).toBeCloseTo(stripMetrics(225).top, 5);
+    // above the scaled stage, and the row starts under the plate
+    expect(p.getChildIndex(q.closeBtn)).toBeGreaterThan(p.getChildIndex(q.stage));
+    expect(p.getChildIndex(q.titlePlate)).toBeGreaterThan(p.getChildIndex(q.stage));
+    for (const card of byLabel(p, /^bb-card-/)) expect(card.getBounds().y).toBeGreaterThanOrEqual(plate.y + plate.height - SHADOW_OFFSET);
   });
 
   it('short screen: 400×225 scales the page by 225/440 and keeps it on screen', () => {

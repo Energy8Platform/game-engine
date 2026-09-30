@@ -256,15 +256,13 @@ describe('the shared ✕ corner (I4)', () => {
         (openSBetPicker(host) as unknown as SPicker).closeBtn,
         (openSAutoplayPicker(host) as unknown as SPicker).closeBtn,
         page.closeBtn!,
+        (openSBuyBonus(host) as unknown as { closeBtn: Container }).closeBtn,
       ];
       const c = closeCorner(W, H);
-      // buy bonus lays out at the logical size (h ≥ 440) inside its stage, scaled by k
-      const k = Math.min(1, H / 440);
-      const bb = [(openSBuyBonus(host) as unknown as { closeBtn: Container }).closeBtn, closeCorner(W / k, H / k)] as const;
-      for (const [b, at] of [...btns.map((b) => [b, c] as const), bb]) {
-        expect(b.x).toBeCloseTo(at.x, 5);
-        expect(b.y).toBeCloseTo(at.y, 5);
-        expect((b as SButton).measureSize().w).toBe(Math.round(at.size));
+      for (const b of btns) {
+        expect(b.x).toBeCloseTo(c.x, 5);
+        expect(b.y).toBeCloseTo(c.y, 5);
+        expect((b as SButton).measureSize().w).toBe(Math.round(c.size));
       }
     }
   });

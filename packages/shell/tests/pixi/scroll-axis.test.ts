@@ -35,6 +35,16 @@ describe('ScrollBox axis', () => {
     expect(box.content.x).toBe(-50);
     expect(box.didDrag).toBe(true);
   });
+  it('x: a slow drag (ten 1px moves) counts as a drag; 3px in all does not', () => {
+    const slow = make('x', 900, 80);
+    slow.emit('pointerdown', ptr(200, 50));
+    for (let i = 1; i <= 10; i++) slow.emit('globalpointermove', ptr(200 - i, 50));
+    expect(slow.didDrag).toBe(true);
+    const jitter = make('x', 900, 80);
+    jitter.emit('pointerdown', ptr(200, 50));
+    for (let i = 1; i <= 3; i++) jitter.emit('globalpointermove', ptr(200 - i, 50));
+    expect(jitter.didDrag).toBe(false);
+  });
   it('x: drag under a scaled parent is 1:1 under the finger', () => {
     const parent = new Container();
     parent.scale.set(0.5);

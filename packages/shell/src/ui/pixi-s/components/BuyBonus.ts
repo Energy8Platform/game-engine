@@ -18,7 +18,8 @@ import { S, SHADOW_ALPHA } from '../theme';
 /** Buy-bonus: no frame — over the frosted game the S strip (a BUY BONUS title plate and a ✕ in the
  *  top corners), one horizontal row of portrait "ticket" cards (centred when they fit, else scrolling
  *  along x with the next card peeking in) and the BALANCE | BET plates at the bottom, with no panel
- *  behind them. A screen under 440 tall lays the page out at 440 and draws it scaled down. Each card:
+ *  behind them. A screen under 440 tall lays the row and the band out at 440 and draws them scaled
+ *  down; the plate and ✕ stay at screen size, where every S overlay puts them. Each card:
  *  the hero fills the top and fades to black over the title zone (‹ › either side of the title when
  *  the slot is a `groupedBy` group), then the description, a dashed separator between two side
  *  notches, the volatility bars, the yellow price and a full-width CTA. Returns null when there are
@@ -56,7 +57,8 @@ export class SBuyBonusPage extends Container implements ShellLayer {
   readonly tag = 'buybonus';
   private host: PixiComponentContext;
   private veil = new Graphics();
-  /** Everything but the veil and the confirm, laid out at the page's logical size and scaled by k. */
+  /** The row and the band, laid out at the page's logical size and scaled by k (the veil, plate, ✕
+   *  and confirm stay at screen size). */
   private stage = new Container();
   titlePlate?: STitlePlate;
   private closeBtn?: Container;
@@ -135,24 +137,25 @@ export class SBuyBonusPage extends Container implements ShellLayer {
 
   // ── page ────────────────────────────────────────────────────────────────────
   private rebuild(): void {
-    // a short screen lays the page out at MIN_PAGE_H and draws it scaled down
+    // the title plate and ✕ at screen size in the screen corners, above the stage, as on every S overlay
+    const strip = stripMetrics(this.h);
+    this.titlePlate?.destroy({ children: true });
+    this.closeBtn?.destroy({ children: true });
+    const m = strip.top;
+    this.titlePlate = new STitlePlate(this.host.t('Buy bonus'), strip.height, this.w - m * 4 - strip.height - ScrollBox.GUTTER);
+    this.titlePlate.position.set(m, m);
+    const c = closeCorner(this.w, this.h);
+    this.closeBtn = sCloseButton(c.size, () => this.host.closeLayer());
+    this.closeBtn.position.set(c.x, c.y);
+    this.addChild(this.titlePlate, this.closeBtn);
+
+    // a short screen lays the row and the band out at MIN_PAGE_H and draws them scaled down
     const k = Math.min(1, this.h / MIN_PAGE_H);
     const W = this.w / k;
     const H = this.h / k;
     this.stage.scale.set(k);
     const em = clamp(11, H / 36, 15);
     const pad = clamp(12, em * 1.2, 20);
-    const strip = stripMetrics(H);
-    // the title plate and ✕ in the screen corners
-    this.titlePlate?.destroy({ children: true });
-    this.closeBtn?.destroy({ children: true });
-    const m = strip.top;
-    this.titlePlate = new STitlePlate(this.host.t('Buy bonus'), strip.height, W - m * 4 - strip.height - ScrollBox.GUTTER);
-    this.titlePlate.position.set(m, m);
-    const c = closeCorner(W, H);
-    this.closeBtn = sCloseButton(c.size, () => this.host.closeLayer());
-    this.closeBtn.position.set(c.x, c.y);
-    this.stage.addChild(this.titlePlate, this.closeBtn);
 
     // bet band — the two plates at the bottom edge, no backing
     const betH = Math.min(BET_BAND_H, H * 0.16);
@@ -164,9 +167,9 @@ export class SBuyBonusPage extends Container implements ShellLayer {
     this.band.addChild(band);
 
     // the card row, between the strip and the band; scrolls along x when it overflows
-    const rowTop = strip.top + strip.height * 1.3;
+    const rowTop = (strip.top + strip.height * 1.3) / k; // under the screen-size strip
     const rowBottom = bandTop - pad * 0.5;
-    const cardH = Math.min(rowBottom - rowTop - ScrollBox.GUTTER, (0.62 * W) / ASPECT, 640);
+    const cardH = Math.min(rowBottom - rowTop - ScrollBox.GUTTER, (0.7 * W) / ASPECT, 640);
     const cardW = Math.round(cardH * ASPECT);
     this.cardW = cardW;
     this.cardH = cardH;
