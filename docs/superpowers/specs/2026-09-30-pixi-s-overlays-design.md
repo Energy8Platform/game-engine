@@ -329,3 +329,76 @@ Its users, forked with only imports and styles changed:
   scale-down keeps it on screen, at the cost of small rows. This is accepted.
 - **Inter in S overlays.** It is a deliberate readability choice for long copy. Montserrat stays
   for everything that is a label, title or number.
+
+## Revision 2 (2026-09-30, after the first review of the overlays)
+
+The user's asks, verbatim, with two reference screenshots (a game-info page; an autoplay picker):
+
+> game info: scrollbar, close и главная плашка должны по углам быть, а контент уже по середине с
+> отступом; подложек не должно быть; у controls не должно текста game/menu&info
+> menu: ползунок тоже желтого цвета; сами плашки должны быть по ширине меньше кнопки spin
+> autoplay/bet: не должно быть подложек, примерный вид модалки — второй скрин
+
+Answers to the follow-up questions: the bet and autoplay pickers become a slider; every modal loses
+its backing panel; on mobile the menu rows are narrower than SPIN, with the label above the control.
+
+These rules replace the earlier ones where they conflict.
+
+### R1. Pages (game info, buy bonus): corners
+- **Top corners.**
+  - The title plate sits in the top-left corner of the screen, at `(m, m)` with `m = stripMetrics(h).top`.
+  - ✕ sits in the top-right corner of the screen, at `x = w − m − GUTTER − size`. The gutter keeps it
+    clear of the scrollbar.
+- **Game info scroll area.**
+  - It covers the whole screen, so the scrollbar runs along the right screen edge at full height.
+  - The content column (the same width as before) is centred in it.
+  - The column's top padding is the strip bottom plus half a strip height. Content scrolls under the
+    fixed plates.
+- **Buy bonus.** Only the title plate and ✕ move to the corners. The card list, the bet band and the
+  card panels are unchanged: they are the cards themselves, not a backing.
+
+### R2. Game info: no backing, centred section plates
+- **No backing.** No content panels: every `card()` block and paytable card draws no background.
+  Hotkey keycaps (flat `S.track` rects) and grid cells stay, because they are elements, not a backing.
+- **Centred plates.** Section title plates are centred in the column, as in HB and the reference. The
+  wins header centres the plate and its "min N" badge together.
+- **Controls.** The Controls section drops its "GAME" / "MENU & INFO" sub-headings.
+
+### R3. Modals: no backing
+- **Layout.** `SCardModal` draws no panel. The content sits straight on the veil over the frosted
+  game:
+  - the title plate is centred at the top of the content block;
+  - the body and the actions follow below it;
+  - ✕ sits in the top-right corner of the screen (`stripMetrics` size and inset). Its hit area is
+    the plate, which is at least 44.
+- **Unchanged.** The API, fit-scaling and the rule that an empty title shows no plate stay as they
+  were.
+
+### R4. Bet and autoplay pickers: a stepped slider
+- **Shape.** A full-screen layer (veil, no card):
+  - the title plate is centred;
+  - ✕ sits in the top-right corner;
+  - below the title: a yellow value plate showing the current choice, riding above the thumb and
+    clamped to the slider's ends;
+  - the slider;
+  - the CONFIRM / START `STextButton` (accent), centred.
+  - The block is centred vertically.
+- **`SStepSlider(count, index, onChange)`.**
+  - A flat `S.track` track, half the thumb height.
+  - The thumb is a leaning yellow slab (0.8·h × h).
+  - A drag or tap snaps to the nearest step.
+  - Width `min(620, 0.7·w)`.
+- **Keys** are as in HB: →/↓/=/Num+ step up, ←/↑/−/Num− step down, Enter/Space confirm, Escape
+  close.
+- **Choices** are unchanged: bet levels, and autoplay counts including ∞ (capped by `maxCount`).
+
+### R5. Menu
+- **Slider thumb.** Yellow, like the fill (it was fg).
+- **Row width.** Just under SPIN's width: wide 236 (SPIN 248), mobile 142 (SPIN 150).
+- **Wrapping.** A row whose label and control do not fit on one line stacks the label above the
+  control:
+  - ranges wrap when the slider would be under 90;
+  - toggles wrap when the label would not fit beside the 44 toggle;
+  - a stacked row is `10 + label + 8 + control + 10` tall;
+  - button rows stay one line, and their label scales to fit.
+- **Stacking.** Rows stack with their own heights.
