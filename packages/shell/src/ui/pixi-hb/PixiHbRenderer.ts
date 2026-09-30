@@ -11,6 +11,7 @@ import {
 } from 'pixi.js';
 import type { ShellRenderer, ShellHost, OverlayRequest, OverlayHandle, SafeArea } from '@/core/renderer';
 import type { Rect } from '@/core/popover';
+import type { ReplayModalOptions, ModalOptions } from '@/core/types';
 import type { ShellTokens } from '@/core/theme';
 import type { PixiComponentContext, ShellLayer, LayerHandle } from '../pixi/context';
 import { installShellFont, whenFontReady } from './text';
@@ -42,13 +43,38 @@ export interface HbBar extends Container {
   fitScale(): number;
   /** Screen-space insets the scene should avoid. */
   safeArea(): SafeArea;
+  /** The menu layer opened (true) or closed (false) — a skin can mark its burger (S: ✕). */
+  setMenuOpen?(open: boolean): void;
 }
+
+/** The overlay builders PixiHbRenderer uses; a skin overrides any of them through `overlays`. */
+export interface HbOverlays {
+  menu(ctx: PixiComponentContext, anchor: () => Rect | null, plate: () => Rect | null, scale: () => number): ShellLayer;
+  gameInfo(ctx: PixiComponentContext): ShellLayer;
+  buyBonus(ctx: PixiComponentContext): ShellLayer | null;
+  betPicker(ctx: PixiComponentContext): ShellLayer;
+  autoplayPicker(ctx: PixiComponentContext): ShellLayer;
+  replay(ctx: PixiComponentContext, opts: ReplayModalOptions, reopen: () => void): ShellLayer;
+  modal(ctx: PixiComponentContext, opts: ModalOptions): ShellLayer;
+}
+
+const HB_OVERLAYS: HbOverlays = {
+  menu: openMenu,
+  gameInfo: openGameInfo,
+  buyBonus: openBuyBonus,
+  betPicker: openBetPicker,
+  autoplayPicker: openAutoplayPicker,
+  replay: buildReplayModal,
+  modal: buildModal,
+};
 
 export interface PixiHbRendererOptions {
   app: Application;
   parent?: Container;
   /** Build the control bar. Default: HB's BottomBar. */
   bar?: (ctx: PixiComponentContext) => HbBar;
+  /** Replace any of HB's overlays (the S skin replaces them all). */
+  overlays?: Partial<HbOverlays>;
 }
 
 /** The Pixi VIEW half of the shell — the renderer the controller drives. Owns the root/bar/modal
@@ -75,11 +101,14 @@ export class PixiHbRenderer implements ShellRenderer {
   private layerBackdrop = false;
   private moneyAnims: Array<() => void> = [];
   private destroyed = false;
+  private overlays: HbOverlays;
+  private currentKind: OverlayRequest['kind'] | null = null;
 
   constructor(opts: PixiHbRendererOptions) {
     this.app = opts.app;
     this.parent = opts.parent;
     this.makeBar = opts.bar ?? ((ctx) => new BottomBar(ctx));
+    this.overlays = { ...HB_OVERLAYS, ...opts.overlays };
   }
 
   private get ticker(): Ticker {
@@ -126,6 +155,8 @@ export class PixiHbRenderer implements ShellRenderer {
     this.bar = this.makeBar(this.ctx);
     this.barLayer.addChild(this.bar);
     this.bar.applyFit();
+    // a bar rebuilt under the open menu keeps its "menu open" mark (the S burger's ✕)
+    if (this.currentKind === 'menu') this.bar.setMenuOpen?.(true);
     // renderBar() runs on every resize AND on ~20 other state changes (bet/win/turbo/mode/…), any of
     // which can change the bar's own fitScale()/menuPlate() (e.g. a WIN pill appearing mid-autoplay
     // retriggers the wide layout's overflow-tightening branch). Only onResize used to reposition the
@@ -169,6 +200,7 @@ export class PixiHbRenderer implements ShellRenderer {
   }
 
   openOverlay(req: OverlayRequest): OverlayHandle | void {
+    const o = this.overlays;
     let layer: ShellLayer | null = null;
     switch (req.kind) {
       case 'menu':
@@ -177,7 +209,7 @@ export class PixiHbRenderer implements ShellRenderer {
         // — see Menu.ts's openMenu doc comment for why this must stay lazy. menuAnchor (the burger)
         // is the arrow's pointer; menuPlate (the plaque) drives placement; fitScale is the same
         // factor BottomBar applies to its own content via `inner.scale`.
-        layer = openMenu(
+        layer = o.menu(
           this.ctx,
           () => this.bar?.menuAnchor() ?? null,
           () => this.bar?.menuPlate() ?? null,
@@ -185,26 +217,28 @@ export class PixiHbRenderer implements ShellRenderer {
         );
         break;
       case 'gameInfo':
-        layer = openGameInfo(this.ctx);
+        layer = o.gameInfo(this.ctx);
         break;
       case 'buyBonus':
-        layer = openBuyBonus(this.ctx);
+        layer = o.buyBonus(this.ctx);
         break;
       case 'betPicker':
-        layer = openBetPicker(this.ctx);
+        layer = o.betPicker(this.ctx);
         break;
       case 'autoplayPicker':
-        layer = openAutoplayPicker(this.ctx);
+        layer = o.autoplayPicker(this.ctx);
         break;
       case 'replay':
-        layer = buildReplayModal(this.ctx, req.opts, () => this.host.openReplay(req.opts));
+        layer = o.replay(this.ctx, req.opts, () => this.host.openReplay(req.opts));
         break;
       case 'modal':
-        layer = buildModal(this.ctx, req.opts);
+        layer = o.modal(this.ctx, req.opts);
         break;
     }
     if (!layer) return;
     this.pushLayer(layer, { backdrop: req.kind !== 'menu' });
+    this.currentKind = req.kind; // after pushLayer: its clearLayer() resets it
+    if (req.kind === 'menu') this.bar?.setMenuOpen?.(true);
     const built = layer;
     return {
       onKey: built.onKey ? built.onKey.bind(built) : undefined,
@@ -269,6 +303,8 @@ export class PixiHbRenderer implements ShellRenderer {
     }
     this.layerBackdrop = false;
     this.removeBackdrop();
+    this.currentKind = null;
+    this.bar?.setMenuOpen?.(false);
   }
 
   fitModals(): void {

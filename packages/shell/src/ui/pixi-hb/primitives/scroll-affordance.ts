@@ -26,6 +26,15 @@ export interface ThumbBounds {
 }
 
 export const THUMB_THICK = 6;
+
+/** How the scrollbar is painted. HB: an orange rounded thumb on a dark groove; S: flat yellow. */
+export interface ScrollLook {
+  track: string;
+  thumb: string;
+  /** Corner radius of the thumb and track; 0 draws plain rects. */
+  radius: number;
+}
+export const HB_SCROLL_LOOK: ScrollLook = { track: HB.track, thumb: HB.orange, radius: THUMB_THICK / 2 };
 export const THUMB_INSET = 5;
 const THUMB_MIN_PX = 24;
 
@@ -34,8 +43,11 @@ export class ScrollAffordanceView extends Container {
   private bounds: ThumbBounds | null = null;
   private track: ThumbBounds | null = null;
 
-  constructor() {
+  private look: ScrollLook;
+
+  constructor(look: ScrollLook = HB_SCROLL_LOOK) {
     super();
+    this.look = look;
     this.eventMode = 'none'; // decoration: the ScrollBox handles the thumb drag itself
     this.addChild(this.thumb);
     this.visible = false;
@@ -83,7 +95,13 @@ export class ScrollAffordanceView extends Container {
     const t = this.track;
     const b = this.bounds;
     this.thumb.clear();
-    this.thumb.roundRect(t.x, t.y, t.w, t.h, THUMB_THICK / 2).fill(HB.track);
-    this.thumb.roundRect(b.x, b.y, b.w, b.h, THUMB_THICK / 2).fill(HB.orange);
+    const r = this.look.radius;
+    if (r > 0) {
+      this.thumb.roundRect(t.x, t.y, t.w, t.h, r).fill(this.look.track);
+      this.thumb.roundRect(b.x, b.y, b.w, b.h, r).fill(this.look.thumb);
+    } else {
+      this.thumb.rect(t.x, t.y, t.w, t.h).fill(this.look.track);
+      this.thumb.rect(b.x, b.y, b.w, b.h).fill(this.look.thumb);
+    }
   }
 }

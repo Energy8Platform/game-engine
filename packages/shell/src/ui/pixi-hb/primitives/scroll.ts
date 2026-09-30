@@ -1,6 +1,6 @@
 import { Container, Graphics, Rectangle, type FederatedPointerEvent, type Ticker } from 'pixi.js';
 import { scrollHint } from '@/core/scrollHint';
-import { ScrollAffordanceView, THUMB_THICK, THUMB_INSET } from './scroll-affordance';
+import { ScrollAffordanceView, THUMB_THICK, THUMB_INSET, type ScrollLook } from './scroll-affordance';
 
 /** A vertically-scrolling viewport — mask + drag + mouse-wheel, the Pixi analogue of the
  *  overlay's `overflow-y:auto` scroll region. Add content to `.content`; call `refresh()`
@@ -23,10 +23,10 @@ export class ScrollBox extends Container {
   private canvas?: HTMLCanvasElement;
   private wheelHandler?: (e: WheelEvent) => void;
 
-  constructor(canvas?: HTMLCanvasElement, _ticker?: Ticker) {
+  constructor(canvas?: HTMLCanvasElement, _ticker?: Ticker, look?: ScrollLook) {
     super();
     this.canvas = canvas;
-    this.affordance = new ScrollAffordanceView();
+    this.affordance = new ScrollAffordanceView(look);
     // Added AFTER content, and never masked: the marks describe the viewport, so clipping them to
     // the content they describe would hide them exactly when the content overflows.
     this.addChild(this.content, this.affordance);

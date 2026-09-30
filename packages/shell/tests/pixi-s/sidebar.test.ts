@@ -347,4 +347,18 @@ describe('S side bar — modes and controls', () => {
     for (const n of [p.spin!, p.menuBtn, p.buy!, p.turboTab!, p.autoTab!, p.bet.up!, p.bet.valueHit]) n.emit('pointertap', {});
     expect(calls).toEqual(['spin', 'menu', 'buy', 'turbo', 'auto', 'bet1', 'picker']);
   });
+
+  it('setMenuOpen swaps the burger glyph for ✕ and back', () => {
+    const bar = build(host(1280, 720));
+    const b = bar as unknown as { menuBtn: SButton; menuClose: Container };
+    expect(b.menuBtn.glyph.visible).toBe(true);
+    expect(b.menuClose.visible).toBe(false);
+    bar.setMenuOpen(true);
+    expect(b.menuBtn.glyph.visible).toBe(false);
+    expect(b.menuClose.visible).toBe(true);
+    expect((b.menuClose as IconView).iconName).toBe('close');
+    bar.setMenuOpen(false);
+    expect(b.menuBtn.glyph.visible).toBe(true);
+    expect(b.menuClose.visible).toBe(false);
+  });
 });

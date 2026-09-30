@@ -36,5 +36,6 @@ export function sIcon(name: SIconName, size: number, color: string): Graphics {
   }
   const g = new Graphics(ctx);
   g.scale.set(size / 24);
+  g.label = 's-glyph'; // lets the no-round/no-stroke guard skip glyph geometry (SVG paths)
   return g;
 }

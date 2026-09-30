@@ -2,7 +2,7 @@ import { Container, type Text } from 'pixi.js';
 import type { PixiComponentContext } from '../pixi/context';
 import type { HbBar } from '../pixi-hb/PixiHbRenderer';
 import { autoplayDiscMode } from '../pixi-hb/components/BottomBar';
-import { makeIcon } from '../pixi-hb/pixi-icon';
+import { makeIcon, type IconView } from '../pixi-hb/pixi-icon';
 import type { Rect } from '@/core/popover';
 import type { SafeArea } from '@/core/renderer';
 import { bonusBuyLocked } from '@/core/state';
@@ -100,6 +100,7 @@ export class SideBar extends Container implements HbBar {
   private plate: Rect | null = null;
   private safe: SafeArea = { top: 0, right: 0, bottom: 0, left: 0 };
   private menuBtn!: SButton;
+  private menuClose!: IconView;
   private totalWin?: SReadout;
   private win!: SReadout;
   private balance?: SReadout;
@@ -155,6 +156,13 @@ export class SideBar extends Container implements HbBar {
     return this.safe;
   }
 
+  /** The menu is open: the burger shows ✕ (a tap closes it — the controller toggles). */
+  setMenuOpen(open: boolean): void {
+    if (this.destroyed) return;
+    this.menuBtn.glyph.visible = !open;
+    this.menuClose.visible = open;
+  }
+
   applyFit(): void {
     const { screenW: W, screenH: H } = this.host;
     const winW = this.win.measureSize().w;
@@ -201,6 +209,11 @@ export class SideBar extends Container implements HbBar {
       glyphSize: z.menuGlyph,
       onTap: () => this.host.actions.openMenu(),
     });
+    // the ✕ the burger shows while the menu is open (setMenuOpen), in the same glyph box
+    this.menuClose = makeIcon('close', z.menuGlyph, { ink: S.fg, fill: S.fg });
+    this.menuClose.position.copyFrom(this.menuBtn.glyph.position);
+    this.menuClose.visible = false;
+    this.menuBtn.addChild(this.menuClose);
     const items: Sized[] = [this.menuBtn];
     if (this.isBase()) {
       this.buy = this.buildBuy();
