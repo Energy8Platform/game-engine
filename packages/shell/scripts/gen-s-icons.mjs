@@ -39,7 +39,9 @@ const round = (n) => {
 // --- path walker: absolute M/L/C/Z subpaths (H/V → L, S expanded) --------------------------------
 function tokenize(d) {
   const out = [];
-  const re = /([MLHVCSZmlhvcsz])|(-?\d*\.?\d+(?:e[-+]?\d+)?)/gi;
+  // any letter is a command (an unsupported one, e.g. A / Q / T, throws below); a number's `e` is
+  // consumed by the number alternative
+  const re = /([A-Za-z])|(-?\d*\.?\d+(?:e[-+]?\d+)?)/gi;
   let m;
   while ((m = re.exec(d)) !== null) out.push(m[1] ? { cmd: m[1] } : { num: parseFloat(m[2]) });
   return out;
@@ -56,6 +58,7 @@ function walkPath(d) {
   };
   while (i < toks.length) {
     if (toks[i].cmd) cur = toks[i++].cmd;
+    else if (!cur || cur.toUpperCase() === 'Z') throw new Error(`number ${toks[i].num} after ${cur ?? 'no command'}`); // Z takes none
     const rel = cur === cur.toLowerCase();
     switch (cur.toUpperCase()) {
       case 'M': { let X = num(), Y = num(); if (rel) { X += x; Y += y; } x = sx = X; y = sy = Y; subs.push([{ c: 'M', pts: [[X, Y]] }]); cur = rel ? 'l' : 'L'; prev = 'M'; break; }
