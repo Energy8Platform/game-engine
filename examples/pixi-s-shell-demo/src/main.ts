@@ -344,7 +344,7 @@ applyScreen(currentScreen);
 renderToolbar();
 log('shell mounted');
 
-// ─── Debug/QA params: ?screen=<id>&kiosk=1&open=settings|info|buybonus ──────
+// ─── Debug/QA params: ?screen=<id>&kiosk=1&open=menu|info|buybonus|bet|auto|replay ──────
 const params = new URLSearchParams(location.search);
 const screenParam = params.get('screen');
 if (screenParam) { const s = SCREENS.find((x) => x.id === screenParam); if (s) applyScreen(s); }
@@ -366,6 +366,9 @@ const modeParam = params.get('mode') as ShellMode | null;
 if (modeParam) applyMode(modeParam);
 if (params.get('ante')) shell.activateFeature({ id: 'ante-warrior', type: 'feature', title: 'Warrior Ante', description: '', priceMultiplier: 1.25 });
 const open = params.get('open');
-if (open === 'settings') shell.openSettings();
+if (open === 'settings' || open === 'menu') shell.openMenu();
 else if (open === 'info') shell.openInfo();
 else if (open === 'buybonus') shell.openBuyBonus();
+else if (open === 'bet') shell.openBetPicker();
+else if (open === 'auto') shell.openAutoplayPicker();
+else if (open === 'replay') shell.openReplay({ bonusId: 'fs', bet: state.bet, payoutMultiplier: 87.5, onReplay: () => log('▶ replay started') });

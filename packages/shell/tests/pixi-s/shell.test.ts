@@ -58,4 +58,16 @@ describe('createPixiSShell', () => {
     const a = createPixiSShell(config(fakeApp(1280, 720)));
     expect(createPixiSShell(config(fakeApp(1280, 720)))).toBe(a);
   });
+
+  it('opens the S overlays, and the burger shows ✕ while the menu is open', () => {
+    const shell = createPixiSShell(config(fakeApp(1280, 720)));
+    shell.openMenu();
+    const r = (shell as unknown as { renderer: { currentLayer: { tag?: string } | null; bar: { menuClose: { visible: boolean } } } }).renderer;
+    expect(r.currentLayer?.tag).toBe('menu');
+    expect(r.currentLayer?.constructor.name).toBe('SMenu');
+    expect(r.bar.menuClose.visible).toBe(true);
+    shell.openInfo();
+    expect(r.currentLayer?.constructor.name).toBe('SPage');
+    expect(r.bar.menuClose.visible).toBe(false);
+  });
 });
