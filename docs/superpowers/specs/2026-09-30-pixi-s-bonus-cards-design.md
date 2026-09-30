@@ -169,6 +169,14 @@ current confirm does.
 
 `SCardModal` stays: the replay and generic modals use it.
 
+**As built (Task 4).**
+- At full fade-out the row, band and title plate also go `visible = false`, and they come back as
+  the reverse starts. Pixi still hit-tests a node at alpha 0, so the other CTAs and the bet stepper
+  would otherwise take taps through the empty page. A CTA tap while a flyer is out does nothing.
+- On the way back, Enter, Escape and the ✕ do nothing: the confirm is already closing. The bonus
+  being confirmed is cleared when the reverse starts, not when it ends.
+- Any rebuild (a bet step or a group flip, not only a resize) drops an open confirm without animation.
+
 ## 4. `ScrollBox` gets an axis
 
 `pixi-hb/primitives/scroll.ts`: `new ScrollBox(canvas, ticker, look?, axis: 'x' | 'y' = 'y')`.

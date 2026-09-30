@@ -1,6 +1,6 @@
 import '../pixi/setup-canvas'; // must be first — patches canvas getContext before pixi.js loads
 import { describe, it, expect, vi, afterEach } from 'vitest';
-import { Assets, Container, FillGradient, Graphics, Point, Sprite, Texture } from 'pixi.js';
+import { Assets, Container, FillGradient, Graphics, Point, Sprite, Texture, type Ticker } from 'pixi.js';
 import { openSBuyBonus, SBuyBonusPage } from '@/ui/pixi-s/components/BuyBonus';
 import { stripMetrics, closeCorner } from '@/ui/pixi-s/primitives/page';
 import { ScrollBox } from '@/ui/pixi-hb/primitives/scroll';
@@ -45,7 +45,10 @@ interface Parts {
   veil: Graphics;
   scroll: ScrollBox;
   band: Container;
-  confirm?: unknown;
+  titlePlate: Container;
+  closeBtn: Container;
+  flyer?: Container;
+  actions?: Container;
   cardEm(h: number): number;
   cardSize(): { w: number; h: number };
 }
@@ -92,26 +95,20 @@ describe('S buy bonus page', () => {
     const { page: p, emit, host } = page();
     const closeLayer = vi.spyOn(host, 'closeLayer');
     p.ctas[1].emit('pointertap', {});
-    expect(parts(p).confirm).toBeDefined();
+    expect(parts(p).flyer).toBeDefined();
     p.onKey({ code: 'Enter' } as KeyboardEvent);
     expect(emit).toHaveBeenCalledWith('buyBonusSelect', { id: 'fs' });
     expect(closeLayer).toHaveBeenCalled();
   });
 
-  it('I3: while the confirm is open the list, band, title plate and ✕ are hidden; Escape brings them back', () => {
+  it('I3: while the confirm is open nothing under the flyer shows but the ✕', () => {
     const { page: p } = page();
-    const q = p as unknown as { scroll: Container; band: Container; titlePlate: Container; closeBtn: Container; confirm?: unknown };
-    const shown = () => [q.scroll.visible, q.band.visible, q.titlePlate.visible, q.closeBtn.visible];
-    expect(shown()).toEqual([true, true, true, true]);
+    const q = parts(p);
     p.ctas[1].emit('pointertap', {});
-    expect(q.confirm).toBeDefined();
-    expect(shown()).toEqual([false, false, false, false]);
-    p.onKey({ code: 'Escape' } as KeyboardEvent);
-    expect(q.confirm).toBeUndefined();
-    expect(shown()).toEqual([true, true, true, true]);
-    p.ctas[1].emit('pointertap', {});
-    p.resize(1280, 720); // a resize drops the confirm and rebuilds the page — visible again
-    expect(shown()).toEqual([true, true, true, true]);
+    const shown = (n: Container) => n.visible && n.alpha > 0;
+    const onPage = p.children.filter((c) => c !== q.veil && c !== q.stage && shown(c as Container));
+    expect(onPage.map((c) => c === q.closeBtn)).toEqual([true]);
+    expect(q.stage.children.filter((c) => c !== q.flyer && c !== q.actions && shown(c as Container)).length).toBe(0);
   });
 
   it('an unaffordable option disables its CTA', () => {
@@ -242,7 +239,7 @@ describe('S buy bonus page', () => {
     scroll.emit('globalpointermove', { global: new Point(160, 400) } as never);
     scroll.emit('pointerup', { global: new Point(160, 400) } as never);
     p.ctas[1].emit('pointertap', {});
-    expect(parts(p).confirm).toBeUndefined();
+    expect(parts(p).flyer).toBeUndefined();
   });
 
   it('keys: → scrolls one card, Shift+↑ steps the bet', () => {
@@ -289,5 +286,151 @@ describe('S buy bonus page', () => {
     expect(x1).toBeLessThanOrEqual(400);
     const v = veil.getBounds();
     expect([v.x, v.y, v.width, v.height]).toEqual([0, 0, 400, 225]);
+  });
+});
+
+describe('S buy bonus: the fly-in confirm', () => {
+  const realMM = (globalThis as { matchMedia?: unknown }).matchMedia;
+  afterEach(() => {
+    (globalThis as { matchMedia?: unknown }).matchMedia = realMM;
+  });
+  /** FOUR at 1280×720 (k = 1) on a manual ticker, with motion on. */
+  function animated() {
+    (globalThis as { matchMedia?: unknown }).matchMedia = () => ({ matches: false });
+    const fns = new Set<(t: { deltaMS: number }) => void>();
+    const ticker = { add: (f: never) => fns.add(f), remove: (f: never) => fns.delete(f) } as unknown as Ticker;
+    const tick = (ms: number) => {
+      for (let t = 0; t < ms; t += 50) for (const f of [...fns]) f({ deltaMS: 50 });
+    };
+    return { ...page({ ticker }, FOUR), tick };
+  }
+  /** Where the flyer lands at 1280×720 (spec §3). */
+  function target(p: SBuyBonusPage) {
+    const { w, h } = parts(p).cardSize();
+    const em = parts(p).cardEm(h);
+    const m = stripMetrics(720).top;
+    const s = Math.min(1.3, (720 - 2 * m) / (h + em * 3.8), (1280 - 2 * m) / w);
+    return { w, h, s, gap: em * s, actH: em * 2.8 * s };
+  }
+  const flyer = (p: SBuyBonusPage) => byLabel(p, 'bb-flyer')[0];
+  const actions = (p: SBuyBonusPage) => byLabel(p, 'bb-confirm-actions')[0];
+  const alphas = (p: SBuyBonusPage) => [parts(p).scroll.alpha, parts(p).band.alpha, parts(p).titlePlate.alpha];
+
+  it('open: the card flies to the centre and grows, the page fades, then CANCEL | BUY fade in and take taps', () => {
+    const { page: p, tick } = animated();
+    const q = parts(p);
+    const card = one(p, 'bb-card-2');
+    const cta = p.ctas[2];
+    const from = q.stage.toLocal(card.getGlobalPosition());
+    const t = target(p);
+    one(p, 'bb-cta-2').emit('pointertap', {});
+    tick(150);
+    const f = flyer(p);
+    expect(f.scale.x).toBeGreaterThan(1);
+    expect(f.scale.x).toBeLessThan(t.s);
+    const toX = (1280 - t.w * t.s) / 2;
+    expect((f.x - from.x) * (toX - f.x)).toBeGreaterThan(0); // strictly between start and target
+    expect(!actions(p) || actions(p).eventMode === 'none').toBe(true);
+    tick(150);
+    tick(150);
+    expect(Math.abs(f.x + (t.w * f.scale.x) / 2 - 640)).toBeLessThanOrEqual(1);
+    expect(f.scale.x).toBeCloseTo(t.s, 5);
+    expect(alphas(p)).toEqual([0, 0, 0]);
+    expect(q.closeBtn.visible).toBe(true);
+    expect(q.closeBtn.alpha).toBe(1);
+    expect(card.visible).toBe(false);
+    expect(one(f, 'bb-cta-2').visible).toBe(false); // the copy's own CTA
+    expect(p.ctas[2]).toBe(cta); // still the row card's
+    const a = actions(p);
+    expect([a.alpha, a.eventMode]).toEqual([1, 'passive']);
+    // CANCEL | BUY under the flyer, half its width minus half a gap each; the block centred vertically
+    const [cancel, buy] = a.children as unknown as Array<{ x: number; measureSize(): { w: number; h: number }; kind: string }>;
+    expect(a.y).toBeCloseTo(f.y + t.h * t.s + t.gap, 5);
+    expect(Math.abs(cancel.measureSize().w - (t.w * t.s - t.gap) / 2)).toBeLessThanOrEqual(1); // slabs round their size
+    expect(buy.x).toBeCloseTo((t.w * t.s + t.gap) / 2, 5);
+    expect(Math.abs(cancel.measureSize().h - t.actH)).toBeLessThanOrEqual(1);
+    expect(Math.abs((f.y + a.y + t.actH) / 2 - 360)).toBeLessThanOrEqual(1);
+    expect([cancel.kind, buy.kind]).toEqual(['ghost', 'accent']);
+  });
+
+  it('cancel: Escape flies it back over 250ms; a second cancel mid-way is a no-op; the ✕ cancels, not closes', () => {
+    const { page: p, host, tick } = animated();
+    const closeLayer = vi.spyOn(host, 'closeLayer');
+    const card = one(p, 'bb-card-2');
+    p.ctas[2].emit('pointertap', {});
+    tick(450);
+    p.onKey({ code: 'Escape' } as KeyboardEvent);
+    expect(actions(p)).toBeUndefined(); // the row goes at once
+    tick(100);
+    expect(flyer(p)).toBeDefined();
+    p.onKey({ code: 'Escape' } as KeyboardEvent);
+    tick(150);
+    expect(flyer(p)).toBeUndefined();
+    expect(card.visible).toBe(true);
+    expect(alphas(p)).toEqual([1, 1, 1]);
+    // the ✕ during the confirm
+    p.ctas[2].emit('pointertap', {});
+    tick(450);
+    parts(p).closeBtn.emit('pointertap', {});
+    tick(250);
+    expect(flyer(p)).toBeUndefined();
+    expect(closeLayer).not.toHaveBeenCalled();
+  });
+
+  it('reduced motion (no matchMedia): open and cancel land at once', () => {
+    const { page: p } = page({}, FOUR);
+    const t = target(p);
+    p.ctas[2].emit('pointertap', {});
+    expect(flyer(p).scale.x).toBeCloseTo(t.s, 5);
+    expect(alphas(p)).toEqual([0, 0, 0]);
+    expect([actions(p).alpha, actions(p).eventMode]).toEqual([1, 'passive']);
+    p.ctas[3].emit('pointertap', {}); // another card's CTA while one is out does nothing
+    expect(byLabel(p, 'bb-flyer').length).toBe(1);
+    p.onKey({ code: 'Escape' } as KeyboardEvent);
+    expect(flyer(p)).toBeUndefined();
+    expect(alphas(p)).toEqual([1, 1, 1]);
+    expect(one(p, 'bb-card-2').visible).toBe(true);
+  });
+
+  it('Enter mid-tween commits exactly once; later ticks do not throw', () => {
+    const { page: p, host, emit, tick } = animated();
+    const closeLayer = vi.spyOn(host, 'closeLayer');
+    p.ctas[2].emit('pointertap', {});
+    tick(100);
+    p.onKey({ code: 'Enter' } as KeyboardEvent);
+    expect(() => tick(600)).not.toThrow();
+    expect(emit.mock.calls.filter(([e]) => e === 'buyBonusSelect')).toEqual([['buyBonusSelect', { id: 'fs' }]]);
+    expect(closeLayer).toHaveBeenCalledTimes(1);
+  });
+
+  it('the CANCEL button cancels', () => {
+    const { page: p } = page({}, FOUR);
+    p.ctas[2].emit('pointertap', {});
+    actions(p).children[0].emit('pointertap', {});
+    expect(flyer(p)).toBeUndefined();
+    expect(actions(p)).toBeUndefined();
+  });
+
+  it('resize while open drops the confirm without animation', () => {
+    const { page: p, tick } = animated();
+    p.ctas[2].emit('pointertap', {});
+    tick(150);
+    p.resize(1280, 720);
+    const check = () => {
+      expect(byLabel(p, 'bb-flyer').length).toBe(0);
+      expect(byLabel(p, 'bb-confirm-actions').length).toBe(0);
+      expect(alphas(p)).toEqual([1, 1, 1]);
+      for (const c of byLabel(p, /^bb-card-/)) expect(c.visible).toBe(true);
+    };
+    check();
+    expect(() => tick(600)).not.toThrow();
+    check();
+  });
+
+  it('the feature card confirms with a red ACTIVATE', () => {
+    const { page: p } = page({}, FOUR);
+    p.ctas[1].emit('pointertap', {});
+    const ok = actions(p).children[1] as unknown as { kind: string; labelText: { text: string } };
+    expect([ok.kind, ok.labelText.text]).toEqual(['red', 'ACTIVATE']);
   });
 });
