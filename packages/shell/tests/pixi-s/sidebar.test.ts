@@ -6,6 +6,7 @@ import { SideBar, OUTER, SAFE_GAP } from '@/ui/pixi-s/SideBar';
 import type { SButton, SBet, SSpin, SFsCounter, SReadout } from '@/ui/pixi-s/widgets';
 import { sIcon } from '@/ui/pixi-s/icons';
 import { S } from '@/ui/pixi-s/theme';
+import { SKEW } from '@/ui/pixi-s/slab';
 import type { PixiComponentContext } from '@/ui/pixi/context';
 import { makeContext, defaultConfig } from '../pixi/_host';
 
@@ -90,17 +91,24 @@ describe('S side bar — wide', () => {
     near(box(buy!).y, box(spin!).y);
   });
 
-  it('the tabs tuck under SPIN from its left', () => {
-    const bar = build(host(1280, 720));
-    const { spin, autoTab, turboTab, rightCol } = parts(bar);
-    const s = box(spin!);
-    const a = box(autoTab!);
-    const t = box(turboTab!);
-    expect(a.x).toBeLessThan(s.x);
-    expect(a.r).toBeGreaterThan(s.x);
-    expect(t.y).toBeGreaterThan(a.y);
-    expect(t.b).toBeLessThan(s.b);
-    expect(rightCol.getChildIndex(autoTab!)).toBeLessThan(rightCol.getChildIndex(spin!)); // SPIN draws over
+  it('the tabs stand apart from SPIN: a tabGap-wide seam parallel to its slanted left edge', () => {
+    for (const [w, h] of [[1280, 720], [390, 844]]) {
+      const { spin, autoTab, turboTab } = parts(build(host(w, h)));
+      const [tl, , , bl] = SKEW.spin;
+      const sh = spin!.measureSize().h;
+      // SPIN's left edge in its local units, from its top-left to its bottom-left corner
+      const edgeX = (y: number) => tl[0] + ((bl[0] - tl[0]) * (y - tl[1])) / (sh + bl[1] - tl[1]);
+      for (const tab of [autoTab!, turboTab!]) {
+        const { w: tw, h: th } = tab.measureSize();
+        const d = tw - tab.slab.points[4]; // how far the tab's bottom-right corner sits in
+        for (const [x, y] of [[tw, 0], [tw - d, th]]) {
+          const p = spin!.toLocal(tab.toGlobal({ x, y }));
+          near(edgeX(p.y) - p.x, 4, 0.5);
+        }
+      }
+      expect(box(turboTab!).y).toBeGreaterThan(box(autoTab!).y);
+      expect(box(turboTab!).b).toBeLessThan(box(spin!).b);
+    }
   });
 
   it('BET: the label is yellow, as in the reference — the feature title too', () => {
@@ -146,7 +154,8 @@ describe('S side bar — wide', () => {
     expect(1280 - sa.right).toBeLessThanOrEqual(r.x);
     expect(1280 - sa.right).toBeGreaterThanOrEqual(r.x - SAFE_GAP);
     // nothing in the right column pokes past its reserved edge — the tabs included
-    expect(1280 - sa.right + SAFE_GAP).toBeLessThanOrEqual(box(parts(bar).autoTab!).x + 0.5);
+    const { autoTab, turboTab } = parts(bar);
+    expect(1280 - sa.right + SAFE_GAP).toBeLessThanOrEqual(Math.min(box(autoTab!).x, box(turboTab!).x) + 0.5);
   });
 
   it('menu popover: points at the burger, placed against the left column', () => {

@@ -36,8 +36,6 @@ export interface SButtonOpts {
   /** The glyph; its box is `glyphSize` square (an IconView or an sIcon). */
   glyph: Container;
   glyphSize: number;
-  /** Right strip hidden under a neighbour (the tabs under SPIN): the glyph centres in what is left. */
-  insetRight?: number;
   /** Face shown on hover instead of the face's own hover shade (the tabs light up yellow). */
   hoverFace?: SFace;
   /** Glyph shown on hover instead of `glyph` (same box) — e.g. ink on the yellow hover face. */
@@ -58,7 +56,7 @@ export class SButton extends Container implements Sized {
     this.face = o.face;
     this.slab = new Slab(o.w, o.h, { face: f.fill, corners: o.corners });
     this.glyph = o.glyph;
-    this.glyph.position.set((o.w - (o.insetRight ?? 0) - o.glyphSize) / 2, (o.h - o.glyphSize) / 2);
+    this.glyph.position.set((o.w - o.glyphSize) / 2, (o.h - o.glyphSize) / 2);
     this.addChild(this.slab, this.glyph);
     const hg = o.hoverGlyph;
     if (hg) {

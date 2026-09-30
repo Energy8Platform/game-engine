@@ -6,7 +6,7 @@ import { makeIcon, type IconView } from '../pixi-hb/pixi-icon';
 import type { Rect } from '@/core/popover';
 import type { SafeArea } from '@/core/renderer';
 import { bonusBuyLocked } from '@/core/state';
-import { SKEW } from './slab';
+import { SKEW, spinEdgeX, type Corners } from './slab';
 import { sIcon } from './icons';
 import { S } from './theme';
 import { SButton, SReadout, SBet, SSpin, SFsCounter, type Sized } from './widgets';
@@ -27,9 +27,8 @@ interface Sizes {
   spinGlyph: number;
   tab: [number, number];
   tabGlyph: number;
+  /** Gap between the stacked tabs, and the seam between a tab and SPIN's slanted left edge. */
   tabGap: number;
-  /** How far the tabs tuck under SPIN's left edge. */
-  tabOverlap: number;
   /** Vertical gap between stacked slabs. */
   gap: number;
 }
@@ -40,7 +39,7 @@ const WIDE: Sizes = {
   bet: [232, 38], betLabel: 14, betValue: 19,
   buyGlyph: 120,
   spin: [248, 126], spinGlyph: 84,
-  tab: [56, 34], tabGlyph: 20, tabGap: 4, tabOverlap: 20,
+  tab: [48, 34], tabGlyph: 20, tabGap: 4,
   gap: 4,
 };
 
@@ -51,7 +50,7 @@ const MOBILE: Sizes = {
   bet: [186, 40], betLabel: 11, betValue: 17,
   buyGlyph: 76,
   spin: [150, 90], spinGlyph: 56,
-  tab: [50, 30], tabGlyph: 16, tabGap: 4, tabOverlap: 20,
+  tab: [42, 30], tabGlyph: 16, tabGap: 4,
   gap: 8,
 };
 
@@ -255,13 +254,16 @@ export class SideBar extends Container implements HbBar {
     if (hero && config.features.turbo > 0) tabs.push((this.turboTab = this.buildTurboTab()));
     if (hero && tabs.length) {
       const [tw, th] = z.tab;
-      const x = hero.x - tw + z.tabOverlap;
-      let y = hero.y; // flush with the hero's top edge
-      for (const t of tabs) {
-        t.position.set(x, y);
-        this.rightCol.addChildAt(t, 0); // under the hero
-        y += th + z.tabGap;
-      }
+      // right end a tabGap short of SPIN's slanted left edge at the tab's top; slot 0 is flush with
+      // the hero's top edge
+      const slotX = (i: number) => hero.x + spinEdgeX(i * (th + z.tabGap), hero.measureSize().h) - z.tabGap - tw;
+      tabs.forEach((t, i) => {
+        t.position.set(slotX(i), hero.y + i * (th + z.tabGap));
+        this.rightCol.addChild(t);
+      });
+      // the edge leans, so the second slot sits furthest left; reserve it even with one tab (free
+      // spins) so the column never changes width
+      const x = slotX(1);
       if (x < 0) {
         // the tabs poke out past the widest slab: shift everything so the column starts at 0
         for (const c of this.rightCol.children) c.x -= x;
@@ -354,6 +356,13 @@ export class SideBar extends Container implements HbBar {
     });
   }
 
+  /** A parallelogram whose sides run parallel to SPIN's left edge, so the seam is even. */
+  private tabCorners(): Corners {
+    const th = this.z.tab[1];
+    const lean = spinEdgeX(0, this.z.spin[1]) - spinEdgeX(th, this.z.spin[1]);
+    return [[lean, 0], [0, 0], [-lean, 0], [0, 0]];
+  }
+
   /** ▶ — a running run shows a yellow face with STOP (tap stops it); idle opens the picker. Idle
    *  hover: the yellow face with an ink ▶. */
   private buildAutoTab(): SButton {
@@ -364,10 +373,9 @@ export class SideBar extends Container implements HbBar {
       w: z.tab[0],
       h: z.tab[1],
       face: running ? 'yellow' : 'plate',
-      corners: SKEW.tab,
+      corners: this.tabCorners(),
       glyph: running ? makeIcon('stop', g, { ink: S.ink, fill: S.ink }) : sIcon('play', g, S.fg),
       glyphSize: g,
-      insetRight: z.tabOverlap,
       hoverFace: running ? undefined : 'yellow',
       hoverGlyph: running ? undefined : sIcon('play', g, S.ink),
       onTap: () => {
@@ -389,10 +397,9 @@ export class SideBar extends Container implements HbBar {
       w: z.tab[0],
       h: z.tab[1],
       face: level >= 2 ? 'yellow' : 'plate',
-      corners: SKEW.tab,
+      corners: this.tabCorners(),
       glyph: sIcon('bolt', g, color),
       glyphSize: g,
-      insetRight: z.tabOverlap,
       hoverFace: level >= 2 ? undefined : 'yellow',
       hoverGlyph: level >= 2 ? undefined : sIcon('bolt', g, S.ink),
       onTap: () => this.host.actions.cycleTurbo(),

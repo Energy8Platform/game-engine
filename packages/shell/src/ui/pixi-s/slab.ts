@@ -17,14 +17,19 @@ export const FLAT: Corners = [[0, 0], [0, 0], [0, 0], [0, 0]];
 
 /** Skew presets per element, in design px (they scale with the bar). As in the reference, every slab
  *  leans right (top edge shifted right, ~0.2 of its height); the readouts also tilt up to the right,
- *  SPIN down. The tabs lean on the left only: their right end hides under SPIN. */
+ *  SPIN down. */
 export const SKEW = {
   menu: [[7, 0], [0, 0], [-7, 0], [0, 0]],
   readout: [[11, 6], [0, 0], [-11, -6], [0, 0]],
   bet: [[7, 0], [0, 1], [-7, 0], [0, -3]],
   spin: [[21, 0], [0, 5], [-21, 0], [0, -10]],
-  tab: [[7, 0], [0, 0], [0, 0], [0, 0]],
 } as const satisfies Record<string, Corners>;
+
+/** SPIN's slanted left edge: its x at height y on a SPIN h tall (the tabs run parallel to it). */
+export function spinEdgeX(y: number, h: number): number {
+  const [tl, , , bl] = SKEW.spin;
+  return tl[0] + ((bl[0] - tl[0]) * (y - tl[1])) / (h + bl[1] - tl[1]);
+}
 
 export const SHADOW_OFFSET = 3;
 
@@ -46,7 +51,8 @@ export class Slab extends Container {
   readonly w: number;
   readonly h: number;
   private faceG = new Graphics();
-  private points: number[];
+  /** The outline, as `slabPoints` gives it. */
+  readonly points: number[];
   private _face = '';
 
   constructor(w: number, h: number, opts: SlabOpts) {

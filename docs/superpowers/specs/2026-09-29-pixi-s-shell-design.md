@@ -140,7 +140,7 @@ new Slab(w: number, h: number, opts: {
 | BUY | yellow, SPIN's size and shape | black `mask` glyph; feature active: red face, white `close` |
 | SPIN | yellow, 248×126 | black `spin` glyph; busy: glyph spins (HB behaviour) |
 | FS counter (replaces SPIN) | yellow, SPIN's size | black label `t('Free spins')` + value `3 / 10` (or `state.bonus` label/value) |
-| autoplay tab | black, 52×40, tucked 12px under SPIN's left edge | white `play`; running: yellow face, black `stop` |
+| autoplay tab | black parallelogram, 48×34 (mobile 42×30), a 4px seam from SPIN's slanted left edge | white `play`; running: yellow face, black `stop` |
 | turbo tab | black, under the autoplay tab | `bolt`: L0 white; L1 yellow glyph; L2 yellow face, black glyph |
 
 Sizes are desktop design units, before the fit scale (section 5).
@@ -185,8 +185,11 @@ The bar is laid out in rows (the user's call after the second demo, 2026-09-29: 
 - **Under the buttons.** BALANCE under BUY, BET under SPIN, top-aligned right below the button row.
   BALANCE is hidden in replay, as in HB.
 - **WIN** sits on the bottom line (with BALANCE), centred in the gap between the two columns.
-- **Tabs.** Autoplay and turbo are one size, stacked from SPIN's top edge down, tucked under SPIN's
-  left edge. Hover on a black tab: the yellow face with an ink glyph.
+- **Tabs.** Autoplay and turbo are one size, stacked from SPIN's top edge down. They stand apart from
+  SPIN: each is a parallelogram whose sides run parallel to SPIN's slanted left edge, a `tabGap` (4)
+  seam away (the user, 2026-09-30: tucked under SPIN, the top tab merged with SPIN's top corner). The
+  column reserves both tab slots, so free spins (turbo only) keep the width. Hover on a black tab: the
+  yellow face with an ink glyph.
 - **Plates never change size** (both layouts; the user's call, 2026-09-30: "размеры должны быть
   фиксированными и не менять у плашек"). WIN / BALANCE / TOTAL WIN and BET keep their design size;
   a label or value that does not fit scales down (label and value by one factor). So the insets do
@@ -222,7 +225,7 @@ The bar is laid out in rows (the user's call after the second demo, 2026-09-29: 
   shows the mask glyph large (76), and sits left, level with SPIN. Outside base mode BUY is
   hidden; its slot stays (TOTAL WIN takes it in free spins).
 - Mobile design sizes: menu 52×38, readouts 172×44 (label 11, value 17), BET 186×40, SPIN and BUY
-  150×90, tabs 42×34. Left column (172) + gap (12) + right column (186) = 370 = 390 − 2·10.
+  150×90, tabs 42×30. Left column (172) + gap (12) + right column (186) = 370 = 390 − 2·10.
   Plates keep these sizes whatever the text (see wide).
 - **Fit scale.** The block is designed at 370 wide (390 minus the side padding) and scaled by
   `min(1, (W − 20) / blockW)`, where `blockW = max(370, left + 12 + right, WIN)`. It is never wider than
@@ -271,7 +274,7 @@ Vitest, in `tests/pixi-s/`, with the shared `tests/pixi/_host` context:
      padding.
    - Both columns are bottom-anchored.
    - BUY is SPIN-sized at the bottom of the left column, level with SPIN.
-   - The tabs lie to the left of SPIN and overlap its box.
+   - The tabs lie to the left of SPIN, a 4px seam from its slanted edge.
 2. **Wide safe area.**
    - `safeArea.left` and `safeArea.right` equal the measured column edges plus the gap.
    - `bottom` is 0 and `barHeight` is 0.
