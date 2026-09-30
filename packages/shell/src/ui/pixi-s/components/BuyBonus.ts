@@ -290,7 +290,7 @@ export class SBuyBonusPage extends Container implements ShellLayer {
     } else {
       const face = new Graphics().rect(0, 0, w, h).fill(bonus.type === 'feature' ? S.red : S.yellow);
       face.label = bonus.type === 'feature' ? 'bb-hero-red' : 'bb-hero-yellow';
-      const size = Math.round(w * 0.7);
+      const size = Math.round(Math.min(w, h) * 0.7);
       const mask = sIcon('mask', size, bonus.type === 'feature' ? S.fg : S.ink);
       mask.position.set((w - size) / 2, (h - size) / 2);
       hero.addChild(face, mask);
@@ -308,10 +308,12 @@ export class SBuyBonusPage extends Container implements ShellLayer {
     const locked = state.busy || state.autoplay.active || !!feature;
     const labelSize = Math.round(rh * 0.27);
     const valueSize = Math.round(rh * 0.41);
+    // a narrow band (phone) halves itself between the two — the S widgets scale their text to fit
+    const half = (w - pad * 3) / 2;
     const bet = new SBet({
       label: feature ? feature.title : this.host.t('Bet'),
       value: this.host.fmt(feature ? state.bet * feature.priceMultiplier : state.bet),
-      w: Math.round(rh * 5),
+      w: Math.min(Math.round(rh * 5), half),
       h: rh,
       labelSize,
       valueSize,
@@ -323,7 +325,7 @@ export class SBuyBonusPage extends Container implements ShellLayer {
     bet.up!.label = 'bb-bet-up';
     bet.down!.label = 'bb-bet-down';
     bet.position.set(w - pad - bet.measureSize().w, (h - rh) / 2);
-    const balance = new SReadout({ label: this.host.t('Balance'), value: this.host.fmt(state.balance), w: Math.round(rh * 4.8), h: rh, labelSize, valueSize });
+    const balance = new SReadout({ label: this.host.t('Balance'), value: this.host.fmt(state.balance), w: Math.min(Math.round(rh * 4.8), half), h: rh, labelSize, valueSize });
     balance.position.set(pad, (h - rh) / 2);
     band.addChild(balance, bet);
     return band;

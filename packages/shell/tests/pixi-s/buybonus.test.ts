@@ -2,6 +2,7 @@ import '../pixi/setup-canvas'; // must be first — patches canvas getContext be
 import { describe, it, expect, vi } from 'vitest';
 import type { Container } from 'pixi.js';
 import { openSBuyBonus, SBuyBonusPage } from '@/ui/pixi-s/components/BuyBonus';
+import { SReadout, SBet } from '@/ui/pixi-s/widgets';
 import { makeContext, defaultConfig } from '../pixi/_host';
 
 const OPTIONS = [
@@ -13,6 +14,11 @@ function page(over: Record<string, unknown> = {}) {
   const emit = vi.fn();
   const host = makeContext({ emit, screenW: 1280, screenH: 720, config: defaultConfig({ balance: 1000, features: { turbo: 0, autoplay: false, buyBonus: OPTIONS } }), ...over });
   return { host, emit, page: openSBuyBonus(host) as SBuyBonusPage };
+}
+function byType<T>(n: Container, type: new (...a: never[]) => T, out: T[] = []): T[] {
+  if (n instanceof type) out.push(n);
+  for (const c of n.children) byType(c as Container, type, out);
+  return out;
 }
 function byLabel(n: Container, label: string, out: Container[] = []): Container[] {
   if (n.label === label) out.push(n);
@@ -61,5 +67,12 @@ describe('S buy bonus page', () => {
     expect(p.titlePlate!.labelText.text).toBe('BUY BONUS');
     expect(byLabel(p, 'bb-hero-red').length).toBe(1);
     expect(byLabel(p, 'bb-hero-yellow').length).toBe(1);
+  });
+
+  it('on a phone the balance readout ends before the bet slab starts', () => {
+    const { page: p } = page({ screenW: 390, screenH: 844, layout: 'mobile' });
+    const [balance] = byType(p, SReadout);
+    const [bet] = byType(p, SBet);
+    expect(balance.x + balance.measureSize().w).toBeLessThanOrEqual(bet.x);
   });
 });
