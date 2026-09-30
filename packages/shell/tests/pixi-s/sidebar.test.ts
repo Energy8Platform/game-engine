@@ -227,14 +227,20 @@ describe('S side bar — mobile', () => {
     expect(k.r).toBeLessThanOrEqual(390);
   });
 
-  it('a narrow phone with a huge balance: the block scales down to fit', () => {
+  it('plates keep their design size whatever the text; the block only scales with the screen', () => {
     const ctx = host(320, 568);
     ctx.state.balance = 10_000_000_000;
+    ctx.state.win = 1_000_000_000;
+    ctx.state.activeFeature = { ...ANTE, title: 'Legendary Warrior Ante' };
     const bar = build(ctx);
-    const k = box(parts(bar).block);
+    const p = parts(bar);
+    expect(p.balance!.measureSize()).toEqual({ w: 172, h: 44 });
+    expect(p.win.measureSize()).toEqual({ w: 172, h: 44 });
+    expect(p.bet.measureSize()).toEqual({ w: 186, h: 40 });
+    const k = box(p.block);
     expect(k.x).toBeGreaterThanOrEqual(0);
     expect(k.r).toBeLessThanOrEqual(320);
-    expect(bar.fitScale()).toBeLessThan((320 - 20) / 370);
+    expect(bar.fitScale()).toBeCloseTo((320 - 20) / 370, 5);
   });
 
   it('no buy-bonus configured: no BUY, and BALANCE | BET still sit under the button row', () => {

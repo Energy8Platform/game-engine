@@ -66,17 +66,12 @@ describe('S widgets', () => {
     expect(g.y).toBe(10);
   });
 
-  it('SReadout keeps its design width for short values and grows for long ones', () => {
+  it('SReadout never changes size: short text at full scale, long text scaled down to fit inside', () => {
     const short = new SReadout({ label: 'Win', value: '€0.00', w: 280, h: 54, labelSize: 15, valueSize: 26 });
     expect(short.measureSize()).toEqual({ w: 280, h: 54 });
-    const long = new SReadout({ label: 'Balance', value: '€10,000,000,000.00', w: 280, h: 54, labelSize: 15, valueSize: 26 });
-    expect(long.measureSize().w).toBeGreaterThan(280);
-    expect(long.valueText.x + long.valueText.width).toBeLessThanOrEqual(long.measureSize().w);
-    expect(long.labelText.text).toBe('BALANCE');
-  });
-
-  it('SReadout with grow off keeps its design width and scales the text down to fit inside', () => {
-    const r = new SReadout({ label: 'Total win', value: '€10,000,000,000.00', w: 268, h: 56, labelSize: 15, valueSize: 23, grow: false });
+    expect(short.valueText.scale.x).toBe(1);
+    expect(short.labelText.text).toBe('WIN');
+    const r = new SReadout({ label: 'Total win', value: '€10,000,000,000.00', w: 268, h: 56, labelSize: 15, valueSize: 23 });
     expect(r.measureSize()).toEqual({ w: 268, h: 56 });
     expect(r.labelText.x).toBeGreaterThan(0);
     expect(r.valueText.x + r.valueText.width).toBeLessThanOrEqual(268 - SKEW.readout[0][0]);
@@ -84,8 +79,8 @@ describe('S widgets', () => {
     expect(r.labelText.scale.x).toBeCloseTo(r.valueText.scale.x, 5); // one factor for both
   });
 
-  it('SBet: the label is yellow; with grow off it keeps its width and scales the text to fit', () => {
-    const b = new SBet({ label: 'Legendary Warrior Ante', value: '€1,000.00', w: 232, h: 38, labelSize: 14, valueSize: 19, stepper: false, onStep: () => {}, grow: false });
+  it('SBet: the label is yellow; it never changes size and scales long text to fit', () => {
+    const b = new SBet({ label: 'Legendary Warrior Ante', value: '€1,000.00', w: 232, h: 38, labelSize: 14, valueSize: 19, stepper: false, onStep: () => {} });
     expect(b.labelText.style.fill).toBe(S.yellow);
     expect(b.measureSize()).toEqual({ w: 232, h: 38 });
     expect(b.labelText.x).toBeGreaterThan(0);

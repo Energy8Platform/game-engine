@@ -261,7 +261,7 @@ export class SideBar extends Container implements HbBar {
   // ── pieces ────────────────────────────────────────────────────────────────
   private readout(label: string, value: string): SReadout {
     const z = this.z;
-    return new SReadout({ label: this.host.t(label), value, w: z.readout[0], h: z.readout[1], labelSize: z.labelSize, valueSize: z.valueSize, grow: this.mobile });
+    return new SReadout({ label: this.host.t(label), value, w: z.readout[0], h: z.readout[1], labelSize: z.labelSize, valueSize: z.valueSize });
   }
 
   /** The mask slab, SPIN's size and shape, level with SPIN in the button row; with a feature active
@@ -283,8 +283,7 @@ export class SideBar extends Container implements HbBar {
     });
   }
 
-  /** − BET +. With a feature active the label names it and the value is the feature price. Wide: the
-   *  slab never grows (the right inset stays put); mobile: it may. */
+  /** − BET +. With a feature active the label names it and the value is the feature price. */
   private buildBet(): SBet {
     const { state } = this.host;
     const z = this.z;
@@ -298,7 +297,6 @@ export class SideBar extends Container implements HbBar {
       labelSize: z.betLabel,
       valueSize: z.betValue,
       stepper: isBase,
-      grow: this.mobile,
       onStep: (dir) => {
         if (!this.host.state.busy) this.host.actions.stepBet(dir);
       },

@@ -130,14 +130,11 @@ export class SStep extends Container {
   }
 }
 
-/** The slab width for `texts` side by side plus `chrome` px of padding and gaps. When they do not fit
- *  `w`: `grow` widens the slab; otherwise the slab keeps `w` and the texts scale down by one factor. */
-function fitSlab(w: number, chrome: number, texts: Text[], grow: boolean): number {
+/** Slabs never change size: when `texts` side by side plus `chrome` px of padding and gaps do not fit
+ *  `w`, the texts scale down by one factor. */
+function fitTexts(w: number, chrome: number, texts: Text[]): void {
   const textW = texts.reduce((a, t) => a + t.width, 0);
-  if (chrome + textW <= w) return w;
-  if (grow) return Math.ceil(chrome + textW);
-  for (const t of texts) t.scale.set((w - chrome) / textW);
-  return w;
+  if (chrome + textW > w) for (const t of texts) t.scale.set((w - chrome) / textW);
 }
 
 export interface SReadoutOpts {
@@ -147,14 +144,10 @@ export interface SReadoutOpts {
   h: number;
   labelSize: number;
   valueSize: number;
-  /** Widen past `w` when the text does not fit (default). Off: keep `w` and scale the text down —
-   *  the wide columns set the scene's side insets, which must not change with content. */
-  grow?: boolean;
 }
 
-/** WIN / BALANCE / TOTAL WIN: the yellow caps label, then the white value, on a black slab. With
- *  `grow` (mobile) it widens when the text would not fit and the bar's fit scale then shrinks the
- *  whole block; without it the text scales down inside `w`. */
+/** WIN / BALANCE / TOTAL WIN: the yellow caps label, then the white value, on a fixed-size black slab
+ *  (text that does not fit scales down). */
 export class SReadout extends Container implements Sized {
   readonly labelText: Text;
   readonly valueText: Text;
@@ -166,8 +159,8 @@ export class SReadout extends Container implements Sized {
     const gap = Math.round(o.valueSize * 0.5);
     this.labelText = sLabel(o.label, o.labelSize);
     this.valueText = sValue(o.value, o.valueSize);
-    const w = fitSlab(o.w, 2 * pad + gap, [this.labelText, this.valueText], o.grow !== false);
-    this.slab = new Slab(w, o.h, { face: S.plate, corners: SKEW.readout });
+    fitTexts(o.w, 2 * pad + gap, [this.labelText, this.valueText]);
+    this.slab = new Slab(o.w, o.h, { face: S.plate, corners: SKEW.readout });
     this.labelText.position.set(pad, (o.h - this.labelText.height) / 2);
     this.valueText.position.set(pad + this.labelText.width + gap, (o.h - this.valueText.height) / 2);
     this.addChild(this.slab, this.labelText, this.valueText);
@@ -191,8 +184,6 @@ export interface SBetOpts {
   onStep: (dir: 1 | -1) => void;
   /** Tap on the label/value area (opens the bet picker); omitted = not tappable. */
   onValue?: () => void;
-  /** As SReadoutOpts.grow. */
-  grow?: boolean;
 }
 
 /** − BET value + on one black slab. The ± hit boxes are h×h squares at the ends. */
@@ -210,7 +201,8 @@ export class SBet extends Container implements Sized {
     this.labelText = sLabel(o.label, o.labelSize);
     this.valueText = sValue(o.value, o.valueSize);
     const side = o.stepper ? o.h : Math.round(o.h * 0.4);
-    const w = fitSlab(o.w, 2 * side + 3 * gap, [this.labelText, this.valueText], o.grow !== false);
+    const w = o.w;
+    fitTexts(w, 2 * side + 3 * gap, [this.labelText, this.valueText]);
     const mid = this.labelText.width + gap + this.valueText.width;
     this.slab = new Slab(w, o.h, { face: S.plate, corners: SKEW.bet });
     const x0 = (w - mid) / 2;

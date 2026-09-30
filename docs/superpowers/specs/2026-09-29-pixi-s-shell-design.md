@@ -187,9 +187,10 @@ The bar is laid out in rows (the user's call after the second demo, 2026-09-29: 
 - **WIN** sits on the bottom line (with BALANCE), centred in the gap between the two columns.
 - **Tabs.** Autoplay and turbo are one size, stacked from SPIN's top edge down, tucked under SPIN's
   left edge. Hover on a black tab: the yellow face with an ink glyph.
-- **Wide readouts never grow.** WIN / BALANCE / TOTAL WIN and BET keep their design width; a label
-  or value that does not fit scales down (label and value by one factor). So the side insets do not
-  change with content — scenes read `safeArea` only on resize. (Mobile readouts may grow; see below.)
+- **Plates never change size** (both layouts; the user's call, 2026-09-30: "размеры должны быть
+  фиксированными и не менять у плашек"). WIN / BALANCE / TOTAL WIN and BET keep their design size;
+  a label or value that does not fit scales down (label and value by one factor). So the insets do
+  not change with content either — scenes read `safeArea` only on resize.
 - Outer padding is 16 from the screen edges.
 - **Fit scale.** `s = clamp(min(W / 1280, H / 720), 0.35, 1)`, applied to each column's inner
   container. The 0.35 floor keeps Stake popout S (400×225) readable, as in HB.
@@ -222,8 +223,7 @@ The bar is laid out in rows (the user's call after the second demo, 2026-09-29: 
   hidden; its slot stays (TOTAL WIN takes it in free spins).
 - Mobile design sizes: menu 52×38, readouts 172×44 (label 11, value 17), BET 186×40, SPIN and BUY
   150×90, tabs 42×34. Left column (172) + gap (12) + right column (186) = 370 = 390 − 2·10.
-  Readouts and BET grow when a value does not fit, and
-  the block then scales down — that only shrinks the bottom inset, so it stays safe.
+  Plates keep these sizes whatever the text (see wide).
 - **Fit scale.** The block is designed at 370 wide (390 minus the side padding) and scaled by
   `min(1, (W − 20) / blockW)`, where `blockW = max(370, left + 12 + right, WIN)`. It is never wider than
   the screen, so it has no lower bound.
