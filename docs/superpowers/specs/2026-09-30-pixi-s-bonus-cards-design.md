@@ -27,8 +27,9 @@ This builds on `2026-09-29-pixi-s-shell-design.md` (the bar) and
 - BUY stays SPIN-sized, so it shrinks with SPIN. This is the standing rule from 2026-09-29.
 - The ticket notches are sharp triangles, not the reference's half-circles, because S has no
   rounding anywhere. The top edge is straight.
-- The card proportion is 1:2 (width = height / 2). A card is at most 62% of the screen width, so a
-  phone shows about 1.5 cards and the next one peeks in.
+- The card proportion is 1:2 (width = height / 2). A card is at most 70% of the screen width, so a
+  phone shows one card and the next one peeks in. (It was 62%; the phone shot left about 200px empty
+  above and below the row.)
 - The ✕ stays on screen during the confirm. There it cancels the confirm instead of closing the page.
 
 ## 1. Bar
@@ -55,19 +56,21 @@ This builds on `2026-09-29-pixi-s-shell-design.md` (the bar) and
 - The title plate and ✕ are unchanged: in the corners, at `closeCorner()`.
 - **The band has no backing.** The `S.panel` rect behind BALANCE | BET is removed; only the two
   plates remain, at the band's current position.
-- **Short screens scale the page.** The page lays out at the logical size `(w / k, h / k)` with
-  `k = min(1, h / 440)` and is drawn scaled by `k`. On Stake popout S (400×225) the logical size is
-  about 784×440 at `k ≈ 0.51`. Everything below is in logical units.
+- **Short screens scale the page.** The row and the band lay out at the logical size `(w / k, h / k)`
+  with `k = min(1, h / 440)` and are drawn scaled by `k`. On Stake popout S (400×225) the logical size
+  is about 784×440 at `k ≈ 0.51`. The title plate and ✕ are not scaled: they stay at screen size, at
+  `stripMetrics(h)` / `closeCorner(w, h)` like every other S overlay, above the scaled row and band.
+  Everything below is in logical units.
 
 ### Row
 
 - One horizontal row of cards between the strip and the band:
-  - `rowTop = strip.top + strip.height · 1.3`;
+  - `rowTop = (strip.top + strip.height · 1.3) / k`, with `strip = stripMetrics(h)` at screen size;
   - `rowBottom = band top − pad · 0.5`.
 - It sits in a `ScrollBox` with `axis: 'x'` (see §4). The viewport is the full page width minus
   `pad` on each side. It is `cardH + ScrollBox.GUTTER` tall; the horizontal S scrollbar runs in the
   gutter under the cards.
-- Card size: `cardH = min(rowBottom − rowTop − GUTTER, 0.62 · W / ASPECT, 640)`, with
+- Card size: `cardH = min(rowBottom − rowTop − GUTTER, 0.70 · W / ASPECT, 640)`, with
   `cardW = round(cardH · ASPECT)`, `ASPECT = 0.5`, and a gap of `CARD_GAP = 14` between cards.
 - The row is vertically centred between `rowTop` and `rowBottom`.
 - When every card fits, the row is centred horizontally and does not scroll. Otherwise it starts at
@@ -197,7 +200,7 @@ current confirm does.
 - **Bar:** the WIDE / MOBILE SPIN, BUY and tab sizes from the table; the tabs are still one size;
   the seam test still passes.
 - **Cards:**
-  - every card is `cardW = cardH / 2 (±1)`, and at most `0.62 · W` wide at 390×844;
+  - every card is `cardW = cardH / 2 (±1)`, and at most `0.70 · W` wide at 390×844;
   - the row is centred with no scroll when the cards fit (1280×720, 4 cards);
   - it scrolls with the next card peeking when they do not (390×844).
 - **Card order:**
