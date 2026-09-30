@@ -5,7 +5,7 @@ import { SButton } from '@/ui/pixi-s/widgets';
 import { stripMetrics } from '@/ui/pixi-s/primitives/page';
 import { SCardModal } from '@/ui/pixi-s/primitives/card';
 import { SChip, STextButton, STitlePlate } from '@/ui/pixi-s/primitives/controls';
-import { openSBetPicker, openSAutoplayPicker } from '@/ui/pixi-s/components/pickers';
+import { openSBetPicker, openSAutoplayPicker, type SPicker } from '@/ui/pixi-s/components/pickers';
 import { buildSModal } from '@/ui/pixi-s/components/Modal';
 import { buildSReplayModal } from '@/ui/pixi-s/components/ReplayModal';
 import { S } from '@/ui/pixi-s/theme';
@@ -92,24 +92,56 @@ describe('S card modal', () => {
 });
 
 describe('S pickers, modal, replay', () => {
-  it('bet picker: one S chip per bet, the current one selected (yellow); Enter confirms', () => {
+  it('bet picker: a stepped slider over the bet levels at the current bet; → then Enter confirms the next', () => {
     const emit = vi.fn();
-    const host = makeContext({ emit, config: defaultConfig({ availableBets: [0.5, 1, 2, 5], defaultBet: 1 }) });
-    const layer = openSBetPicker(host) as unknown as { onKey(e: KeyboardEvent): boolean } & Container;
-    const chips = all(layer, SChip);
-    expect(chips.map((c) => c.id)).toEqual(['0.5', '1', '2', '5']);
-    expect(chips.filter((c) => c.selected).map((c) => c.id)).toEqual(['1']);
-    expect(chips[1].labelText.style.fill).toBe(S.ink);
-    layer.onKey({ code: 'ArrowRight' } as KeyboardEvent);
-    layer.onKey({ code: 'Enter' } as KeyboardEvent);
+    const host = makeContext({ emit, screenW: 1280, screenH: 720, config: defaultConfig({ availableBets: [0.5, 1, 2, 5], defaultBet: 1 }) });
+    const p = openSBetPicker(host) as unknown as SPicker;
+    expect(p.slider.index).toBe(1);
+    expect(p.valuePlate.labelText.text).toBe('€1.00');
+    expect(all(p, SChip).length).toBe(0); // no chips any more
+    p.onKey({ code: 'ArrowRight' } as KeyboardEvent);
+    expect(p.valuePlate.labelText.text).toBe('€2.00');
+    p.onKey({ code: 'Enter' } as KeyboardEvent);
     expect(emit).toHaveBeenCalledWith('betChange', 2);
   });
 
-  it('autoplay picker: counts as chips; the title plate says AUTOPLAY', () => {
-    const host = makeContext({ config: defaultConfig({ features: { turbo: 0, autoplay: {}, buyBonus: false } }) });
-    const layer = openSAutoplayPicker(host);
-    expect(all(layer, SChip).length).toBeGreaterThan(3);
-    expect(all(layer, STitlePlate)[0].labelText.text).toBe('AUTOPLAY');
+  it('picker layout (R4): title plate centred, ✕ in the corner, value plate over the thumb within the slider, no backing', () => {
+    const host = makeContext({ screenW: 1280, screenH: 720, config: defaultConfig({ availableBets: [0.5, 1, 2, 5], defaultBet: 0.5 }) });
+    const p = openSBetPicker(host) as unknown as SPicker;
+    expect(p.titlePlate.x + p.titlePlate.measureSize().w / 2).toBeCloseTo(640, 0);
+    const strip = stripMetrics(720);
+    expect(p.closeBtn.x + p.closeBtn.measureSize().w).toBeCloseTo(1280 - strip.top, 0);
+    const s = p.slider.getBounds();
+    const v = p.valuePlate.getBounds();
+    expect(v.x).toBeGreaterThanOrEqual(s.x - 0.5); // index 0: clamped to the slider's left end
+    expect(v.y + v.height).toBeLessThanOrEqual(s.y);
+    p.onKey({ code: 'End' } as KeyboardEvent); // not a picker key — ignored
+    for (let i = 0; i < 5; i++) p.onKey({ code: 'ArrowRight' } as KeyboardEvent);
+    const v2 = p.valuePlate.getBounds();
+    expect(v2.x + v2.width).toBeLessThanOrEqual(s.x + s.width + 3.5); // last index: clamped (+ shadow)
+  });
+
+  it('autoplay picker: counts incl. ∞ on the slider; START confirms', () => {
+    const emit = vi.fn();
+    const host = makeContext({ emit, screenW: 1280, screenH: 720, config: defaultConfig({ features: { turbo: 0, autoplay: {}, buyBonus: false } }) });
+    const p = openSAutoplayPicker(host) as unknown as SPicker;
+    expect(p.titlePlate.labelText.text).toBe('AUTOPLAY');
+    p.slider.setIndex(8);
+    (p as unknown as { sync(): void }).sync();
+    expect(p.valuePlate.labelText.text).toBe('∞');
+    p.confirm.emit('pointertap', {});
+    expect(emit).toHaveBeenCalledWith('autoplayStart', { active: true, remaining: Infinity });
+  });
+
+  it('a single bet level: slider at the start, confirm still works', () => {
+    const emit = vi.fn();
+    const host = makeContext({ emit, config: defaultConfig({ availableBets: [1], defaultBet: 1 }) });
+    const p = openSBetPicker(host) as unknown as SPicker;
+    expect(p.slider.index).toBe(0);
+    p.onKey({ code: 'ArrowRight' } as KeyboardEvent);
+    expect(p.slider.index).toBe(0);
+    p.onKey({ code: 'Enter' } as KeyboardEvent);
+    expect(host.state.bet).toBe(1);
   });
 
   it('generic modal: an action runs, then the modal closes', () => {

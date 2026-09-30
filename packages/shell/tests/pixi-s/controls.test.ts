@@ -1,6 +1,6 @@
 import '../pixi/setup-canvas'; // must be first — patches canvas getContext before pixi.js loads
 import { describe, it, expect, vi } from 'vitest';
-import { STitlePlate, sCloseButton, STextButton, SChip, SSlider, SToggle, S_SCROLL } from '@/ui/pixi-s/primitives/controls';
+import { STitlePlate, sCloseButton, STextButton, SChip, SSlider, SStepSlider, SToggle, S_SCROLL } from '@/ui/pixi-s/primitives/controls';
 import { sBody } from '@/ui/pixi-s/text';
 import { FONT_FAMILY } from '@/ui/pixi-hb/text';
 import { S, DISABLED_ALPHA } from '@/ui/pixi-s/theme';
@@ -86,5 +86,23 @@ describe('S overlay primitives', () => {
   it('body copy is Inter; the S scroll look is flat yellow', () => {
     expect(sBody('Rules', 14).style.fontFamily).toBe(FONT_FAMILY);
     expect(S_SCROLL).toEqual({ track: S.track, thumb: S.yellow, radius: 0 });
+  });
+
+  it('SStepSlider: the index maps to the thumb; a tap snaps to the nearest step; 1 step never divides by 0', () => {
+    const onChange = vi.fn();
+    const s = new SStepSlider(5, 2, onChange);
+    s.layout(400, 40);
+    const tw = Math.round(40 * 0.8);
+    expect(s.thumbCenterX).toBeCloseTo(tw / 2 + (2 / 4) * (400 - tw), 5);
+    s.setIndex(4);
+    expect(s.thumbCenterX).toBeCloseTo(400 - tw / 2, 5);
+    expect(onChange).not.toHaveBeenCalled();
+    (s as unknown as { setFromX(x: number): void }).setFromX(0);
+    expect(s.index).toBe(0);
+    expect(onChange).toHaveBeenCalledWith(0);
+    const one = new SStepSlider(1, 0, () => {});
+    one.layout(300, 40);
+    expect(Number.isFinite(one.thumbCenterX)).toBe(true);
+    expect(one.thumbCenterX).toBeCloseTo(tw / 2, 5);
   });
 });

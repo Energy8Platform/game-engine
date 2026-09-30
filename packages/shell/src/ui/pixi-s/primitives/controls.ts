@@ -294,3 +294,89 @@ export class SToggle extends Container implements Sizable {
     /* fixed size */
   }
 }
+
+/** A stepped slider (the bet / autoplay pickers): a flat track half the thumb's height and a leaning
+ *  yellow slab thumb, 0.8·h × h, snapping to `count` evenly spaced steps. */
+export class SStepSlider extends Container implements Sizable {
+  private track = new Graphics();
+  private thumb = new Graphics();
+  private w = 0;
+  private h = 0;
+  private _index: number;
+  private count: number;
+  private onChange: (i: number) => void;
+  private dragging = false;
+
+  constructor(count: number, index: number, onChange: (i: number) => void) {
+    super();
+    this.count = Math.max(1, count);
+    this._index = Math.max(0, Math.min(this.count - 1, index));
+    this.onChange = onChange;
+    this.addChild(this.track, this.thumb);
+    this.eventMode = 'static';
+    this.cursor = 'pointer';
+    this.on('pointerdown', (e: FederatedPointerEvent) => {
+      this.dragging = true;
+      this.setFromX(this.toLocal(e.global).x);
+    });
+    this.on('globalpointermove', (e: FederatedPointerEvent) => {
+      if (this.dragging) this.setFromX(this.toLocal(e.global).x);
+    });
+    const end = (): void => {
+      this.dragging = false;
+    };
+    this.on('pointerup', end);
+    this.on('pointerupoutside', end);
+  }
+
+  get index(): number {
+    return this._index;
+  }
+  private get thumbW(): number {
+    return Math.round(this.h * 0.8);
+  }
+  /** The thumb's centre x in local units. */
+  get thumbCenterX(): number {
+    const travel = Math.max(0, this.w - this.thumbW);
+    const u = this.count > 1 ? this._index / (this.count - 1) : 0;
+    return this.thumbW / 2 + u * travel;
+  }
+
+  private setFromX(x: number): void {
+    const travel = Math.max(1, this.w - this.thumbW);
+    const u = Math.max(0, Math.min(1, (x - this.thumbW / 2) / travel));
+    const i = Math.round(u * (this.count - 1));
+    if (i === this._index) return;
+    this._index = i;
+    this.draw();
+    this.onChange(i);
+  }
+
+  /** Move to a step without firing onChange (keyboard / programmatic). */
+  setIndex(i: number): void {
+    this._index = Math.max(0, Math.min(this.count - 1, i));
+    this.draw();
+  }
+
+  layout(width: number, height: number): void {
+    this.w = width;
+    this.h = height;
+    this.draw();
+  }
+
+  private draw(): void {
+    const th = this.h * 0.5;
+    this.track.clear().rect(0, (this.h - th) / 2, this.w, th).fill(S.track);
+    const tw = this.thumbW;
+    const x = this.thumbCenterX - tw / 2;
+    this.thumb.clear().poly(slabPoints(tw, this.h, SKEW.menu).map((v, i) => (i % 2 === 0 ? v + x : v))).fill(S.yellow);
+    this.hitArea = new Rectangle(0, 0, this.w, this.h);
+  }
+
+  measureSize(): { w: number; h: number } {
+    return { w: this.w, h: this.h };
+  }
+  setLayoutSize(): void {
+    /* sized by layout() */
+  }
+}
