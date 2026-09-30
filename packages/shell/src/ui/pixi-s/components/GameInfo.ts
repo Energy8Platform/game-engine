@@ -427,7 +427,7 @@ function sectionWins(host: PixiComponentContext, s: WinSection, width: number): 
   const title = s.title ?? host.t(winFallbackTitle(s.kind));
   const sec = section(host, undefined, inner);
   // header (title plate + optional "min N" badge)
-  const header = new FlexBox({ direction: 'row', align: 'center', gap: 10 });
+  const header = new FlexBox({ direction: 'row', align: 'center', gap: 10, width: inner });
   header.add(new STitlePlate(title, Math.round(giEm() * 2.6)));
   if ((s.kind === 'cluster' || s.kind === 'anywhere') && 'minCount' in s) header.add(badgePill(host, `min ${s.minCount}`));
   sec.add(header);

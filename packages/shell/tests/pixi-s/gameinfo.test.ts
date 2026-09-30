@@ -43,6 +43,14 @@ describe('S game info page', () => {
     for (const t of plates) expect(t.slab.face).toBe(S.yellow);
   });
 
+  it('a wins section title plate sits at the column left, like the paytable plate', () => {
+    const p = info([PAYTABLE(3), { type: 'wins', kind: 'classic', grid: { cols: 5, rows: 3 }, lines: [[1, 1, 1, 1, 1]] }]);
+    const plates = all(p.scrollContent.content, STitlePlate);
+    const pay = plates.find((t) => t.labelText.text === 'PAYTABLE')!;
+    const wins = plates.find((t) => t.labelText.text === 'PAYLINES')!;
+    expect(wins.getGlobalPosition().x).toBeCloseTo(pay.getGlobalPosition().x, 0);
+  });
+
   it('the paytable is always 3 per row across the column: 7 rows → 3, 3, 1, each card a third', () => {
     const p = info([PAYTABLE(7)]);
     const width = pageColumn(1280, 720).width;
