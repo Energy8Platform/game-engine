@@ -10,6 +10,12 @@ export const S = {
   shadow: '#000000',
   fg: '#f4f2eb', // values, white glyphs
   ink: '#0b0b0b', // glyphs and text on yellow
+  panel: '#0b0b0b', // flat panels: menu rows, modal cards, content cards
+  track: '#2a2a2a', // slider / toggle / scroll tracks, empty volatility bars, off grid cells
+  muted: 'rgba(244,242,235,.6)', // secondary text: descriptions, stat labels, version
+  veil: 'rgba(0,0,0,.55)', // the dark layer over the frosted game under a modal
+  winOk: '#4ade80', // game info "✓ wins" tag
+  winNo: '#f87171', // game info "✗ no win" tag
 } as const;
 
 export const SHADOW_ALPHA = 0.45;

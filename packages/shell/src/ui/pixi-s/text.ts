@@ -4,6 +4,8 @@ import { makeText, FONT_FAMILY } from '../pixi-hb/text';
 import { S_FONT_CSS, S_FONT_FAMILY } from './fonts';
 import { S } from './theme';
 
+export { FONT_FAMILY } from '../pixi-hb/text';
+
 // The S bar draws every label and value in Montserrat ExtraBold. HB's overlays keep their own faces
 // (installed by the HB renderer); this module only adds the S face and two text styles.
 
@@ -37,4 +39,18 @@ export function sLabel(str: string, size: number, color: string = S.yellow): Tex
 /** A money / counter value. */
 export function sValue(str: string, size: number, color: string = S.fg): Text {
   return makeText(str, { size, family: S_FAMILY, weight: '800', color });
+}
+
+/** Body copy (descriptions, rules, paragraphs): Inter — long text in Montserrat 800 caps is
+ *  unreadable. Wraps when `wrapWidth` is given. */
+export function sBody(str: string, size: number, color: string = S.fg, wrapWidth?: number, align: 'left' | 'center' | 'right' = 'left'): Text {
+  return makeText(str, {
+    size,
+    family: FONT_FAMILY,
+    weight: '400',
+    color,
+    wrapWidth,
+    lineHeight: wrapWidth != null ? Math.round(size * 1.5) : undefined,
+    align,
+  });
 }
