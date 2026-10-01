@@ -55,7 +55,8 @@ This builds on `2026-09-29-pixi-s-shell-design.md` (the bar) and
 
 - The title plate and ✕ are unchanged: in the corners, at `closeCorner()`.
 - **The band has no backing.** The `S.panel` rect behind BALANCE | BET is removed; only the two
-  plates remain, at the band's current position.
+  plates remain. With the panel gone so is its side inset: BALANCE starts and BET ends at the band's
+  edges, in line with the card row (2026-10-01).
 - **Short screens scale the page.** The row and the band lay out at the logical size `(w / k, h / k)`
   with `k = min(1, h / 440)` and are drawn scaled by `k`. On Stake popout S (400×225) the logical size
   is about 784×440 at `k ≈ 0.51`. The title plate and ✕ are not scaled: they stay at screen size, at

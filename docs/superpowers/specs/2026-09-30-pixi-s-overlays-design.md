@@ -398,7 +398,7 @@ These rules replace the earlier ones where they conflict.
   - The thumb is a leaning yellow slab (0.8·h × h).
   - A drag or tap snaps to the nearest step.
   - Its hit area is at least 44 tall, centred on the track.
-  - Width `min(620, 0.7·w)`.
+  - Width `min(620, max(0.7·w, w − 64))`: 70% of a wide screen, nearly edge to edge on a phone (2026-10-01, the user: "по краям большие паддинги").
 - **Keys** are as in HB: →/↓/=/Num+ step up, ←/↑/−/Num− step down, Enter/Space confirm, Escape
   close.
 - **Choices** are unchanged: bet levels, and autoplay counts including ∞ (capped by `maxCount`).

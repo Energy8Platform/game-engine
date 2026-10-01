@@ -104,6 +104,19 @@ describe('S card modal', () => {
 });
 
 describe('S pickers, modal, replay', () => {
+  it('on a phone the picker slider runs nearly edge to edge (the user: "по краям большие паддинги, должно быть прижато")', () => {
+    for (const [w, h] of [[452, 812], [390, 844], [320, 568]]) {
+      const p = openSBetPicker(makeContext({ screenW: w, screenH: h, config: defaultConfig({ availableBets: [0.5, 1, 2, 5], defaultBet: 1 }) })) as unknown as SPicker;
+      const s = p.slider.getBounds();
+      expect(s.width).toBeGreaterThanOrEqual(w - 64 - 1);
+      expect(s.x).toBeGreaterThanOrEqual(0);
+      expect(s.x + s.width).toBeLessThanOrEqual(w);
+    }
+    // desktop keeps its 620 cap
+    const d = openSBetPicker(makeContext({ screenW: 1280, screenH: 720, config: defaultConfig({ availableBets: [0.5, 1, 2, 5], defaultBet: 1 }) })) as unknown as SPicker;
+    expect(Math.round(d.slider.getBounds().width)).toBe(620);
+  });
+
   it('bet picker: a stepped slider over the bet levels at the current bet; → then Enter confirms the next', () => {
     const emit = vi.fn();
     const host = makeContext({ emit, screenW: 1280, screenH: 720, config: defaultConfig({ availableBets: [0.5, 1, 2, 5], defaultBet: 1 }) });

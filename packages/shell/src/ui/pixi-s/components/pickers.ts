@@ -106,7 +106,9 @@ export class SPicker extends Container implements ShellLayer {
     this.closeBtn.position.set(corner.x, corner.y);
 
     const titleH = strip.height; // the title plate is one strip tall (≈ the ✕)
-    const sliderW = Math.round(Math.min(620, w * 0.7));
+    // 70% of a wide screen (620 at most); a phone runs it nearly edge to edge (32 each side) — the
+    // user: "по краям большие паддинги, должно быть прижато"
+    const sliderW = Math.round(Math.min(620, Math.max(w * 0.7, w - 64)));
     const sliderH = Math.round(em * 3.2);
     const plateH = Math.round(em * 3.6);
     const btnW = Math.round(Math.min(sliderW, em * 16));

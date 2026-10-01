@@ -209,6 +209,24 @@ describe('S buy bonus page', () => {
     expect(p.current(0).id).toBe('w');
   });
 
+  it('the band\'s plates line up with the card row\'s edges — no extra inset now the panel is gone', () => {
+    for (const [w, h] of [[452, 812], [390, 844], [1280, 720]]) {
+      const { page: p } = page({ screenW: w, screenH: h });
+      const { band } = parts(p);
+      const plates = band.children[0].children as Container[]; // [balance, bet]
+      const left = plates[0].getBounds().x;
+      const right = plates[1].getBounds().x + plates[1].getBounds().width;
+      if (w < 900) {
+        // the row overflows on a phone, so its first card sits at the row's left edge; the row is symmetric
+        const rowLeft = one(p, 'bb-card-0').getBounds().x;
+        expect(Math.abs(left - rowLeft)).toBeLessThan(4);
+        expect(Math.abs(right - (w - rowLeft))).toBeLessThan(6); // the slab shadow pokes out a few px
+      } else {
+        expect(right - left).toBeGreaterThan(0);
+      }
+    }
+  });
+
   it('no band backing: every Graphics in the band belongs to a plate', () => {
     const { page: p } = page();
     const inPlate = (n: Container): boolean => !!n.parent && (n.parent instanceof Slab || n.parent instanceof SReadout || n.parent instanceof SBet || inPlate(n.parent));

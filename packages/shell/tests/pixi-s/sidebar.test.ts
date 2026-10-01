@@ -2,7 +2,7 @@ import '../pixi/setup-canvas'; // must be first — patches canvas getContext be
 import { describe, it, expect } from 'vitest';
 import type { Container, Graphics } from 'pixi.js';
 import type { SGlyph } from '@/ui/pixi-s/icons';
-import { SideBar, OUTER, SAFE_GAP } from '@/ui/pixi-s/SideBar';
+import { SideBar, OUTER, SAFE_GAP, M_SIDE } from '@/ui/pixi-s/SideBar';
 import type { SButton, SBet, SSpin, SFsCounter, SReadout } from '@/ui/pixi-s/widgets';
 import { sIcon } from '@/ui/pixi-s/icons';
 import { S } from '@/ui/pixi-s/theme';
@@ -235,6 +235,19 @@ describe('S side bar — mobile', () => {
     expect(win.y).toBeGreaterThanOrEqual(Math.max(bal.b, bet.b) - 3);
     near(win.b, k.b);
     near((win.x + win.r) / 2, (k.x + k.r) / 2, 4);
+  });
+
+  it('a phone wider than the design pins the columns to the side padding (the user: "по краям большие паддинги, должно быть прижато")', () => {
+    for (const [w, h] of [[452, 812], [430, 932], [390, 844]]) {
+      const p = parts(build(host(w, h)));
+      const left = Math.min(box(p.leftCol).x, box(p.balance!).x, box(p.buy!).x);
+      const right = Math.max(box(p.bet).r, box(p.spin!).r);
+      near(left, M_SIDE, 3); // the slab shadows / leans may sit a few px inside
+      near(right, w - M_SIDE, 4);
+      expect(p.block.scale.x).toBe(1); // spread, not scaled up
+      const win = box(p.win);
+      near((win.x + win.r) / 2, w / 2, 4);
+    }
   });
 
   it('the block reserves the bottom: safeArea.bottom reaches its top edge', () => {

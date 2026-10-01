@@ -166,15 +166,18 @@ export class SideBar extends Container implements HbBar {
     const winW = this.win.measureSize().w;
     const winH = this.win.measureSize().h;
     if (this.mobile) {
-      const blockW = Math.max(M_REF_W, this.leftW + M_COL_GAP + this.rightW, winW);
+      // A narrower screen scales the design down; a wider one spreads it — the columns stay pinned
+      // to the side padding, never scaled up (the user: "по краям большие паддинги, должно быть прижато").
+      const designW = Math.max(M_REF_W, this.leftW + M_COL_GAP + this.rightW, winW);
+      const s = Math.min(1, (W - 2 * M_SIDE) / designW);
+      const blockW = (W - 2 * M_SIDE) / s;
       const blockH = this.rowsH + this.z.gap + winH;
       this.leftCol.position.set(0, 0);
       this.rightCol.position.set(blockW - this.rightW, 0);
       this.center.position.set((blockW - winW) / 2, this.rowsH + this.z.gap);
-      const s = Math.min(1, (W - 2 * M_SIDE) / blockW);
       const top = H - M_BOTTOM - blockH * s;
       this.block.scale.set(s);
-      this.block.position.set((W - blockW * s) / 2, top);
+      this.block.position.set(M_SIDE, top);
       this.safe = { top: 0, right: 0, bottom: H - top, left: 0 };
       this.plate = { x: this.block.x, y: top, w: blockW * s, h: blockH * s };
       return;

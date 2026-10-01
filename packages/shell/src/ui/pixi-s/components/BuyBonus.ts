@@ -382,8 +382,10 @@ export class SBuyBonusPage extends Container implements ShellLayer {
   private buildBetBand(w: number, h: number): Container {
     const band = new Container();
     const { state } = this.host;
-    const pad = clamp(10, h * 0.25, 20);
-    const room = w - pad * 3;
+    // no panel any more, so no side inset: the plates line up with the card row's edges; `gap` only
+    // separates them
+    const gap = clamp(10, h * 0.25, 20);
+    const room = w - gap;
     // a band too narrow for the two wide plates (phone) lowers them (the mobile bar's 40 at most, less
     // on a smaller phone) and splits the room 44 / 56 — the bet's ± squares are h wide, so it needs
     // the larger share to stay readable
@@ -408,9 +410,9 @@ export class SBuyBonusPage extends Container implements ShellLayer {
     bet.down!.disabled = locked || i <= 0;
     bet.up!.label = 'bb-bet-up';
     bet.down!.label = 'bb-bet-down';
-    bet.position.set(w - pad - bet.measureSize().w, (h - rh) / 2);
+    bet.position.set(w - bet.measureSize().w, (h - rh) / 2);
     const balance = new SReadout({ label: this.host.t('Balance'), value: this.host.fmt(state.balance), w: narrow ? Math.floor(room * 0.44) : Math.round(rh * 4.8), h: rh, labelSize, valueSize });
-    balance.position.set(pad, (h - rh) / 2);
+    balance.position.set(0, (h - rh) / 2);
     band.addChild(balance, bet);
     return band;
   }

@@ -233,6 +233,9 @@ The bar is laid out in rows (the user's call after the second demo, 2026-09-29: 
 - **Fit scale.** The block is designed at 370 wide (390 minus the side padding) and scaled by
   `min(1, (W − 20) / blockW)`, where `blockW = max(370, left + 12 + right, WIN)`. It is never wider than
   the screen, so it has no lower bound.
+- **A wider phone spreads, never scales up** (the user, 2026-10-01: "по краям большие паддинги, должно
+  быть прижато" on Mobile L 452). The block is laid out `(W − 20) / s` wide, so the left column sits at the
+  10px side padding, the right column ends 10px from the right edge, and WIN stays centred.
 - **Safe area.** `bottom` = screen height − the block's top edge. `left = right = top = 0`.
   `barHeight` equals `bottom`.
 - **Menu anchor.** `menuPlate()` is the whole block, so the popover opens above it.
