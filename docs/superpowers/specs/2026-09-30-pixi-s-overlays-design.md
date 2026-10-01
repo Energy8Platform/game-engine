@@ -183,7 +183,7 @@ Game info and buy bonus share it.
   width → `min(760, inner − 2·sidePad − ScrollBox.GUTTER)`, centred. "по ширине и
   позиционированию оставить также".
 - **Top strip.**
-  - At `y = clamp(12, 0.03h, 24)`. Height `T = clamp(44, 0.09h, 72)`.
+  - At `y = clamp(8, min(0.03h, 0.04w), 24)`. Height `T = clamp(30, min(0.09h, 0.12w), 72)` (`stripMetrics(w, h)`): the short side rules, so a small popout or narrow phone gets a small strip. Until 2026-10-01 it was `clamp(12, 0.03h, 24)` / `clamp(44, 0.09h, 72)`; the user found the plates and ✕ "огромные" on popout S / Stake S / mobile S. The ✕ keeps a 44px hit box.
   - The title plate (`sTitlePlate(title, T)`, big caps) sits at the column's left edge.
   - `sCloseButton(T)` sits at the column's right edge.
 - **Scroll area.** Below the strip (+ 0.3T) down to the screen bottom − 12, as wide as the column
@@ -346,7 +346,7 @@ These rules replace the earlier ones where they conflict.
 
 ### R1. Pages (game info, buy bonus): corners
 - **Top corners.**
-  - The title plate sits in the top-left corner of the screen, at `(m, m)` with `m = stripMetrics(h).top`.
+  - The title plate sits in the top-left corner of the screen, at `(m, m)` with `m = stripMetrics(w, h).top`.
   - ✕ sits in the top-right corner of the screen, at `x = w − m − GUTTER − size`. The gutter keeps it
     clear of the scrollbar. `closeCorner(w, h)` (`primitives/page.ts`) returns this place; every S
     overlay puts its ✕ there.

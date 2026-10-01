@@ -99,7 +99,7 @@ export class SPicker extends Container implements ShellLayer {
     this.laidOut = `${w}x${h}`;
     if (this.children.length > 1) this.removeChildren(1).forEach((c) => c.destroy({ children: true }));
     const em = clampEm(w, h);
-    const strip = stripMetrics(h);
+    const strip = stripMetrics(w, h);
     const corner = closeCorner(w, h);
 
     this.closeBtn = sCloseButton(corner.size, () => this.host.closeLayer());

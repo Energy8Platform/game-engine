@@ -32,7 +32,7 @@ describe('S game info page', () => {
     const p = info([PAYTABLE(3)]);
     expect(p.veil.hitArea).toMatchObject({ x: 0, y: 0, width: 1280, height: 720 });
     expect(p.titlePlate!.labelText.text).toBe('GAME INFO');
-    const strip = stripMetrics(720);
+    const strip = stripMetrics(1280, 720);
     expect(p.titlePlate!.x).toBeCloseTo(strip.top, 0);
     expect(p.titlePlate!.y).toBeCloseTo(strip.top, 0);
     expect(p.closeBtn!.x + strip.height).toBeCloseTo(1280 - strip.top - ScrollBox.GUTTER, 0);

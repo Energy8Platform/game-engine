@@ -59,13 +59,13 @@ This builds on `2026-09-29-pixi-s-shell-design.md` (the bar) and
 - **Short screens scale the page.** The row and the band lay out at the logical size `(w / k, h / k)`
   with `k = min(1, h / 440)` and are drawn scaled by `k`. On Stake popout S (400×225) the logical size
   is about 784×440 at `k ≈ 0.51`. The title plate and ✕ are not scaled: they stay at screen size, at
-  `stripMetrics(h)` / `closeCorner(w, h)` like every other S overlay, above the scaled row and band.
+  `stripMetrics(w, h)` / `closeCorner(w, h)` like every other S overlay, above the scaled row and band.
   Everything below is in logical units.
 
 ### Row
 
 - One horizontal row of cards between the strip and the band:
-  - `rowTop = (strip.top + strip.height · 1.3) / k`, with `strip = stripMetrics(h)` at screen size;
+  - `rowTop = (strip.top + strip.height · 1.3) / k`, with `strip = stripMetrics(w, h)` at screen size;
   - `rowBottom = band top − pad · 0.5`.
 - It sits in a `ScrollBox` with `axis: 'x'` (see §4). The viewport is the full page width minus
   `pad` on each side. It is `cardH + ScrollBox.GUTTER` tall; the horizontal S scrollbar runs in the

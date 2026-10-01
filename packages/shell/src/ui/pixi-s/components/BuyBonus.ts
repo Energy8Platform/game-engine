@@ -158,7 +158,7 @@ export class SBuyBonusPage extends Container implements ShellLayer {
   private rebuild(): void {
     this.removeConfirm(); // a resize or the end of a cancel drops the confirm, unanimated
     // the title plate and ✕ at screen size in the screen corners, above the stage, as on every S overlay
-    const strip = stripMetrics(this.h);
+    const strip = stripMetrics(this.w, this.h);
     this.titlePlate?.destroy({ children: true });
     this.closeBtn?.destroy({ children: true });
     const m = strip.top;
@@ -442,7 +442,7 @@ export class SBuyBonusPage extends Container implements ShellLayer {
     const W = this.w / k;
     const H = this.h / k;
     // the flyer sits between the ✕ strip (its bottom plus one margin) and the bottom margin
-    const strip = stripMetrics(this.h);
+    const strip = stripMetrics(this.w, this.h);
     const top = (strip.top * 2 + strip.height) / k;
     const m = strip.top / k;
     const s = Math.min(1.3, (H - top - m) / ch, (W - 2 * m) / cw);

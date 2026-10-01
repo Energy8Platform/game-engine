@@ -8,15 +8,21 @@ import { STitlePlate, sCloseButton, S_SCROLL } from './controls';
 import { S } from '../theme';
 import { BORDER } from '../../pixi-hb/theme';
 
-/** Where the page's top strip sits on a screen `h` tall: its top edge and height. */
-export function stripMetrics(h: number): { top: number; height: number } {
-  return { top: clamp(12, h * 0.03, 24), height: clamp(44, h * 0.09, 72) };
+/** Where the overlays' top strip (title plate, ✕) sits on a `w × h` screen: its top edge and height.
+ *  Sized by the short side — 9% of the height, 12% of the width — so a small popout or a narrow
+ *  phone gets a small strip (the user: "заголовки в модалках и закрыть огромные" at 44px on Stake S);
+ *  the ✕ keeps a 44px hit box (sCloseButton). */
+export function stripMetrics(w: number, h: number): { top: number; height: number } {
+  return {
+    top: clamp(8, Math.min(h * 0.03, w * 0.04), 24),
+    height: clamp(30, Math.min(h * 0.09, w * 0.12), 72),
+  };
 }
 
 /** The ✕'s place, shared by every S overlay: the top-right screen corner, inboard of the scrollbar
  *  gutter, one strip tall. */
 export function closeCorner(w: number, h: number): { x: number; y: number; size: number } {
-  const { top: m, height: size } = stripMetrics(h);
+  const { top: m, height: size } = stripMetrics(w, h);
   return { x: w - m - ScrollBox.GUTTER - size, y: m, size };
 }
 
@@ -67,7 +73,7 @@ export class SPage extends Container implements ShellLayer {
     this.veil.clear().rect(0, 0, w, h).fill(S.veil);
     this.veil.hitArea = new Rectangle(0, 0, w, h);
     const col = pageColumn(w, h);
-    const strip = stripMetrics(h);
+    const strip = stripMetrics(w, h);
     const m = strip.top;
 
     this.titlePlate?.destroy({ children: true });

@@ -1,6 +1,6 @@
 import '../pixi/setup-canvas'; // must be first — patches canvas getContext before pixi.js loads
 import { describe, it, expect, vi } from 'vitest';
-import { Container, Graphics, Point } from 'pixi.js';
+import { Container, Graphics, Point, type Rectangle } from 'pixi.js';
 import { SButton } from '@/ui/pixi-s/widgets';
 import { stripMetrics, closeCorner, SPage } from '@/ui/pixi-s/primitives/page';
 import { SCardModal } from '@/ui/pixi-s/primitives/card';
@@ -57,7 +57,7 @@ describe('S card modal', () => {
     const c = closeCorner(390, 844);
     const b = m.closeBtn as unknown as SButton;
     expect(b.parent).toBe(m);
-    expect(b.measureSize().w).toBe(stripMetrics(844).height);
+    expect(b.measureSize().w).toBe(Math.round(stripMetrics(390, 844).height));
     expect(b.x).toBeCloseTo(c.x, 0);
     expect(b.y).toBeCloseTo(c.y, 0);
   });
@@ -120,7 +120,7 @@ describe('S pickers, modal, replay', () => {
     const host = makeContext({ screenW: 1280, screenH: 720, config: defaultConfig({ availableBets: [0.5, 1, 2, 5], defaultBet: 0.5 }) });
     const p = openSBetPicker(host) as unknown as SPicker;
     expect(p.titlePlate.toGlobal(new Point(p.titlePlate.measureSize().w / 2, 0)).x).toBeCloseTo(640, 0);
-    expect(p.titlePlate.measureSize().h).toBe(Math.round(stripMetrics(720).height)); // M1: the ✕'s height
+    expect(p.titlePlate.measureSize().h).toBe(Math.round(stripMetrics(1280, 720).height)); // M1: the ✕'s height
     expect(p.closeBtn.x).toBeCloseTo(closeCorner(1280, 720).x, 0);
     const s = p.slider.getBounds();
     const v = p.valuePlate.getBounds();
@@ -149,7 +149,7 @@ describe('S pickers, modal, replay', () => {
     expect(t.x + t.width).toBeLessThanOrEqual(p.closeBtn.x); // level with the ✕, the title keeps clear of it
     // on a phone the title sits well below the ✕, so it keeps its full 3h width
     const phone = openSBetPicker(makeContext({ screenW: 390, screenH: 844 })) as unknown as SPicker;
-    expect(phone.titlePlate.measureSize().w).toBe(Math.round(3 * stripMetrics(844).height));
+    expect(phone.titlePlate.measureSize().w).toBe(Math.round(3 * stripMetrics(390, 844).height));
   });
 
   it('I2: an off-list bet shows the nearest level; Confirm without moving keeps the bet; a step then confirms the level', () => {
@@ -237,6 +237,25 @@ describe('S pickers, modal, replay', () => {
     await Promise.resolve();
     await Promise.resolve();
     expect(reopen).toHaveBeenCalled();
+  });
+});
+
+describe('the strip scales with the screen\'s short side (the user, 2026-10-01: "заголовки в модалках и закрыть огромные" on popout S / Stake S / mobile S)', () => {
+  it('small screens get a small strip; desktop keeps its size; the ✕ stays tappable', () => {
+    expect(stripMetrics(1280, 720).top).toBeCloseTo(21.6, 5); // desktop: unchanged
+    expect(stripMetrics(1280, 720).height).toBeCloseTo(64.8, 5);
+    expect(stripMetrics(400, 225).height).toBe(30); // was 44 — a fifth of the screen
+    expect(stripMetrics(480, 270).height).toBe(30);
+    expect(stripMetrics(320, 568).height).toBeCloseTo(38.4, 5); // the short side rules a portrait phone
+    expect(stripMetrics(390, 844).height).toBeCloseTo(46.8, 5);
+    expect(stripMetrics(400, 225).top).toBe(8);
+    // a small ✕ still has a 44px hit box
+    const host = makeContext({ screenW: 400, screenH: 225 });
+    const card = new SCardModal(host, { title: 'Bet', onClose: () => {} });
+    card.build();
+    const hit = (card.closeBtn as unknown as SButton).hitArea as Rectangle;
+    expect(hit.width).toBeGreaterThanOrEqual(44);
+    expect(hit.height).toBeGreaterThanOrEqual(44);
   });
 });
 

@@ -38,10 +38,11 @@ export class STitlePlate extends Container implements Sizable {
   }
 }
 
-/** The ✕: a yellow square slab with the ink `close` glyph. */
+/** The ✕: a yellow square slab with the ink `close` glyph. A small ✕ (small screens) keeps a 44px
+ *  hit box, centred on it. */
 export function sCloseButton(size: number, onTap: () => void): SButton {
   const g = Math.round(size * 0.5);
-  return new SButton({
+  const b = new SButton({
     w: size,
     h: size,
     face: 'yellow',
@@ -50,6 +51,9 @@ export function sCloseButton(size: number, onTap: () => void): SButton {
     glyphSize: g,
     onTap,
   });
+  const pad = Math.max(0, (44 - size) / 2);
+  if (pad > 0) b.hitArea = new Rectangle(-pad, -pad, size + pad * 2, size + pad * 2);
+  return b;
 }
 
 export type SButtonKind = 'accent' | 'red' | 'ghost' | 'dim';

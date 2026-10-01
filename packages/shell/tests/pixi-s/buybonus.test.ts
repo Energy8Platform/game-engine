@@ -67,7 +67,7 @@ afterEach(() => vi.restoreAllMocks());
 describe('S buy bonus page', () => {
   it('R1: the BUY BONUS plate and ✕ sit in the screen corners', () => {
     const { page: p } = page();
-    const strip = stripMetrics(720);
+    const strip = stripMetrics(1280, 720);
     expect(p.titlePlate!.x).toBeCloseTo(strip.top, 0);
     expect((p as unknown as { closeBtn: { x: number } }).closeBtn.x + strip.height).toBeCloseTo(1280 - strip.top - ScrollBox.GUTTER, 0);
   });
@@ -264,7 +264,7 @@ describe('S buy bonus page', () => {
     expect(b.y).toBeCloseTo(c.y, 5);
     expect(b.width - SHADOW_OFFSET).toBeCloseTo(Math.round(c.size), 5);
     const plate = q.titlePlate.getBounds();
-    expect(plate.y).toBeCloseTo(stripMetrics(225).top, 5);
+    expect(plate.y).toBeCloseTo(stripMetrics(400, 225).top, 5);
     // above the scaled stage, and the row starts under the plate
     expect(p.getChildIndex(q.closeBtn)).toBeGreaterThan(p.getChildIndex(q.stage));
     expect(p.getChildIndex(q.titlePlate)).toBeGreaterThan(p.getChildIndex(q.stage));
@@ -308,7 +308,7 @@ describe('S buy bonus: the fly-in confirm', () => {
   function target(p: SBuyBonusPage) {
     const { w, h } = parts(p).cardSize();
     const em = parts(p).cardEm(h);
-    const strip = stripMetrics(720);
+    const strip = stripMetrics(1280, 720);
     const m = strip.top;
     const top = strip.top * 2 + strip.height;
     const s = Math.min(1.3, (720 - top - m) / h, (1280 - 2 * m) / w);
