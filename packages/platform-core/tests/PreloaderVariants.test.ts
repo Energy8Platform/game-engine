@@ -10,7 +10,7 @@ import {
 } from '../src/loading';
 import { VARIANTS } from '../src/loading/variants';
 import type { PreloaderVariantName } from '../src/loading/variants';
-import { HELLBUDDHA_INTRO_MS } from '../src/loading/variants/hellbuddha';
+import { HELLBUDDHA_INTRO_MS, LOADER_BAR_MAX_WIDTH as HB_BAR_MAX_WIDTH } from '../src/loading/variants/hellbuddha';
 import { BRAND_FLOOR_MS } from '../src/loading/splash';
 
 describe('preloader variant registry', () => {
@@ -183,8 +183,10 @@ describe('hellbuddha variant', () => {
 
   it('renders the animated lockup plus its own loader rect + text', () => {
     createCSSPreloader(container, { preloaderVariant: 'hellbuddha' });
-    // The artwork: body + all ten letters, each with the export's own class hooks.
+    // The artwork: the buddha (dark silhouette + white detail) and all ten letters of the wordmark.
     expect(container.querySelector('.ge-hb .body .f')).not.toBeNull();
+    expect(container.querySelectorAll('.ge-hb .body .dark').length).toBe(2);
+    expect(container.querySelectorAll('.ge-hb .body .f > *').length).toBe(22);
     expect(container.querySelectorAll('.ge-hb .ltr').length).toBe(10);
     expect(container.querySelector('#ge-hb-loader-rect')).not.toBeNull();
     expect(container.querySelector('#ge-pl-loader-rect')).toBeNull();
@@ -211,11 +213,11 @@ describe('hellbuddha variant', () => {
     expect(rect.closest('.ge-hb-loader')).not.toBeNull();
   });
 
-  it('drives the loader rect width on progress (max width 775)', () => {
+  it('drives the loader rect width on progress, up to the bar\'s full width', () => {
     createCSSPreloader(container, { preloaderVariant: 'hellbuddha' });
     setCSSPreloaderProgress(0.5);
     const rect = container.querySelector('#ge-hb-loader-rect') as SVGRectElement;
-    expect(rect.getAttribute('width')).toBe(String(0.5 * 775));
+    expect(rect.getAttribute('width')).toBe(String(0.5 * HB_BAR_MAX_WIDTH));
     expect(rect.classList.contains('driven')).toBe(true);
   });
 
