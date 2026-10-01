@@ -2,7 +2,7 @@ import '../pixi/setup-canvas'; // must be first — patches canvas getContext be
 import { describe, it, expect } from 'vitest';
 import type { Container, Graphics } from 'pixi.js';
 import type { SGlyph } from '@/ui/pixi-s/icons';
-import { SideBar, OUTER, SAFE_GAP, M_SIDE } from '@/ui/pixi-s/SideBar';
+import { SideBar, OUTER, SAFE_GAP, M_SIDE, WIDE_BOTTOM } from '@/ui/pixi-s/SideBar';
 import type { SButton, SBet, SSpin, SFsCounter, SReadout } from '@/ui/pixi-s/widgets';
 import { sIcon } from '@/ui/pixi-s/icons';
 import { S } from '@/ui/pixi-s/theme';
@@ -76,8 +76,8 @@ describe('S side bar — wide', () => {
     expect(bet.y).toBeGreaterThanOrEqual(spin.b - 3);
     // WIN: on the bottom line (with BALANCE), centred in the gap between the two columns
     near(win.b, bal.b);
-    expect(win.b).toBeGreaterThan(720 - OUTER - 1);
-    expect(win.b).toBeLessThanOrEqual(720 - OUTER + 3);
+    expect(win.b).toBeGreaterThan(720 - WIDE_BOTTOM - 1);
+    expect(win.b).toBeLessThanOrEqual(720 - WIDE_BOTTOM + 3);
     expect(win.x).toBeGreaterThan(l.r);
     expect(win.r).toBeLessThan(r.x);
     near((win.x + win.r) / 2, (l.r + r.x) / 2, 4);
@@ -315,16 +315,61 @@ describe('S side bar — modes and controls', () => {
     expectOnScreen(bar, 1280, 720);
   });
 
-  it('an active feature: red BUY with a cross, a locked stepper, the multiplied bet', () => {
-    const ctx = host(1280, 720);
+  it('an active feature: red BUY with a cross, the multiplied bet — and the stepper still steps (the user: "когда активна feature я в баре не могу менять ставку")', () => {
+    const steps: number[] = [];
+    const ctx = host(1280, 720, FULL, { actions: { stepBet: (d: 1 | -1) => steps.push(d) } });
     ctx.state.activeFeature = ANTE;
+    ctx.state.bet = ctx.state.availableBets[1];
     const p = parts(build(ctx));
     expect(p.buy!.face).toBe('red');
     expect((p.buy!.glyph as SGlyph).iconName).toBe('close');
-    expect(p.bet.up!.disabled).toBe(true);
-    expect(p.bet.down!.disabled).toBe(true);
-    expect(p.bet.valueText.text).toBe('€1.25');
+    expect(p.bet.up!.disabled).toBe(false);
+    expect(p.bet.down!.disabled).toBe(false);
     expect(p.bet.labelText.text).toBe('WARRIOR ANTE');
+    p.bet.up!.emit('pointertap', {});
+    p.bet.down!.emit('pointertap', {});
+    expect(steps).toEqual([1, -1]);
+  });
+
+  it('an active feature shows the feature price: the bet times its multiplier', () => {
+    const ctx = host(1280, 720);
+    ctx.state.activeFeature = ANTE;
+    expect(parts(build(ctx)).bet.valueText.text).toBe('€1.25');
+  });
+
+  it('a replay of free spins: TOTAL WIN sits on the bottom row, in BALANCE\'s empty slot, not raised above it', () => {
+    for (const [w, h] of [[1280, 720], [390, 844]]) {
+      const ctx = host(w, h);
+      ctx.state.mode = 'replay';
+      ctx.state.replay = true;
+      ctx.state.freeSpins = { current: 3, total: 10, totalWin: 12 };
+      const p = parts(build(ctx));
+      expect(p.balance).toBeUndefined();
+      // exactly where BALANCE sits during live free spins
+      const live = host(w, h);
+      live.state.mode = 'freeSpins';
+      live.state.freeSpins = { current: 3, total: 10, totalWin: 12 };
+      const bal = box(parts(build(live)).balance!);
+      const tw = box(p.totalWin!);
+      near(tw.x, bal.x, 1);
+      near(tw.y, bal.y, 1);
+    }
+    // live free spins keep it in BUY's slot, over BALANCE
+    const live = host(1280, 720);
+    live.state.mode = 'freeSpins';
+    live.state.freeSpins = { current: 3, total: 10, totalWin: 12 };
+    const q = parts(build(live));
+    expect(box(q.totalWin!).b).toBeLessThan(box(q.balance!).y + 1);
+  });
+
+  it('the bar sits close to the bottom edge: 8px on desktop, less on a popout (scaled, at least 4)', () => {
+    for (const [w, h, max] of [[1280, 720, 8], [480, 270, 4], [400, 225, 4]]) {
+      const p = parts(build(host(w, h)));
+      const bottom = Math.max(box(p.balance!).b, box(p.bet).b, box(p.win).b);
+      const gap = h - bottom;
+      expect(gap, `${w}×${h}`).toBeLessThanOrEqual(max + 0.5);
+      expect(gap, `${w}×${h}`).toBeGreaterThanOrEqual(0);
+    }
   });
 
   it('autoplay running: a yellow tab with STOP and SPIN stops the run; halted: SPIN resumes with the count', () => {

@@ -552,6 +552,15 @@ describe('S buy bonus: the fly-in confirm', () => {
 });
 
 describe('S buy bonus: a rebuild keeps the row scrolled', () => {
+  it('with a feature active the band\'s bet still steps', () => {
+    const { host, page: p } = page();
+    host.state.activeFeature = { id: 'w', type: 'feature', title: 'Warrior Ante', description: '', priceMultiplier: 1.25 };
+    host.state.bet = host.state.availableBets[1];
+    p.resize(1280, 721); // rebuild with the feature on
+    expect((one(p, 'bb-bet-up') as unknown as { disabled: boolean }).disabled).toBe(false);
+    expect((one(p, 'bb-bet-down') as unknown as { disabled: boolean }).disabled).toBe(false);
+  });
+
   it('a bet step keeps the row where it was', () => {
     const { page: p } = page({ screenW: 390, screenH: 844, layout: 'mobile' }, FOUR);
     p.onKey({ code: 'ArrowRight' } as KeyboardEvent);

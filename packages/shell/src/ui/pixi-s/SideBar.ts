@@ -58,8 +58,11 @@ const MOBILE: Sizes = {
 export const WIDE_REF_W = 1280;
 export const WIDE_REF_H = 720;
 export const WIDE_MIN_SCALE = 0.35;
-/** Screen padding around the wide columns. */
+/** Screen padding around the wide columns (left / right). */
 export const OUTER = 16;
+/** Wide bottom padding at full scale; it scales with the bar (never under 4), so a small popout's
+ *  bar sits on the bottom edge (the user: "прижать bar сильнее к низу, особенно в popout"). */
+export const WIDE_BOTTOM = 8;
 /** Extra room between a column and the scene's safe rect. */
 export const SAFE_GAP = 12;
 /** Mobile block: design width, side / bottom padding, and the gap between its two columns. */
@@ -183,7 +186,7 @@ export class SideBar extends Container implements HbBar {
       return;
     }
     const s = Math.max(WIDE_MIN_SCALE, Math.min(1, W / WIDE_REF_W, H / WIDE_REF_H));
-    const top = H - OUTER - this.rowsH * s;
+    const top = H - Math.max(4, WIDE_BOTTOM * s) - this.rowsH * s;
     const leftEdge = OUTER + this.leftW * s; // the left column's right edge
     const rx = W - OUTER - this.rightW * s; // the right column's left edge (tabs included)
     // WIN sits on the bottom line, centred in the gap between the columns
@@ -220,9 +223,12 @@ export class SideBar extends Container implements HbBar {
       this.buy = this.buildBuy();
       if (this.buy) this.buy.position.set(0, this.rowB);
     } else if (this.showFs()) {
-      // BUY's slot is free outside base: TOTAL WIN goes there, so no row grows and no inset moves
+      // BUY's slot is free outside base: TOTAL WIN goes there, so no row grows and no inset moves. A
+      // replay has no BALANCE, so TOTAL WIN takes BALANCE's slot on the bottom row instead of
+      // floating over an empty one.
       this.totalWin = this.readout('Total win', this.host.fmtWin(state.freeSpins.totalWin));
-      this.totalWin.position.set(0, this.rowB + (z.spin[1] - z.readout[1]) / 2);
+      if (state.replay) this.totalWin.position.set(0, this.rowC);
+      else this.totalWin.position.set(0, this.rowB + (z.spin[1] - z.readout[1]) / 2);
     }
     if (this.buy) items.push(this.buy);
     if (this.totalWin) items.push(this.totalWin);
@@ -423,11 +429,12 @@ export class SideBar extends Container implements HbBar {
     return this.host.state.busy || this.host.state.autoplay.active;
   }
 
-  /** Same locks as HB's BottomBar.applyBusy. */
+  /** HB's BottomBar.applyBusy locks, except an active feature keeps the bet steppable — its price
+   *  follows the bet (the user: "когда активна feature я в баре не могу менять ставку"). */
   private applyBusy(): void {
     const { state } = this.host;
     const auto = state.autoplay.active;
-    const lockBet = state.busy || auto || !!state.activeFeature;
+    const lockBet = state.busy || auto;
     const i = state.availableBets.indexOf(state.bet);
     if (this.bet.up) this.bet.up.disabled = lockBet || i >= state.availableBets.length - 1;
     if (this.bet.down) this.bet.down.disabled = lockBet || i <= 0;

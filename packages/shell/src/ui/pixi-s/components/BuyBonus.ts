@@ -393,7 +393,7 @@ export class SBuyBonusPage extends Container implements ShellLayer {
     const rh = Math.round(narrow ? Math.min(h * 0.78, 40, room * NARROW_RH_SHARE) : h * 0.78);
     const i = state.availableBets.indexOf(state.bet);
     const feature = state.activeFeature;
-    const locked = state.busy || state.autoplay.active || !!feature;
+    const locked = state.busy || state.autoplay.active; // a feature keeps the bet steppable, as the bar
     const labelSize = Math.round(rh * 0.27);
     const valueSize = Math.round(rh * 0.41);
     const bet = new SBet({
