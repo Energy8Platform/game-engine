@@ -2,6 +2,10 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+> The e8 engine and its WebIDE (`engine/*`, `@energy8engine/*`) live in their own repo,
+> `~/Documents/repo/e8-engine` (since 2026-10-01). It takes `@energy8platform/{platform-core,shell,game-sdk}`
+> from npm, so a change here reaches it only after a publish.
+
 ## Repo layout
 
 This is an **npm workspaces monorepo** that publishes two packages:
