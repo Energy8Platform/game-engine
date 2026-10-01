@@ -49,3 +49,5 @@ export function removePixiSShell(): Promise<void> {
 
 export { S } from './theme';
 export * from '@/core';
+/** The layer contract renderers and custom layers share — public so emitted declarations can name it. */
+export type { ShellLayer, LayerHandle, PixiComponentContext } from '../pixi/context';

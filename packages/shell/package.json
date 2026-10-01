@@ -41,6 +41,7 @@
     "gen-version": "node scripts/gen-version.mjs",
     "prebuild": "npm run gen-version",
     "build": "rollup -c rollup.config.mjs",
+    "postbuild": "tsc -p tests/dts",
     "dev": "rollup -c rollup.config.mjs -w",
     "lint": "eslint src/ --ext .ts",
     "format": "prettier --write \"src/**/*.ts\"",

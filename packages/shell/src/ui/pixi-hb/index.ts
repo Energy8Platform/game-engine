@@ -57,3 +57,5 @@ export { makeIcon, IconView } from './pixi-icon';
 export { HB_ICON_NAMES, iconSVG, type HbIconName, type HbIconColors } from './icons';
 export { HB } from './theme';
 export * from '@/core';
+/** The layer contract renderers and custom layers share — public so emitted declarations can name it. */
+export type { ShellLayer, LayerHandle, PixiComponentContext } from '../pixi/context';
