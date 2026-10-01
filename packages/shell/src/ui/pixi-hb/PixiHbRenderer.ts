@@ -9,7 +9,9 @@ import {
   type Text,
   type Ticker,
 } from 'pixi.js';
-import type { ShellRenderer, ShellHost, OverlayRequest, OverlayHandle } from '@/core/renderer';
+import type { ShellRenderer, ShellHost, OverlayRequest, OverlayHandle, SafeArea } from '@/core/renderer';
+import type { Rect } from '@/core/popover';
+import type { ReplayModalOptions, ModalOptions } from '@/core/types';
 import type { ShellTokens } from '@/core/theme';
 import type { PixiComponentContext, ShellLayer, LayerHandle } from '../pixi/context';
 import { installShellFont, whenFontReady } from './text';
@@ -25,16 +27,61 @@ import { openBetPicker, openAutoplayPicker } from './components/pickers';
 import { buildModal } from './components/Modal';
 import { buildReplayModal } from './components/ReplayModal';
 
+/** What PixiHbRenderer needs from a control bar. HB's BottomBar and the S skin's SideBar implement
+ *  it; the renderer rebuilds the bar through `PixiHbRendererOptions.bar` on every renderBar(). */
+export interface HbBar extends Container {
+  /** Value Texts `animateMoney` counts up (absent when that readout is hidden). */
+  balanceValue?: Text;
+  winValue?: Text;
+  /** Position and scale the freshly built bar for the current screen. */
+  applyFit(): void;
+  /** Screen rect of the burger — the menu popover's pointer. */
+  menuAnchor(): Rect | null;
+  /** Screen rect the menu popover places itself against. */
+  menuPlate(): Rect | null;
+  /** The bar's own content scale (the popover matches it). */
+  fitScale(): number;
+  /** Screen-space insets the scene should avoid. */
+  safeArea(): SafeArea;
+  /** The menu layer opened (true) or closed (false) — a skin can mark its burger (S: ✕). */
+  setMenuOpen?(open: boolean): void;
+}
+
+/** The overlay builders PixiHbRenderer uses; a skin overrides any of them through `overlays`. */
+export interface HbOverlays {
+  menu(ctx: PixiComponentContext, anchor: () => Rect | null, plate: () => Rect | null, scale: () => number): ShellLayer;
+  gameInfo(ctx: PixiComponentContext): ShellLayer;
+  buyBonus(ctx: PixiComponentContext): ShellLayer | null;
+  betPicker(ctx: PixiComponentContext): ShellLayer;
+  autoplayPicker(ctx: PixiComponentContext): ShellLayer;
+  replay(ctx: PixiComponentContext, opts: ReplayModalOptions, reopen: () => void): ShellLayer;
+  modal(ctx: PixiComponentContext, opts: ModalOptions): ShellLayer;
+}
+
+const HB_OVERLAYS: HbOverlays = {
+  menu: openMenu,
+  gameInfo: openGameInfo,
+  buyBonus: openBuyBonus,
+  betPicker: openBetPicker,
+  autoplayPicker: openAutoplayPicker,
+  replay: buildReplayModal,
+  modal: buildModal,
+};
+
 export interface PixiHbRendererOptions {
   app: Application;
   parent?: Container;
+  /** Build the control bar. Default: HB's BottomBar. */
+  bar?: (ctx: PixiComponentContext) => HbBar;
+  /** Replace any of HB's overlays (the S skin replaces them all). */
+  overlays?: Partial<HbOverlays>;
 }
 
 /** The Pixi VIEW half of the shell — the renderer the controller drives. Owns the root/bar/modal
- *  containers, builds the BottomBar + overlays, runs money count-ups + the frosted backdrop, and
- *  reports its surface size back to the controller. All the keyboard / pull-focus / overlay-flow
- *  logic lives in the ShellController; this class is pure Pixi rendering — a 1:1 port of the
- *  PixiGameShell rendering methods. */
+ *  containers, builds the bar from `opts.bar` (default: BottomBar) + overlays, runs money count-ups
+ *  + the frosted backdrop, and reports its surface size back to the controller. All the keyboard /
+ *  pull-focus / overlay-flow logic lives in the ShellController; this class is pure Pixi rendering —
+ *  a 1:1 port of the PixiGameShell rendering methods. */
 export class PixiHbRenderer implements ShellRenderer {
   private app: Application;
   private parent?: Container;
@@ -44,7 +91,8 @@ export class PixiHbRenderer implements ShellRenderer {
   private root = new Container();
   private barLayer = new Container();
   private modalLayer = new Container();
-  private bar?: BottomBar;
+  private bar?: HbBar;
+  private makeBar: (ctx: PixiComponentContext) => HbBar;
   private currentLayer: ShellLayer | null = null;
   private backdrop?: { node: Container; texture: RenderTexture };
   /** Whether `currentLayer` asked for a frosted backdrop. Light-dismiss layers (the menu popover)
@@ -53,10 +101,14 @@ export class PixiHbRenderer implements ShellRenderer {
   private layerBackdrop = false;
   private moneyAnims: Array<() => void> = [];
   private destroyed = false;
+  private overlays: HbOverlays;
+  private currentKind: OverlayRequest['kind'] | null = null;
 
   constructor(opts: PixiHbRendererOptions) {
     this.app = opts.app;
     this.parent = opts.parent;
+    this.makeBar = opts.bar ?? ((ctx) => new BottomBar(ctx));
+    this.overlays = { ...HB_OVERLAYS, ...opts.overlays };
   }
 
   private get ticker(): Ticker {
@@ -100,9 +152,11 @@ export class PixiHbRenderer implements ShellRenderer {
       this.barLayer.removeChild(this.bar);
       this.bar.destroy({ children: true });
     }
-    this.bar = new BottomBar(this.ctx);
+    this.bar = this.makeBar(this.ctx);
     this.barLayer.addChild(this.bar);
     this.bar.applyFit();
+    // a bar rebuilt under the open menu keeps its "menu open" mark (the S burger's ✕)
+    if (this.currentKind === 'menu') this.bar.setMenuOpen?.(true);
     // renderBar() runs on every resize AND on ~20 other state changes (bet/win/turbo/mode/…), any of
     // which can change the bar's own fitScale()/menuPlate() (e.g. a WIN pill appearing mid-autoplay
     // retriggers the wide layout's overflow-tightening branch). Only onResize used to reposition the
@@ -146,6 +200,7 @@ export class PixiHbRenderer implements ShellRenderer {
   }
 
   openOverlay(req: OverlayRequest): OverlayHandle | void {
+    const o = this.overlays;
     let layer: ShellLayer | null = null;
     switch (req.kind) {
       case 'menu':
@@ -154,7 +209,7 @@ export class PixiHbRenderer implements ShellRenderer {
         // — see Menu.ts's openMenu doc comment for why this must stay lazy. menuAnchor (the burger)
         // is the arrow's pointer; menuPlate (the plaque) drives placement; fitScale is the same
         // factor BottomBar applies to its own content via `inner.scale`.
-        layer = openMenu(
+        layer = o.menu(
           this.ctx,
           () => this.bar?.menuAnchor() ?? null,
           () => this.bar?.menuPlate() ?? null,
@@ -162,26 +217,28 @@ export class PixiHbRenderer implements ShellRenderer {
         );
         break;
       case 'gameInfo':
-        layer = openGameInfo(this.ctx);
+        layer = o.gameInfo(this.ctx);
         break;
       case 'buyBonus':
-        layer = openBuyBonus(this.ctx);
+        layer = o.buyBonus(this.ctx);
         break;
       case 'betPicker':
-        layer = openBetPicker(this.ctx);
+        layer = o.betPicker(this.ctx);
         break;
       case 'autoplayPicker':
-        layer = openAutoplayPicker(this.ctx);
+        layer = o.autoplayPicker(this.ctx);
         break;
       case 'replay':
-        layer = buildReplayModal(this.ctx, req.opts, () => this.host.openReplay(req.opts));
+        layer = o.replay(this.ctx, req.opts, () => this.host.openReplay(req.opts));
         break;
       case 'modal':
-        layer = buildModal(this.ctx, req.opts);
+        layer = o.modal(this.ctx, req.opts);
         break;
     }
     if (!layer) return;
     this.pushLayer(layer, { backdrop: req.kind !== 'menu' });
+    this.currentKind = req.kind; // after pushLayer: its clearLayer() resets it
+    if (req.kind === 'menu') this.bar?.setMenuOpen?.(true);
     const built = layer;
     return {
       onKey: built.onKey ? built.onKey.bind(built) : undefined,
@@ -246,6 +303,8 @@ export class PixiHbRenderer implements ShellRenderer {
     }
     this.layerBackdrop = false;
     this.removeBackdrop();
+    this.currentKind = null;
+    this.bar?.setMenuOpen?.(false);
   }
 
   fitModals(): void {
@@ -309,14 +368,14 @@ export class PixiHbRenderer implements ShellRenderer {
   }
 
   // ── safe area / visibility (PixiGameShell parity) ─────────────────────────────
-  /** Height of the bottom control bar in px (0 before first layout, or in replay-only chrome). */
+  /** The bar's bottom inset in px — 0 before first layout, or for a bar that reserves no bottom strip. */
   get barHeight(): number {
-    return this.bar?.height ?? 0;
+    return this.safeArea.bottom;
   }
 
-  /** Insets a scene should avoid. Only the bottom bar is reserved; the rest is full-bleed. */
-  get safeArea(): { top: number; right: number; bottom: number; left: number } {
-    return { top: 0, right: 0, bottom: this.barHeight, left: 0 };
+  /** Insets a scene should avoid, as the bar reports them (HB: the bottom strip; S: the side columns). */
+  get safeArea(): SafeArea {
+    return this.bar?.safeArea() ?? { top: 0, right: 0, bottom: 0, left: 0 };
   }
 
   /** Show/hide the whole shell (bar + overlays). */

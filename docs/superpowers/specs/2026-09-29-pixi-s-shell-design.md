@@ -2,8 +2,7 @@
 
 A third Pixi skin for the game shell. It reuses the Hellbuddha renderer (`PixiHbRenderer`) and all
 of HB's overlays unchanged, and replaces only the control bar: instead of HB's bottom panel, S draws
-two **side columns** that flank the reels, built from skewed black "slabs" with a halftone dot
-texture and a yellow accent. The core (`src/core/`) and every public contract (`ShellConfig`,
+two **side columns** that flank the reels, built from flat skewed black "slabs" with a yellow accent. The core (`src/core/`) and every public contract (`ShellConfig`,
 `Shell`, events, actions, state) stay as they are. A game switches by passing
 `shellFactory: createPixiSShell`.
 
@@ -37,13 +36,15 @@ packages/shell/
     ├── theme.ts        ← S palette (fixed, like HB)
     ├── fonts.ts        ← generated
     ├── text.ts         ← installSFont(), S text styles (label, value)
-    ├── icons.ts        ← S glyphs: mask, play, bolt (hand-written SVG fragments)
-    ├── slab.ts         ← the slab primitive (skewed quad, shadow, halftone, sawtooth edge)
+    ├── icons-sheet.ts  ← generated from icons-s.svg by scripts/gen-s-icons.mjs
+    ├── icons.ts        ← sIcon → SGlyph: the sheet's glyphs + a hand-drawn `play`
+    ├── slab.ts         ← the slab primitive (skewed quad + shadow)
     └── SideBar.ts      ← the bar: wide + mobile layouts, safe area, menu anchor
 ```
 
-Everything else comes from `../pixi-hb/` (renderer, overlays, `IconView`, HB icons for `spin` /
-`close` / `stop` / `menu` / `minus` / `plus`) and `../pixi/` (`FlexBox`, motion, context).
+Everything else comes from `../pixi-hb/` (renderer, overlays, and HB's `makeIcon` for the three
+glyphs the S sheet has none of — sound, music and info, in game info only) and `../pixi/`
+(`FlexBox`, motion, context).
 
 Exports:
 
@@ -101,9 +102,7 @@ Sampled from the reference screenshot:
 | token | value | use |
 |---|---|---|
 | `yellow` | `#f8be45` | SPIN and BUY faces, labels, ± glyphs, active tab |
-| `yellowDot` | `#d8a63d` | halftone dots on yellow |
 | `plate` | `#0b0b0b` | slab face |
-| `plateDot` | `#1c1c1c` | halftone dots on black |
 | `shadow` | `rgba(0,0,0,.45)` | slab drop shadow |
 | `fg` | `#f4f2eb` | values, white glyphs |
 | `ink` | `#0b0b0b` | glyphs on yellow |
@@ -119,10 +118,7 @@ One class draws every bar element:
 ```ts
 new Slab(w: number, h: number, opts: {
   face: string;                 // S.plate or S.yellow or S.red
-  dots?: string;                // halftone colour; omitted = no texture
-  fade?: boolean;               // dots thin toward the top-right (default true; SPIN passes false)
   corners?: Corners;            // per-corner offsets in px (the "torn" skew)
-  sawtooth?: boolean;           // zig-zag bottom edge (SPIN / FS counter)
   shadow?: boolean;             // offset darker copy behind the face (default true)
 })                              // + setFace(color) for hover
 ```
@@ -132,12 +128,8 @@ new Slab(w: number, h: number, opts: {
   bottom edge rising 4px). The offsets are constants, not random, so the bar looks the same on
   every render and in every test.
 - **Shadow.** The same quad offset by `(3, 3)` in `S.shadow`, drawn first.
-- **Halftone.** A dot grid (spacing 6px, dot radius 1.1px). A dot is kept only when it lies
-  wholly inside the quad (point-in-polygon on its four extreme points), so no mask is needed. On
-  black plates the dot radius fades from full at the bottom-left to nothing toward the top-right.
-  On SPIN the dots are uniform. The dots of one slab are one `GraphicsContext`, cached by size,
-  corners, colour and fade, and shared, so a bar rebuild re-tessellates nothing.
-- **Sawtooth.** SPIN's bottom edge is a zig-zag: teeth 8px wide and 5px deep.
+- **Flat faces.** No texture and no sawtooth edge (2026-09-29, the user's call after the first demo:
+  "убери эти точки на плашках, и у спина пилу снизу").
 
 ### Elements
 
@@ -146,17 +138,17 @@ new Slab(w: number, h: number, opts: {
 | menu | black, 64×44 | white `menu` glyph |
 | WIN / BALANCE | black, 280×54 (label 15, value 26) | yellow caps label (`t('Win')` / `t('Balance')`), white value |
 | TOTAL WIN (FS) | as WIN | label `t('Total win')` |
-| BET | black, 290×46 (label 14, value 24) | yellow `minus` · white caps `t('Bet')` · white value · yellow `plus` |
-| BUY | yellow tab, 96×52 | black `mask` glyph; feature active: red face, white `close` |
-| SPIN | yellow, sawtooth, 260×136 | black `spin` glyph; busy: glyph spins (HB behaviour) |
-| FS counter (replaces SPIN) | yellow, sawtooth | black label `t('Free spins')` + value `3 / 10` (or `state.bonus` label/value) |
-| autoplay tab | black, 52×40, tucked 12px under SPIN's left edge | white `play`; running: yellow face, black `stop` |
-| turbo tab | black, under the autoplay tab | `bolt`: L0 white; L1 yellow glyph; L2 yellow face, black glyph |
+| BET | black, 290×46 (label 14, value 24) | yellow `minus` · yellow caps `t('Bet')` · white value · yellow `plus` |
+| BUY | yellow, SPIN's size and shape | black `bonus` glyph; feature active: red face, white `close` |
+| SPIN | yellow, 174×126 | black `spin` glyph; busy: glyph spins (HB behaviour) |
+| FS counter (replaces SPIN) | yellow, SPIN's size | black label `t('Free spins')` + value `3 / 10` (or `state.bonus` label/value) |
+| autoplay tab | black parallelogram, 34×34 (mobile 29×30), a 4px seam from SPIN's slanted left edge | white `play`; running: yellow face, black `stop` |
+| turbo tab | black, under the autoplay tab | `turbo`: L0 white; L1 yellow glyph; L2 yellow face, black glyph |
 
 Sizes are desktop design units, before the fit scale (section 5).
 
 Text: labels in Montserrat ExtraBold, uppercase, `S.yellow`. Values in Montserrat ExtraBold,
-`S.fg`, with no stroke. The BET label is `S.fg`, as in the reference.
+`S.fg`, with no stroke. The BET label is `S.yellow`, as in the reference.
 
 ### Behaviour kept from HB
 
@@ -177,27 +169,40 @@ code.
 
 ### Wide (desktop, landscape)
 
+The bar is laid out in rows (the user's call after the second demo, 2026-09-29: "баланс и bet под
+кнопками", "win прям по низу между блоками", the tabs "одного размера и идти ровно от верхнего края
+кнопки, и при ховер желтым цветом"):
+
 ```
-[≡]                                              [BUY]
-[ВЫИГРЫШ  $0.00      ]                  [− СТАВКА $1.00 +]
-[БАЛАНС   $1,000.00  ]              ▶ ┌──────────────────┐
-                                    ⚡ │       SPIN       │
-                                       └/\/\/\/\/\/\/\/\/┘
+[≡]
+┌──────────────────┐                ▶ ┌──────────────────┐
+│   BUY (bonus)    │                ⚡ │       SPIN       │
+└──────────────────┘                   └──────────────────┘
+[БАЛАНС   $1,000.00  ]  [ВЫИГРЫШ $0.00]  [− СТАВКА $1.00 +]
 ```
 
-- The left column is anchored bottom-left and stacks, from the top: menu, (TOTAL WIN in FS),
-  WIN, BALANCE. BALANCE is hidden in replay, as in HB. The slabs are left-aligned and the gap
-  between them is 10.
-- The right column is anchored bottom-right and stacks, from the top: BUY (right-aligned, base
-  mode only), BET, SPIN (or the FS counter). The autoplay and turbo tabs hang off SPIN's left
-  edge, vertically centred on it.
+- **Button row.** BUY (left; SPIN's size and lean, base mode only) and SPIN or the FS counter
+  (right), level. The burger sits above BUY. In free spins BUY's slot holds TOTAL WIN, so no row
+  grows and no inset moves.
+- **Under the buttons.** BALANCE under BUY, BET under SPIN, top-aligned right below the button row.
+  BALANCE is hidden in replay, as in HB.
+- **WIN** sits on the bottom line (with BALANCE), centred in the gap between the two columns.
+- **Tabs.** Autoplay and turbo are one size, stacked from SPIN's top edge down. They stand apart from
+  SPIN: each is a parallelogram whose sides run parallel to SPIN's slanted left edge, a `tabGap` (4)
+  seam away (the user, 2026-09-30: tucked under SPIN, the top tab merged with SPIN's top corner). The
+  column reserves both tab slots, so free spins (turbo only) keep the width. Hover on a black tab: the
+  yellow face with an ink glyph.
+- **Plates never change size** (both layouts; the user's call, 2026-09-30: "размеры должны быть
+  фиксированными и не менять у плашек"). WIN / BALANCE / TOTAL WIN and BET keep their design size;
+  a label or value that does not fit scales down (label and value by one factor). So the insets do
+  not change with content either — scenes read `safeArea` only on resize.
 - Outer padding is 16 from the screen edges.
 - **Fit scale.** `s = clamp(min(W / 1280, H / 720), 0.35, 1)`, applied to each column's inner
   container. The 0.35 floor keeps Stake popout S (400×225) readable, as in HB.
 - **Safe area.** `left` = the left column's right edge + 12 (screen px). `right` = screen width −
-  the right column's left edge (tabs included) + 12. `top = bottom = 0`. `barHeight` is therefore 0.
-  Scenes that read `api.shell.safeArea` fit the reels between the columns. Scenes that ignore it
-  are unaffected.
+  the right column's left edge (tabs included) + 12. `bottom` = screen height − WIN's top + 12 (the
+  WIN row between the columns). `top = 0`; `barHeight` equals `bottom`. Scenes that read
+  `api.shell.safeArea` fit the reels between the columns and above WIN.
 - **Menu anchor.** `menuAnchor()` is the burger rect. `menuPlate()` is the left column's bounds,
   so the HB popover opens above the column, left-aligned.
 
@@ -207,27 +212,30 @@ code.
 ┌──────────── 390 ────────────┐
 │          (reels)            │
 │ [≡]                         │
-│ [ВЫИГРЫШ $0.00] [− $1.00 +] │
-│ [БАЛАНС $1,000]             │
 │ ┌─────────┐   ▶ ┌─────────┐ │
 │ │   BUY   │   ⚡ │  SPIN   │ │
 │ └─────────┘     └─────────┘ │
+│ [БАЛАНС $1,000] [− $1.00 +] │
+│       [ВЫИГРЫШ $0.00]       │
 └─────────────────────────────┘
 ```
 
-- The same two columns, pulled together and sharing one bottom line. Side padding is 10 and
-  bottom padding is 8.
-- The left column stacks: menu, (TOTAL WIN in FS), WIN, BALANCE, then BUY. The right column
-  stacks: BET, then SPIN with the tabs.
-- **BUY is spin-sized.** On mobile BUY uses SPIN's slab size (150×90, without the sawtooth),
-  shows the mask glyph large (76), and sits bottom-left, level with SPIN. Outside base mode BUY is
-  hidden and both columns stay bottom-anchored.
+- The same rows as wide in one bottom block; WIN gets its own bottom row, centred under both
+  columns (there is no gap between the columns to hold it). Side padding is 10 and bottom
+  padding is 8.
+- **BUY is spin-sized.** On mobile BUY uses SPIN's slab size and lean (105×90),
+  shows the `bonus` glyph large (66), and sits left, level with SPIN. Outside base mode BUY is
+  hidden; its slot stays (TOTAL WIN takes it in free spins).
 - Mobile design sizes: menu 52×38, readouts 172×44 (label 11, value 17), BET 186×40, SPIN and BUY
-  150×90, tabs 42×34. Left column (172) + gap (12) + right column (186) = 370 = 390 − 2·10.
-  Readouts and BET grow when a value does not fit, and the block then scales down.
+  105×90, tabs 29×30. Left column (172) + gap (12) + right column (186) = 370 = 390 − 2·10.
+  Plates keep these sizes whatever the text (see wide).
+- SPIN, BUY and the tabs were cut 30% shorter on 2026-09-30 (the user: "укоротим процентов на 30").
 - **Fit scale.** The block is designed at 370 wide (390 minus the side padding) and scaled by
-  `min(1, (W − 20) / blockW)`, where `blockW = max(370, left + 12 + right)`. It is never wider than
+  `min(1, (W − 20) / blockW)`, where `blockW = max(370, left + 12 + right, WIN)`. It is never wider than
   the screen, so it has no lower bound.
+- **A wider phone spreads, never scales up** (the user, 2026-10-01: "по краям большие паддинги, должно
+  быть прижато" on Mobile L 452). The block is laid out `(W − 20) / s` wide, so the left column sits at the
+  10px side padding, the right column ends 10px from the right edge, and WIN stays centred.
 - **Safe area.** `bottom` = screen height − the block's top edge. `left = right = top = 0`.
   `barHeight` equals `bottom`.
 - **Menu anchor.** `menuPlate()` is the whole block, so the popover opens above it.
@@ -250,18 +258,21 @@ The controller already picks the layout (`h > w` gives mobile). SideBar branches
 
 ## 7. Icons
 
-`icons.ts` holds three solid 24×24 SVG fragments with one colour slot (`currentColor`):
+The S glyphs come from the user's sheet, `packages/shell/icons-s.svg` (solid black glyphs on an
+Illustrator canvas). `node scripts/gen-s-icons.mjs` converts it into `src/ui/pixi-s/icons-sheet.ts`:
+24×24 fragments with one colour slot (`currentColor`), each fitted into the box and centred. The
+sheet gives `turbo`, `spin`, `plus`, `minus`, `stop`, `menu`, `close`, `bonus` (the mask; its white
+details are real holes) and `chevronLeft` / `chevronRight` (both rotated from the one authored
+`chevron`). The generator rejects a path command it does not handle. To change an icon, edit the
+sheet and re-run the script; never edit `icons-sheet.ts` by hand.
 
-- `mask`: the reference's stylised mask with two eye slits, drawn by hand to match the screenshot.
-- `play`: a solid triangle.
-- `bolt`: a single solid lightning bolt.
+`icons.ts` adds `play` (a solid triangle, hand-drawn — the sheet has none). `sIcon(name, size,
+color)` returns an `SGlyph`: a container with `iconName` and a `spin` angle, which turns the glyph
+about its own centre. It wraps the fragment in `<svg viewBox="0 0 24 24">`, parses it once per
+`name|color` into a cached, shared `GraphicsContext`, and scales it to `size`.
 
-`sIcon(name, size, color): Graphics` renders them: it wraps the fragment in `<svg viewBox="0 0 24
-24">`, parses it once per `name|color` into a cached `GraphicsContext`, and scales it to `size`.
-HB's `IconView` is typed to HB's names and stays untouched.
-
-`spin`, `stop`, `close`, `menu`, `minus` and `plus` come from HB's set through `makeIcon`. The mask
-is fixed in this slice. The config has no per-game icon override, and none is added.
+HB glyphs (`makeIcon`) appear only for sound, music and info, in game info's controls list, since
+the sheet has none of them. The config has no per-game icon override, and none is added.
 
 ## 8. Testing
 
@@ -271,8 +282,8 @@ Vitest, in `tests/pixi-s/`, with the shared `tests/pixi/_host` context:
    - The left column's left edge is at the padding. The right column's right edge is at `W −`
      padding.
    - Both columns are bottom-anchored.
-   - BUY sits above BET.
-   - The tabs lie to the left of SPIN and overlap its box.
+   - BUY is SPIN-sized at the bottom of the left column, level with SPIN.
+   - The tabs lie to the left of SPIN, a 4px seam from its slanted edge.
 2. **Wide safe area.**
    - `safeArea.left` and `safeArea.right` equal the measured column edges plus the gap.
    - `bottom` is 0 and `barHeight` is 0.
@@ -301,9 +312,6 @@ reference by eye.
 
 ## 9. Risks
 
-- **Halftone cost.** About 2000 circles per bar. The shared dot contexts make each rebuild after
-  the first a cache hit. Readout widths are rounded to whole pixels, so the cache stays bounded by
-  the number of distinct slab sizes.
 - **Safe-area semantics.** Until now `safeArea` was bottom-only. Scaffolded games do not read it,
   so nothing breaks. A game that relies on `barHeight` sees 0 on S desktop. This is intended: the
   columns take the sides, not a bottom strip.

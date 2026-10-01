@@ -1,12 +1,16 @@
 import { Container, Graphics, Rectangle, type FederatedPointerEvent, type Ticker } from 'pixi.js';
 import { scrollHint } from '@/core/scrollHint';
-import { ScrollAffordanceView, THUMB_THICK, THUMB_INSET } from './scroll-affordance';
+import { ScrollAffordanceView, THUMB_THICK, THUMB_INSET, type ScrollLook } from './scroll-affordance';
 
-/** A vertically-scrolling viewport — mask + drag + mouse-wheel, the Pixi analogue of the
- *  overlay's `overflow-y:auto` scroll region. Add content to `.content`; call `refresh()`
+/** How far (screen px, along the axis) the pointer travels from the press before it is a drag, not a
+ *  tap — in global px, so a scaled-down page does not shrink it under the finger. */
+const DRAG_SLOP = 4;
+
+/** A scrolling viewport (vertical by default, or horizontal) — mask + drag + mouse-wheel, the Pixi
+ *  analogue of the overlay's `overflow:auto` scroll region. Add content to `.content`; call `refresh()`
  *  after content changes or a resize. */
 export class ScrollBox extends Container {
-  /** Horizontal room the scrollbar takes at the right edge — content should stay clear of it. */
+  /** Room the scrollbar takes at the right edge (y) or the bottom edge (x) — content should stay clear of it. */
   static readonly GUTTER = THUMB_THICK + THUMB_INSET * 2;
   readonly content = new Container();
   /** The drawn "this scrolls" marks — thumb, edge scrim, chevron. Public so the overlay that owns
@@ -18,15 +22,20 @@ export class ScrollBox extends Container {
   private scrollY = 0;
   private maxScroll = 0;
   private dragging = false;
+  private lastX = 0;
   private lastY = 0;
+  /** The press point along the axis, in global (screen) px. */
+  private pressAt = 0;
+  private axis: 'x' | 'y';
   private moved = false;
   private canvas?: HTMLCanvasElement;
   private wheelHandler?: (e: WheelEvent) => void;
 
-  constructor(canvas?: HTMLCanvasElement, _ticker?: Ticker) {
+  constructor(canvas?: HTMLCanvasElement, _ticker?: Ticker, look?: ScrollLook, axis: 'x' | 'y' = 'y') {
     super();
+    this.axis = axis;
     this.canvas = canvas;
-    this.affordance = new ScrollAffordanceView();
+    this.affordance = new ScrollAffordanceView(look);
     // Added AFTER content, and never masked: the marks describe the viewport, so clipping them to
     // the content they describe would hide them exactly when the content overflows.
     this.addChild(this.content, this.affordance);
@@ -42,9 +51,14 @@ export class ScrollBox extends Container {
       this.wheelHandler = (e: WheelEvent) => {
         // Always swallow the wheel while this scroll region is mounted (a modal is open) so the
         // gesture never chains to the parent page — on Stake the game is in an iframe and an
-        // un-prevented wheel scrolls the host page. Still scroll our content when it overflows.
+        // un-prevented wheel scrolls the host page. Still scroll our content when it overflows —
+        // unless the box is switched off or hidden (a confirm over the S buy-bonus row).
         e.preventDefault();
-        if (this.maxScroll > 0) this.setScroll(this.scrollY + e.deltaY);
+        if (this.eventMode === 'none') return;
+        for (let n: Container | null = this; n; n = n.parent) if (!n.visible) return; // Pixi v8 has no worldVisible
+        if (this.maxScroll > 0) this.setScroll(
+          this.scrollY + (this.axis === 'x' && Math.abs(e.deltaX) > Math.abs(e.deltaY) ? e.deltaX : e.deltaY),
+        );
       };
       this.canvas.addEventListener('wheel', this.wheelHandler, { passive: false });
     }
@@ -64,8 +78,9 @@ export class ScrollBox extends Container {
     this.content.mask = null; // measure unmasked (a mask clips getLocalBounds to the viewport)
     if (this.maskG.parent) this.removeChild(this.maskG);
     const b = this.content.getLocalBounds();
-    const contentH = b.height + b.y; // content laid out from y≈0 downward
-    this.maxScroll = Math.max(0, contentH - this.viewH);
+    const x = this.axis === 'x';
+    const contentLen = x ? b.width + b.x : b.height + b.y; // content laid out from 0 onward
+    this.maxScroll = Math.max(0, contentLen - (x ? this.viewW : this.viewH));
     // Only clip + grab pointer/drag when the content actually overflows. (An earlier version of this
     // comment claimed a masked container blocks pointer events to its children in Pixi v8 — that's
     // false: EventBoundary's hitPruneFn only prunes a point OUTSIDE the mask/hitArea, so interactive
@@ -86,6 +101,12 @@ export class ScrollBox extends Container {
     this.syncAffordance();
   }
 
+  /** How far the content is scrolled along the axis (0 at the start) — read it before replacing the
+   *  box on a rebuild and `scrollBy` the new one to keep the place. */
+  get scrollPos(): number {
+    return this.scrollY;
+  }
+
   /** Max scrollable distance (0 when content fits) — exposed for tests. */
   get maxScrollY(): number {
     return this.maxScroll;
@@ -101,47 +122,68 @@ export class ScrollBox extends Container {
     // has been destroyed, and writing to a torn-down content Container throws (use-after-destroy).
     if (this.destroyed || !this.content || this.content.destroyed) return;
     this.scrollY = Math.max(0, Math.min(this.maxScroll, y)) || 0; // || 0 converts -0 to 0
-    this.content.y = this.scrollY === 0 ? 0 : -this.scrollY;
+    this.content[this.axis] = this.scrollY === 0 ? 0 : -this.scrollY;
     this.syncAffordance();
   }
 
   private syncAffordance(): void {
     if (this.destroyed || this.affordance.destroyed) return;
+    const len = this.axis === 'x' ? this.viewW : this.viewH;
     this.affordance.update(
-      { x: 0, y: 0, w: this.viewW, h: this.viewH, axis: 'y' },
-      scrollHint({ scrollTop: this.scrollY, scrollHeight: this.viewH + this.maxScroll, clientHeight: this.viewH }),
+      { x: 0, y: 0, w: this.viewW, h: this.viewH, axis: this.axis },
+      scrollHint({ scrollTop: this.scrollY, scrollHeight: len + this.maxScroll, clientHeight: len }),
     );
   }
 
   /** A press in the scrollbar gutter drags the THUMB (content moves track-proportionally); anywhere
    *  else drags the content itself. */
   private thumbDrag = false;
+  /** Pointer position in the parent's space, so a drag is 1:1 under the finger even when the parent
+   *  is scaled. */
+  private parentPoint(e: FederatedPointerEvent): { x: number; y: number } {
+    return this.parent ? this.parent.toLocal(e.global) : e.global;
+  }
   private onDown = (e: FederatedPointerEvent): void => {
     this.dragging = true;
     this.moved = false;
-    this.lastY = e.global.y;
+    const p = this.parentPoint(e);
+    this.lastX = p.x;
+    this.lastY = p.y;
+    this.pressAt = this.axis === 'x' ? e.global.x : e.global.y;
     const local = this.toLocal(e.global);
     const t = this.affordance.trackBounds;
+    if (this.axis === 'x') {
+      this.thumbDrag = !!t && local.y >= t.y - THUMB_INSET;
+      if (this.thumbDrag && t) {
+        const b = this.affordance.thumbBounds!;
+        // a press outside the thumb jumps it there
+        if (local.x < b.x || local.x > b.x + b.w) this.setScroll(((local.x - t.x - b.w / 2) / Math.max(1, t.w - b.w)) * this.maxScroll);
+      }
+      return;
+    }
     this.thumbDrag = !!t && local.x >= t.x - THUMB_INSET;
     if (this.thumbDrag && t) {
       const b = this.affordance.thumbBounds!;
-      // a press outside the thumb jumps it there
       if (local.y < b.y || local.y > b.y + b.h) this.setScroll(((local.y - t.y - b.h / 2) / Math.max(1, t.h - b.h)) * this.maxScroll);
     }
   };
   private onMove = (e: FederatedPointerEvent): void => {
     if (!this.dragging) return;
-    const dy = e.global.y - this.lastY;
-    if (Math.abs(dy) > 2) this.moved = true;
-    this.lastY = e.global.y;
+    const p = this.parentPoint(e);
+    const x = this.axis === 'x';
+    const d = x ? p.x - this.lastX : p.y - this.lastY;
+    // a drag once the finger is more than 4 screen px from the press along the axis — a slow drag too
+    if (Math.abs((x ? e.global.x : e.global.y) - this.pressAt) > DRAG_SLOP) this.moved = true;
+    this.lastX = p.x;
+    this.lastY = p.y;
     if (this.maxScroll <= 0) return;
     if (this.thumbDrag) {
       const t = this.affordance.trackBounds;
       const b = this.affordance.thumbBounds;
-      const travel = t && b ? Math.max(1, t.h - b.h) : 1;
-      this.setScroll(this.scrollY + (dy / travel) * this.maxScroll);
+      const travel = t && b ? Math.max(1, x ? t.w - b.w : t.h - b.h) : 1;
+      this.setScroll(this.scrollY + (d / travel) * this.maxScroll);
     } else {
-      this.setScroll(this.scrollY - dy);
+      this.setScroll(this.scrollY - d);
     }
   };
   private onUp = (): void => {

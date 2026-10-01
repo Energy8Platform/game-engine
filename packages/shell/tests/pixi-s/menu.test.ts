@@ -1,0 +1,173 @@
+import '../pixi/setup-canvas'; // must be first — patches canvas getContext before pixi.js loads
+import { describe, it, expect, vi } from 'vitest';
+import { Container as PixiContainer, EventBoundary, Matrix, type Container, type Rectangle } from 'pixi.js';
+
+// Render-less tests: the renderer's EventSystem never installs the events mixin, and nothing updates
+// worldTransform. Polyfill the mixin's defaults and update transforms by hand (same as bet-picker-fit).
+{
+  const proto = PixiContainer.prototype as unknown as { isInteractive?: () => boolean; interactiveChildren?: boolean };
+  if (typeof proto.isInteractive !== 'function') {
+    proto.isInteractive = function (this: Container) {
+      return this.eventMode === 'static' || this.eventMode === 'dynamic';
+    };
+  }
+  if (proto.interactiveChildren === undefined) proto.interactiveChildren = true;
+}
+function updateWorld(node: Container, parent: Matrix): void {
+  node.updateLocalTransform();
+  node.worldTransform.copyFrom(parent).append(node.localTransform);
+  for (const c of node.children) updateWorld(c as Container, node.worldTransform);
+}
+import { openSMenu, SMenu } from '@/ui/pixi-s/components/Menu';
+import { SSlider, SToggle } from '@/ui/pixi-s/primitives/controls';
+import { Slab } from '@/ui/pixi-s/slab';
+import { S } from '@/ui/pixi-s/theme';
+import { makeContext } from '../pixi/_host';
+
+function all<T>(n: Container, cls: abstract new (...a: never[]) => T, out: T[] = []): T[] {
+  if (n instanceof cls) out.push(n as T);
+  for (const c of n.children) all(c as Container, cls, out);
+  return out;
+}
+const BURGER = { x: 16, y: 540, w: 64, h: 40 };
+
+function menu(over: Parameters<typeof makeContext>[0] = {}, anchor = BURGER, scale = 1): SMenu {
+  return openSMenu(makeContext({ screenW: 1280, screenH: 720, ...over }), () => anchor, () => null, () => scale) as SMenu;
+}
+
+describe('S menu', () => {
+  it('one slab per row, no sound master row, no separators, in menu order', () => {
+    const m = menu();
+    expect(m.rows.map((r) => r.label)).toEqual(['menu-row-music', 'menu-row-sfx', 'menu-row-gameInfo']);
+    for (const r of m.rows) expect(all(r, Slab).length).toBe(1);
+  });
+
+  it('stacks upward above the burger, left-aligned to it', () => {
+    const m = menu();
+    const b = m.stack.getBounds();
+    expect(b.x).toBeCloseTo(BURGER.x, 0);
+    expect(b.y + b.height).toBeLessThanOrEqual(BURGER.y - 8 + 3.5); // + the slab shadow
+    expect(m.rows[0].getBounds().y).toBeLessThan(m.rows[2].getBounds().y); // menu order top → bottom
+  });
+
+  it('a short screen scales the stack down so it stays on screen', () => {
+    const anchor = { x: 16, y: 120, w: 22, h: 14 };
+    const m = menu({ screenW: 400, screenH: 225 }, anchor, 0.35);
+    const b = m.stack.getBounds();
+    expect(b.y).toBeGreaterThanOrEqual(0);
+    expect(b.y + b.height).toBeLessThanOrEqual(anchor.y);
+  });
+
+  it('re-anchors on resize (rotation with the menu open)', () => {
+    let anchor = BURGER;
+    const host = makeContext({ screenW: 1280, screenH: 720 });
+    const m = openSMenu(host, () => anchor, () => null, () => 1) as SMenu;
+    anchor = { x: 40, y: 600, w: 64, h: 40 };
+    m.resize(1280, 720);
+    expect(m.stack.getBounds().x).toBeCloseTo(40, 0);
+  });
+
+  it('range rows carry a slider (value = the menu value); live refresh moves it', () => {
+    let refresh: ((id: string, v: boolean | number) => void) | null = null;
+    const host = makeContext({ setMenuRefresh: (fn) => { refresh = fn; } });
+    host.setMenuValue('music', 0.25);
+    const m = openSMenu(host, () => BURGER, () => null, () => 1) as SMenu;
+    const slider = all(m.rows[0], SSlider)[0];
+    expect(slider.value).toBeCloseTo(0.25);
+    refresh!('music', 0.75);
+    expect(slider.value).toBeCloseTo(0.75);
+  });
+
+  it('button rows: hover gives the yellow face + ink label; tap closes and selects', () => {
+    const closeLayer = vi.fn();
+    const openInfo = vi.fn();
+    const m = menu({ closeLayer, actions: { openInfo } as never });
+    const row = m.rows[2];
+    const slab = all(row, Slab)[0];
+    row.emit('pointerover', {});
+    expect(slab.face).toBe(S.yellow);
+    row.emit('pointerout', {});
+    expect(slab.face).toBe(S.plate);
+    row.emit('pointertap', {});
+    expect(closeLayer).toHaveBeenCalled();
+    expect(openInfo).toHaveBeenCalled();
+  });
+
+  it('toggle rows carry an S toggle: a short label sits beside it, a long one stacks above it (R5)', () => {
+    const open = (label: string) => openSMenu(makeContext({
+      menu: [{ id: 'lefty', type: 'toggle', label, value: false }] as never,
+    }), () => BURGER, () => null, () => 1) as SMenu;
+    const parts = (m: SMenu) => {
+      const row = m.rows[0];
+      const label = row.children.find((c) => (c as { text?: string }).text !== undefined) as Container;
+      return { toggle: all(row, SToggle)[0], label, hit: row.hitArea as Rectangle };
+    };
+    const short = parts(open('Turbo'));
+    expect(short.toggle).toBeDefined();
+    expect(short.label.x + short.label.width).toBeLessThanOrEqual(short.toggle.x - 8);
+    const long = parts(open('A very very long left-hand mode label for testing'));
+    expect(long.label.y + long.label.height).toBeLessThanOrEqual(long.toggle.y);
+    expect(long.label.x + long.label.width).toBeLessThanOrEqual(long.hit.width - 16 + 0.01);
+    expect(long.toggle.x + 44).toBeLessThanOrEqual(long.hit.width);
+  });
+
+  it('taps on a row body or in a gap are absorbed; only outside the stack dismisses', () => {
+    const m = menu();
+    m.eventMode = 'static';
+    updateWorld(m, Matrix.IDENTITY);
+    const b = new EventBoundary(m);
+    const r0 = m.rows[0].getBounds();
+    const r1 = m.rows[1].getBounds();
+    const hit = (x: number, y: number) => b.hitTest(x, y);
+    const label = hit(r0.x + 20, r0.y + r0.height / 2);
+    expect(label).not.toBeNull();
+    expect(label).not.toBe(m.dismissLayer);
+    const gap = hit(r0.x + 20, (r0.y + r0.height + r1.y) / 2);
+    expect(gap).not.toBeNull();
+    expect(gap).not.toBe(m.dismissLayer);
+    expect(hit(1200, 100)).toBe(m.dismissLayer);
+  });
+
+  it('range rows: every slider starts at one x, whatever the label width', () => {
+    const host = makeContext({
+      menu: [{ id: 'music' }, { id: 'sfx' }, { id: 'speed', type: 'range', label: 'Reel speed', min: 0, max: 1, step: 0.1, value: 0.5 }] as never,
+    });
+    const m = openSMenu(host, () => BURGER, () => null, () => 1) as SMenu;
+    const xs = m.rows.map((r) => all(r, SSlider)[0].x);
+    expect(xs.length).toBe(3);
+    expect(new Set(xs).size).toBe(1);
+  });
+
+  it('R5: rows are narrower than SPIN (wide 248, mobile 150)', () => {
+    expect(menu().rows.every((r) => (r.hitArea as Rectangle).width < 248)).toBe(true);
+    const m = openSMenu(makeContext({ layout: 'mobile', screenW: 390, screenH: 844 }), () => ({ x: 10, y: 600, w: 52, h: 38 }), () => null, () => 1) as SMenu;
+    expect(m.rows.every((r) => (r.hitArea as Rectangle).width < 150)).toBe(true);
+  });
+
+  it('R5: on mobile a range row stacks its label above the slider, inside the row; rows stack by their own heights', () => {
+    const m = openSMenu(makeContext({ layout: 'mobile', screenW: 390, screenH: 844 }), () => ({ x: 10, y: 600, w: 52, h: 38 }), () => null, () => 1) as SMenu;
+    const row = m.rows[0];
+    const slider = all(row, SSlider)[0];
+    const label = row.children.find((c) => (c as { text?: string }).text !== undefined) as Container;
+    const hit = row.hitArea as Rectangle;
+    expect(slider.y).toBeGreaterThanOrEqual(label.y + label.height);
+    expect(slider.x + slider.measureSize().w).toBeLessThanOrEqual(hit.width);
+    expect(slider.y + 24).toBeLessThanOrEqual(hit.height);
+    expect(m.rows[1].y).toBeGreaterThanOrEqual(row.y + hit.height);
+  });
+
+  it('R5: a long toggle label on mobile stacks, the toggle inside the row', () => {
+    const host = makeContext({
+      layout: 'mobile',
+      screenW: 390,
+      screenH: 844,
+      menu: [{ id: 'lefty', type: 'toggle', label: 'Left-hand mode', value: false }] as never,
+    });
+    const m = openSMenu(host, () => ({ x: 10, y: 600, w: 52, h: 38 }), () => null, () => 1) as SMenu;
+    const row = m.rows[0];
+    const toggle = all(row, SToggle)[0];
+    const hit = row.hitArea as Rectangle;
+    expect(toggle.x + 44).toBeLessThanOrEqual(hit.width);
+    expect(toggle.y + 24).toBeLessThanOrEqual(hit.height);
+  });
+});
