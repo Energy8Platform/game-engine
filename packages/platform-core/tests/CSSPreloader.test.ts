@@ -9,9 +9,10 @@ import {
   waitCSSPreloaderTap,
 } from '../src/loading';
 import { BRAND_FLOOR_MS, SPLASH_DURATION_MS } from '../src/loading/splash';
+import { ENERGY8_INTRO_MS } from '../src/loading/variants/energy8';
 
-/** Fast-forward past the powered-by splash + brand floor that gates every start. */
-const BRAND_GATE_MS = SPLASH_DURATION_MS + BRAND_FLOOR_MS;
+/** Fast-forward past the default variant's intro (splash + logo) + brand floor that gates every start. */
+const BRAND_GATE_MS = ENERGY8_INTRO_MS + BRAND_FLOOR_MS;
 
 /**
  * Run `fn` on fake timers, always restoring real ones — `afterEach` tears the

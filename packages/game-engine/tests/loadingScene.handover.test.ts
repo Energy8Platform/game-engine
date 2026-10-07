@@ -11,7 +11,7 @@
  * overlay's own `hideLoader()` — the only place that can observe what was on screen at the instant
  * it was dismissed.
  */
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import {
   adoptExternalOverlay,
   advanceExternalOverlay,
@@ -24,10 +24,14 @@ import { LoadingScene } from '../src/loading/LoadingScene';
 
 const PRELOADER_ID = '__ge-css-preloader__';
 /**
- * The powered-by splash plus the brand floor, which every start waits out on every target — the
- * one gate that is NOT the tap. Mirrors `platform-core/src/loading/splash.ts`.
+ * The default (energy8) variant's intro — the powered-by splash, then the logo's own — plus the
+ * brand floor, which every start waits out on every target: the one gate that is NOT the tap.
+ * Mirrors `ENERGY8_INTRO_MS + BRAND_FLOOR_MS` in platform-core.
  */
-const BRAND_GATE_MS = 3000;
+const BRAND_GATE_MS = 4900;
+
+// Every start here waits out that gate in real time, which no longer fits vitest's 5s default.
+vi.setConfig({ testTimeout: 15000 });
 
 let container: HTMLElement;
 

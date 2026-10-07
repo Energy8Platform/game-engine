@@ -1,60 +1,57 @@
 /**
  * Shared Energy8 SVG logo with a loader bar underneath.
  *
- * The wordmark is the official ENERGY8 artwork as vector outlines, kept at its
- * native coordinates (836.01 × 185.55). Two deviations from the Illustrator
- * export:
+ * The wordmark is the 2026-10 "energy8" artwork (Illustrator export, e82.svg),
+ * paths copied verbatim, painted white for the black preloader screen. Fill is
+ * an attribute on the root rather than the export's `<style>` block: inlining
+ * that would leak rules for its generic `.cls-*` selectors into the host page.
  *
- * - Fourteen zero-area `<path d="M…"/>` stubs are dropped (export artifacts),
- *   same as in splash.ts.
- * - The export gives every shape its own `<linearGradient>` even though they
- *   collapse to two distinct ramps — one over the letters that sit on the
- *   baseline (y 0..160.85), one over the two that descend (y 0..185.55).
- *   Colours are attributes rather than a `<style>` block on purpose: inlining
- *   the export's `<style>` would leak rules for the generic `.st0` selector
- *   into the host page.
+ * The letters are grouped for the energy8 preloader's intro (see
+ * variants/energy8.ts): `.ge-e8-e` (the leading "e"), `.ge-e8-mid` ("nergy",
+ * x 59.6..301) and `.ge-e8-8` (the "8", drawn last so it sits on top of the
+ * letters it uncovers), all inside `.ge-e8-word`. Without the variant's CSS the
+ * markup is just the static logo.
  *
- * The loader bar is NOT part of the artwork — it is a pill drawn below the
- * wordmark, with the fill controlled via a `<clipPath>` whose `<rect>` width
- * is animatable. Different consumers customise gradient IDs and the clip
- * element's ID/class to avoid collisions when both CSSPreloader and
- * LoadingScene appear in the same DOM.
+ * The loader bar is NOT part of the artwork — a thin bar under the gap between
+ * the "e" and the "8", the fill controlled via a `<clipPath>` whose `<rect>`
+ * width is animatable. Consumers customise the clip element's ID/class to avoid
+ * collisions when the logo appears more than once in the same DOM.
  */
 
-/** Full width of the artwork in SVG units — the bar spans it edge to edge. */
-const LOGO_WIDTH = 836.01;
-/** Loader bar geometry, in SVG units, below the wordmark's 185.55 baseline. */
-const BAR_Y = 215;
-const BAR_H = 24;
-
-/** SVG path data for the Energy8 wordmark, in reading order: E N E R G Y 8 */
-const WORDMARK_PATHS = `
-  <polygon points="133.44 0 34.47 0 0 160.84 98.96 160.89 106.94 123.69 45.07 123.72 50.37 98.97 87.48 99.01 95.46 61.78 58.31 61.89 63.63 37.09 125.48 37.15 133.44 0" fill="url(#GID0)"/>
-  <polygon points="205.08 185.4 176.15 185.55 164.37 86.6 148.43 161.13 111.28 161.1 145.81 0 182.93 0 191.76 74.24 207.67 0 244.79 0 205.08 185.4" fill="url(#GID1)"/>
-  <polygon points="356.14 0 257.15 0 222.7 160.82 321.67 160.8 329.64 123.59 267.78 123.61 273.07 98.96 310.18 98.94 318.16 61.73 281.02 61.84 286.34 37.02 348.18 37.14 356.14 0" fill="url(#GID0)"/>
-  <path d="M455.1,0h-86.6c-11.53,53.8-22.93,107.03-34.46,160.82h37.12l13.24-61.85h12.38s-.88,61.86-.88,61.86l37.12-.04.88-61.83,15.02-12.37,15.91-74.24L455.1,0ZM417.1,61.87l-24.74-.03c1.76-8.22,6.2-28.9,7.96-37.12l24.76-.06-7.97,37.21Z" fill="url(#GID0)"/>
-  <polygon points="457.75 160.84 455.99 111.33 477.21 12.3 492.22 0 578.83 0 588.59 12.19 580.6 49.49 543.46 49.53 546.13 37.08 509.01 37.11 490.46 123.69 527.57 123.7 532.87 98.98 520.5 98.96 525.8 74.24 575.31 74.2 559.4 148.42 544.35 160.9 457.75 160.84" fill="url(#GID0)"/>
-  <polygon points="624.78 74.24 603.58 0 640.69 0 654.85 49.4 690.17 0 727.3 0 656.6 98.95 643.37 160.81 600.95 185.55 624.78 74.24" fill="url(#GID1)"/>
-  <path d="M836.01,12.37L826.27,0h-74.23s-15.02,12.36-15.02,12.36l-13.23,61.84,15.9,6.69-18.56,5.71-13.25,61.84,9.72,12.37h74.23s15.03-12.39,15.03-12.39l13.25-61.82-18.56-5.76,21.2-6.6,13.26-61.87ZM772.38,136.13l-24.73-.04c1.76-8.22,6.19-28.89,7.95-37.1h24.74s-7.96,37.14-7.96,37.14ZM788.29,61.86l-24.74-.02c1.76-8.21,6.19-28.88,7.95-37.09l24.75-.02-7.96,37.13Z" fill="url(#GID0)"/>`;
-
+/** Width of the artwork in SVG units. */
+const LOGO_WIDTH = 376.09;
 /**
- * Gradient definitions template (gradient IDs are replaced per-consumer).
- * GID0/GID1 are the wordmark's two vertical ramps — bottom-to-top, so y1 is
- * the shape's baseline and y2 its top. GID2 is the cyan loader fill.
+ * Loader bar geometry, in SVG units. It spans the gap between the "e" (right
+ * edge 60.5) and the "8" (left edge 304.5), below the "g"/"y" descenders
+ * (bottom 110). Thickness matches the hellbuddha bar relative to its wordmark.
  */
-const GRADIENT_DEFS = `
-    <linearGradient id="GID0" x1="0" x2="0" y1="160.85" y2="0" gradientUnits="userSpaceOnUse">
-      <stop stop-color="#892ebf"/><stop stop-color="#862fbf" offset=".23"/><stop stop-color="#7f35c1" offset=".36"/><stop stop-color="#7539be" offset=".67"/><stop stop-color="#7139b7" offset=".72"/><stop stop-color="#6c3aae" offset=".83"/><stop stop-color="#6b3bac" offset="1"/>
-    </linearGradient>
-    <linearGradient id="GID1" x1="0" x2="0" y1="185.55" y2="0" gradientUnits="userSpaceOnUse">
-      <stop stop-color="#892ebf"/><stop stop-color="#862fbf" offset=".23"/><stop stop-color="#7f35c1" offset=".36"/><stop stop-color="#7539be" offset=".67"/><stop stop-color="#7139b7" offset=".72"/><stop stop-color="#6c3aae" offset=".83"/><stop stop-color="#6b3bac" offset="1"/>
-    </linearGradient>
-    <linearGradient id="GID2" x1="0" x2="${LOGO_WIDTH}" y1="${BAR_Y}" y2="${BAR_Y}" gradientUnits="userSpaceOnUse">
-      <stop stop-color="#316FB0"/><stop stop-color="#1FCDE6" offset=".5"/><stop stop-color="#29FEE7" offset="1"/>
-    </linearGradient>`;
+const BAR_X = 60.5;
+const BAR_Y = 126;
+const BAR_H = 3.5;
 
-/** Max width of the loader bar in SVG units */
-export const LOADER_BAR_MAX_WIDTH = LOGO_WIDTH;
+/** The "e" — the brand's leading letter, half of the "E8" the intro opens on. */
+const E_PATH = 'M0,96.51l4.13-16.96-.42-53.19c0-3.93,1.27-7.76,3.63-10.9h0c2.54-3.39,6.19-5.78,10.3-6.77L60.52,0l-8.48,19.72-25.9,5.96v11.46l26.81-3.79-5.49,17.02-21.32,4.65.23,11.69,31.87-3.9-5.52,18.61L0,96.51Z';
+
+/** The letters between them, in reading order: n e r g y. */
+const MID_PATHS = [
+  'M59.56,84.46l1.06-49.15c0-3.82,2.67-5.88,6.09-7.57l12.38-1.38v7.57s19.26-18.11,28.43,1.38c3.69,7.84,3.44,42.41,3.44,42.41l-19.03,6.42.08-33.77c-.04-3.18-2.63-5.74-5.81-5.74h0c-3.18,0-5.76,2.55-5.81,5.72l-.84,27.36-19.99,6.74Z',
+  'M127.7,28.42c-9.93,2.81-24.45,30.42-8.03,48.15,6.39,6.89,19.72,10.31,37.6,0v-14.45c-25.91,10.09-25.91-.91-25.91-.91,0,0,25.55-1.18,28.97-14.4,3.92-15.12-5.5-26.05-32.63-18.39ZM144.17,43.2c-.52,5.73-13.76,8.76-13.76,8.76,0,0,1.18-10.26,8.09-12.2,4.47-1.26,5.82,1.78,5.67,3.44Z',
+  'M163.19,84.21s-.87-45.59.49-50.13c2.75-9.2,18.34-7.86,18.34-7.86l.05,5.97c4.99-7.99,18.83-5.92,18.83-5.92l-6.23,17.16s-9.25-1.53-12.08,5.44l-.31,29.41-19.09,5.93Z',
+  'M247.16,29.1c-36.28-12.21-47.63,10.14-47.63,10.14,0,0-10.26,18.47-1.32,30.15,11.81,15.41,30.09-.06,30.09-.06,0,0,4.76,22.87-28.94,12.21l-7.39,16.68s43.15,21.14,55.19-18.92c0,0,1-49.86,0-50.2ZM227.73,54.5s-14.5,12.64-13.76-2.54c.52-10.48,13.76-12.2,13.76-12.2v14.74Z',
+  'M250.08,26.27h18.91l2.01,26.82c.27,2.87,2.67,5.06,5.55,5.06h0c3.08,0,5.58-2.5,5.58-5.58l-.08-26.3h18.91l-1.08,45.98c-.99,31.55-55.83,37.66-55.83,37.66l10.66-21.84c28.54-2.75,26.48-18.23,26.48-18.23,0,0-13.75,13.24-23.56.52-3.38-4.39-7.57-44.09-7.57-44.09Z',
+];
+
+/** The "8". */
+const EIGHT_PATH = 'M341.83,53.63l15.82-9.63s22.21,8.49,17.88,26.48c-4.47,18.57-31.41,20.63-31.41,20.63,0,0-33.48,4.47-39.2-21.09-3.21-14.33,12.26-21.55,12.26-21.55,0,0,30.19-17.24,31.01-18.47,8.3-12.36-16.11-14.2-17.26-4.55-.7,5.86,5.62,8.46,5.62,8.46l-16.62,8.83s-19.69-16.35.57-32.09c16.96-13.18,36.68-2.62,37.37-2.29,2.51,1.19,20.4,17.1,3.44,29.8l-34.39,21.55s-7.09,6.56-.34,12.04c12.15,9.86,25.33,0,25.33,0,10.66-10.66-10.09-18.11-10.09-18.11Z';
+
+const WORDMARK = `<g class="ge-e8-word">
+    <path class="ge-e8-e" d="${E_PATH}"/>
+    <g class="ge-e8-mid">${MID_PATHS.map((d) => `<path d="${d}"/>`).join('')}</g>
+    <path class="ge-e8-8" d="${EIGHT_PATH}"/>
+  </g>`;
+
+/** Max width of the loader bar in SVG units — from the "e" to the "8". */
+export const LOADER_BAR_MAX_WIDTH = 244;
 
 interface LogoSVGOptions {
   /** Prefix for gradient/clip IDs to avoid collisions (e.g. 'pl' or 'ls') */
@@ -84,12 +81,7 @@ interface LogoSVGOptions {
 export function buildLogoSVG(opts: LogoSVGOptions): string {
   const { idPrefix, svgClass, svgStyle, clipRectClass, clipRectId, textId, textContent, textClass } = opts;
 
-  // Replace gradient ID placeholders with prefixed versions
-  const paths = WORDMARK_PATHS.replace(/GID(\d)/g, `${idPrefix}$1`);
-  const defs = GRADIENT_DEFS.replace(/GID(\d)/g, `${idPrefix}$1`);
-
   const clipId = `${idPrefix}-loader-clip`;
-  const fillGradientId = `${idPrefix}2`;
 
   const classAttr = svgClass ? ` class="${svgClass}"` : '';
   const styleAttr = svgStyle ? ` style="${svgStyle}"` : '';
@@ -98,18 +90,17 @@ export function buildLogoSVG(opts: LogoSVGOptions): string {
   const txtIdAttr = textId ? ` id="${textId}"` : '';
   const txtClassAttr = textClass ? ` class="${textClass}"` : '';
 
-  const bar = `x="0" y="${BAR_Y}" width="${LOGO_WIDTH}" height="${BAR_H}" rx="${BAR_H / 2}"`;
+  const bar = `x="${BAR_X}" y="${BAR_Y}" width="${LOADER_BAR_MAX_WIDTH}" height="${BAR_H}"`;
 
-  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${LOGO_WIDTH} 310" fill="none"${classAttr}${styleAttr}>
-${paths}
-  <clipPath id="${clipId}">
-    <rect${rectIdAttr} x="0" y="${BAR_Y}" width="0" height="${BAR_H}"${rectClassAttr}/>
-  </clipPath>
-  <rect ${bar} fill="url(#${fillGradientId})" opacity=".18"/>
-  <rect ${bar} fill="url(#${fillGradientId})" clip-path="url(#${clipId})"/>
-  <text${txtIdAttr} x="${LOGO_WIDTH / 2}" y="294" text-anchor="middle" fill="rgba(255,255,255,0.6)" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif" font-size="26" font-weight="600" letter-spacing="5"${txtClassAttr}>${textContent ?? 'Loading...'}</text>
-  <defs>
-${defs}
-  </defs>
+  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${LOGO_WIDTH} 166" fill="#fff"${classAttr}${styleAttr} role="img" aria-label="energy8">
+  ${WORDMARK}
+  <g class="ge-e8-loader">
+    <clipPath id="${clipId}">
+      <rect${rectIdAttr} x="${BAR_X}" y="${BAR_Y}" width="0" height="${BAR_H}"${rectClassAttr}/>
+    </clipPath>
+    <rect ${bar} opacity=".15"/>
+    <rect ${bar} clip-path="url(#${clipId})"/>
+    <text${txtIdAttr} x="${BAR_X + LOADER_BAR_MAX_WIDTH / 2}" y="156" text-anchor="middle" fill="rgba(255,255,255,0.6)" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif" font-size="10" font-weight="600" letter-spacing="2"${txtClassAttr}>${textContent ?? 'Loading...'}</text>
+  </g>
 </svg>`;
 }

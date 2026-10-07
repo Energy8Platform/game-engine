@@ -11,7 +11,8 @@ import {
 import { VARIANTS } from '../src/loading/variants';
 import type { PreloaderVariantName } from '../src/loading/variants';
 import { HELLBUDDHA_INTRO_MS, LOADER_BAR_MAX_WIDTH as HB_BAR_MAX_WIDTH } from '../src/loading/variants/hellbuddha';
-import { BRAND_FLOOR_MS } from '../src/loading/splash';
+import { BRAND_FLOOR_MS, SPLASH_DURATION_MS } from '../src/loading/splash';
+import { ENERGY8_INTRO_MS } from '../src/loading/variants/energy8';
 
 describe('preloader variant registry', () => {
   it('exposes the energy8 variant as a registered key', () => {
@@ -58,6 +59,56 @@ describe('createCSSPreloader — variant selection', () => {
       preloaderVariant: 'does-not-exist' as PreloaderVariantName,
     });
     expect(container.querySelector('#ge-pl-loader-rect')).not.toBeNull();
+  });
+});
+
+describe('energy8 variant', () => {
+  let container: HTMLElement;
+
+  beforeEach(() => {
+    container = document.createElement('div');
+    document.body.appendChild(container);
+  });
+
+  afterEach(async () => {
+    vi.useRealTimers();
+    await removeCSSPreloader(container);
+    container.remove();
+  });
+
+  it('groups the wordmark for the intro: the e, the letters between, then the 8 on top', () => {
+    createCSSPreloader(container, { preloaderVariant: 'energy8' });
+    const word = container.querySelector('.ge-e8-word')!;
+    expect(word.querySelector('.ge-e8-e')).not.toBeNull();
+    expect(word.querySelectorAll('.ge-e8-mid > path').length).toBe(5);
+    expect(word.lastElementChild!.classList.contains('ge-e8-8')).toBe(true);
+    expect(container.querySelector('#ge-pl-loader-rect')!.closest('.ge-e8-loader')).not.toBeNull();
+  });
+
+  it('paints a black screen regardless of the game background config', () => {
+    createCSSPreloader(container, {
+      preloaderVariant: 'energy8',
+      backgroundColor: 0x123456,
+      backgroundGradient: 'linear-gradient(135deg, #0a0a1a 0%, #1a1a3e 100%)',
+    });
+    const css = container.querySelector('style')!.textContent!;
+    expect(css).toContain('background: #000;');
+    expect(css).not.toContain('linear-gradient');
+  });
+
+  it('holds the brand gate until the splash and the logo intro have played, plus the brand floor', async () => {
+    vi.useFakeTimers();
+    createCSSPreloader(container, { preloaderVariant: 'energy8', tapToStart: false });
+    let settled = false;
+    void waitCSSPreloaderTap().then(() => {
+      settled = true;
+    });
+
+    expect(ENERGY8_INTRO_MS).toBeGreaterThan(SPLASH_DURATION_MS);
+    await vi.advanceTimersByTimeAsync(ENERGY8_INTRO_MS + BRAND_FLOOR_MS - 1);
+    expect(settled).toBe(false);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(settled).toBe(true);
   });
 });
 
