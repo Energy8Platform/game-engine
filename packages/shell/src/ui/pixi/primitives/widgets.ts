@@ -1,7 +1,8 @@
 import { BlurFilter, Color, Container, Graphics, GraphicsContext, Rectangle, Text, Ticker } from 'pixi.js';
 import type { ShellTokens } from '@/core/theme';
 import type { IconName } from '../icons';
-import { makeIcon, IconView } from '../pixi-icon';
+import { makeIcon, bonusGlyph, IconView } from '../pixi-icon';
+import type { BonusIconName } from '@/core/bonusIcons';
 import { makeText, setText, NUM_FONT_FAMILY, NUM_FONT_SCALE } from '../text';
 import { tween, type TweenOpts } from '../motion-pixi';
 import { prefersReducedMotion } from '@/core/motion';
@@ -577,6 +578,8 @@ export interface BuyBonusOpts {
   coinArt?: string;
   /** Show this icon instead of the text label. */
   icon?: IconName;
+  /** Show this provider's BUY BONUS icon (core/bonusIcons) instead of the text label; wins over `icon`. */
+  bonusIcon?: BonusIconName;
   iconSize?: number; // glyph px (≈ size * 0.62)
   iconColor?: string; // ticket ink (black)
   tokens: ShellTokens;
@@ -588,7 +591,6 @@ export class BuyBonusBadge extends Container implements Sizable {
   private size: number;
   private disc: Graphics;
   private labelText?: Text;
-  private iconView?: IconView;
   private content: Container; // labelText / iconView / coin — the pulsed node
   private isCoin = false;
   private dim?: Graphics; // disabled veil over the coin (no filter → crisp, mirrors the spin disc)
@@ -615,13 +617,14 @@ export class BuyBonusBadge extends Container implements Sizable {
       this.content = coin;
       this.dim = new Graphics();
       this.addChild(coin, this.dim); // veil on top for the disabled state
-    } else if (opts.icon) {
+    } else if (opts.bonusIcon || opts.icon) {
       const gs = opts.iconSize ?? this.size * 0.62;
-      this.iconView = makeIcon(opts.icon, gs, opts.iconColor ?? '#0b0e16');
-      this.iconView.pivot.set(gs / 2, gs / 2);             // pulse/scale around the glyph centre
-      this.iconView.position.set(this.size / 2, this.size / 2);
-      this.content = this.iconView;
-      this.addChild(this.iconView);
+      const ink = opts.iconColor ?? '#0b0e16';
+      const view = opts.bonusIcon ? bonusGlyph(opts.bonusIcon, gs, ink) : makeIcon(opts.icon!, gs, ink);
+      view.pivot.set(gs / 2, gs / 2);             // pulse/scale around the glyph centre
+      view.position.set(this.size / 2, this.size / 2);
+      this.content = view;
+      this.addChild(view);
     } else {
       this.labelText = makeText(opts.label, {
         size: opts.fontSize ?? 13,

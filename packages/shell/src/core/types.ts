@@ -1,3 +1,4 @@
+import type { BonusIconName } from './bonusIcons';
 import type { MenuItem } from './menu';
 
 /** `freeSpins` and `bonus` are the SAME bar layout (host-driven hero + Total Win); `freeSpins` is
@@ -263,6 +264,9 @@ export interface ShellConfig {
    *  opening the built-in buy-bonus overlay (e.g. the game shows its own bonus UI). The button
    *  is shown whenever this OR `features.buyBonus` is set. */
   onBonusBuy?: () => void;
+  /** The provider whose BUY BONUS icon the button shows (see `BONUS_ICONS`), e.g. `'energy8'`.
+   *  Omit — or pass an unknown name — for the skin's own icon. */
+  bonusIcon?: BonusIconName;
   /** Initial Settings-overlay volume slider positions (each 0..1, defaults to 1 = 100%). The shell
    *  keeps them stateful across opens; read/update at runtime via `shell.getVolume()` /
    *  `shell.setVolume()`, and listen to `settingChange` ({ key: 'music'|'sfx' }) to apply. */
@@ -289,7 +293,7 @@ export type ResolvedShellConfig = Required<
     | 'replay'
   >
 > &
-  Pick<ShellConfig, 'currentBet' | 'theme' | 'onBonusBuy' | 'volumes' | 'menu'>;
+  Pick<ShellConfig, 'currentBet' | 'theme' | 'onBonusBuy' | 'bonusIcon' | 'volumes' | 'menu'>;
 
 export interface ShellState {
   mode: ShellMode;

@@ -220,6 +220,7 @@ export class BottomBar extends Container implements HbBar {
       size,
       face: feature ? 'red' : 'orange',
       icon: feature ? 'close' : 'volatility',
+      bonusIcon: config.bonusIcon,
       onTap: () => (feature ? this.host.actions.deactivateFeature() : this.host.actions.openBuyBonus()),
     });
   }

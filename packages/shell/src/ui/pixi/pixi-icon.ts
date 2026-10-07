@@ -1,5 +1,6 @@
 import { Container, Graphics, GraphicsContext, GraphicsContextSystem } from 'pixi.js';
 import { iconSVG, type IconName } from './icons';
+import { bonusIconSVG, type BonusIconName } from '@/core/bonusIcons';
 import type { Sizable } from './primitives/flex';
 
 // Icons/coins are parsed from small-viewBox SVGs (24-unit glyphs, ~260-unit coin). Pixi's default
@@ -103,4 +104,22 @@ export class IconView extends Container implements Sizable {
 
 export function makeIcon(name: IconName, size: number, color = '#ffffff'): IconView {
   return new IconView(name, size, color);
+}
+
+const bonusCache = new Map<string, GraphicsContext>();
+
+/** A provider's BUY BONUS icon (core/bonusIcons) in `color`, filling a `size × size` box from the
+ *  local origin. Shared by every Pixi skin; contexts are parsed once per name|colour. */
+export function bonusGlyph(name: BonusIconName, size: number, color: string): Container {
+  const key = `${name}|${color}`;
+  let ctx = bonusCache.get(key);
+  if (!ctx) {
+    ctx = new GraphicsContext().svg(bonusIconSVG(name, color));
+    bonusCache.set(key, ctx);
+  }
+  const box = new Container();
+  const g = new Graphics(ctx);
+  g.scale.set(size / VIEWBOX);
+  box.addChild(g);
+  return box;
 }

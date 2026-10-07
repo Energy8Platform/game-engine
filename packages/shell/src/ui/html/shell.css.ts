@@ -75,6 +75,7 @@ export const SHELL_CSS = `
 #${SHELL_ROOT_ID} .ge-shell-buybonus span { display:inline-block; will-change:transform; }
 /* the ticket glyph fills the badge (em-sized off the button's font-size, so it scales per context) */
 #${SHELL_ROOT_ID} .ge-shell-buybonus .ge-bb-tk { display:flex; font-size:3.5em; color:#0b0e16; }
+#${SHELL_ROOT_ID} .ge-shell-buybonus .ge-bb-tk svg { width:1em; height:1em; display:block; }
 /* coin variant (BUY state): the full-colour coin IS the button — drop the accent disc + border,
    keep the circular hit/glow. The coin art fills the button and is the pulsed node on hover. */
 #${SHELL_ROOT_ID} .ge-shell-buybonus.ge-bb-coin { background:none; border:none; }

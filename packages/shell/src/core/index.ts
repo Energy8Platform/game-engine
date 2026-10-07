@@ -32,6 +32,8 @@ export { DEFAULT_MENU, resolveMenu, seedMenuValues, rangeBounds, isPresetId } fr
 export type { MenuItem, MenuRow, MenuHost, MenuPresetId } from './menu';
 export { placePopover, popoverWidth, POPOVER } from './popover';
 export type { PopoverPlacement, Rect as PopoverRect } from './popover';
+export { BONUS_ICONS, bonusIconSVG, isBonusIcon } from './bonusIcons';
+export type { BonusIconName } from './bonusIcons';
 export { resolveTheme, SCHEMES, DEFAULT_ACCENT } from './theme';
 export type { ShellTokens } from './theme';
 export { createI18n, socialize, normalizeLang } from './i18n';

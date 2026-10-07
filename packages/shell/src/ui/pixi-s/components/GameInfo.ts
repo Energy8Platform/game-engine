@@ -21,7 +21,7 @@ import type { HbIconName } from '../../pixi-hb/icons';
 import { FlexBox } from '../../pixi/primitives/flex';
 import { SButton } from '../widgets';
 import { SKEW } from '../slab';
-import { sIcon, type SIconName } from '../icons';
+import { sIcon, sBonusIcon, type SIconName } from '../icons';
 import { sLabel, sValue, sBody } from '../text';
 import { PACKAGE_VERSION } from '@/core/version';
 import { S } from '../theme';
@@ -224,7 +224,7 @@ function sectionControls(host: PixiComponentContext, title: string, width: numbe
     { vis: fgIcon('minus'), name: 'Lower bet', desc: 'Decrease your stake.', on: true },
     { vis: badge('plate', sIcon('play', 18, S.fg), 18), name: 'Autoplay', desc: 'Spin automatically a set number of times.', on: features.autoplay != null },
     { vis: badge('plate', sIcon('turbo', 18, S.fg), 18), name: 'Turbo', desc: 'Speed up spin animations.', on: features.turbo > 0 },
-    { vis: badge('yellow', sIcon('bonus', 26, S.ink), 26), name: 'Buy bonus', desc: 'Pay a fixed cost to enter a bonus feature.', on: features.buyBonus !== false },
+    { vis: badge('yellow', sBonusIcon(host.config.bonusIcon, 26, S.ink), 26), name: 'Buy bonus', desc: 'Pay a fixed cost to enter a bonus feature.', on: features.buyBonus !== false },
   ];
   const menu: CtlRow[] = [
     { vis: fgIcon('menu'), name: 'Menu', desc: 'Open settings and game info.', on: true },

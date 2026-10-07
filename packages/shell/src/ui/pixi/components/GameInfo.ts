@@ -18,7 +18,7 @@ import { makeIcon } from '../pixi-icon';
 import { FlexBox } from '../primitives/flex';
 import { section, paragraph, Spacer } from '../primitives/controls';
 import { BuyBonusBadge } from '../primitives/widgets';
-import { BUY_BONUS_ART, BUY_BONUS_SOCIAL_ART } from '../../buy-bonus-art';
+import { buyFace } from './BottomBar';
 import { PACKAGE_VERSION } from '@/core/version';
 
 /** Game info overlay — modes, controls, paytable, win illustrations, custom sections. */
@@ -198,7 +198,7 @@ function sectionControls(host: PixiComponentContext, title: string, width: numbe
       size: 46,
       border: 2,
       bg: host.tokens.accent,
-      coinArt: host.config.isSocial ? BUY_BONUS_SOCIAL_ART : BUY_BONUS_ART,
+      ...buyFace(host.config),
       label: '',
       tokens: host.tokens,
       ticker: host.ticker,

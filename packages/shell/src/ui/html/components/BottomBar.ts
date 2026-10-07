@@ -3,6 +3,7 @@ import { effectiveAccent } from '@/core/colors';
 import { icon, type IconName } from '../icons';
 import { BUY_BONUS_ART, BUY_BONUS_SOCIAL_ART, BUY_BONUS_DISABLED_ART } from '../../buy-bonus-art';
 import { bonusBuyLocked } from '@/core/state';
+import { bonusIconSVG } from '@/core/bonusIcons';
 
 /** A floating labelled money readout (balance/win/bet). */
 function readout(ge: string, label: string, value: string): HTMLElement {
@@ -196,25 +197,33 @@ function compact(items: (HTMLElement | null)[]): HTMLElement[] {
   return items.filter((x): x is HTMLElement => x !== null);
 }
 
+/** The BUY BONUS face (bar button and game-info legend): the provider's icon in ink on the accent
+ *  disc when `bonusIcon` is set, else the full-colour coin (social variant in social mode). */
+export function buyFace(host: ShellHost): { cls: string; inner: string } {
+  const name = host.config.bonusIcon;
+  if (name) return { cls: 'ge-shell-buybonus', inner: `<span class="ge-bb-tk">${bonusIconSVG(name, 'currentColor')}</span>` };
+  const art = host.config.isSocial ? BUY_BONUS_SOCIAL_ART : BUY_BONUS_ART;
+  return { cls: 'ge-shell-buybonus ge-bb-coin', inner: `<span class="ge-bb-coin-art">${art}</span>` };
+}
+
 function buyBtn(host: ShellHost): HTMLButtonElement {
   const buy = document.createElement('button');
   buy.className = 'ge-shell-buybonus ge-bb-coin';
   buy.dataset.ge = 'buybonus';
-  const setCoin = (art: string) => {
-    buy.innerHTML = `<span class="ge-bb-coin-art">${art}</span>`;
-  };
   const feature = host.state.activeFeature;
   if (feature) {
     // A feature is active → the coin becomes the "deactivate" variant.
     buy.setAttribute('aria-label', host.t('DISABLE'));
-    setCoin(BUY_BONUS_DISABLED_ART);
+    buy.innerHTML = `<span class="ge-bb-coin-art">${BUY_BONUS_DISABLED_ART}</span>`;
     buy.addEventListener('click', () => {
       if (!buy.disabled) host.actions.deactivateFeature();
     });
   } else {
-    // Default / social buy-bonus coin (no accent disc); keep the label for screen readers.
+    // Keep the label for screen readers — the face is art only.
+    const face = buyFace(host);
+    buy.className = face.cls;
+    buy.innerHTML = face.inner;
     buy.setAttribute('aria-label', host.t('BUY BONUS'));
-    setCoin(host.config.isSocial ? BUY_BONUS_SOCIAL_ART : BUY_BONUS_ART);
     buy.addEventListener('click', () => {
       if (!buy.disabled) host.actions.openBuyBonus();
     });

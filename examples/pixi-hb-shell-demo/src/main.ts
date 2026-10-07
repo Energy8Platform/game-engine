@@ -1,6 +1,6 @@
 import { Application, Container, Graphics, Text } from 'pixi.js';
 import { createPixiHbShell, makeIcon, HB_ICON_NAMES } from '@energy8platform/shell/pixi-hb';
-import type { PixiGameShell, ShellMode } from '@energy8platform/shell/pixi-hb';
+import type { PixiGameShell, ShellMode, BonusIconName } from '@energy8platform/shell/pixi-hb';
 
 // ─── Screen presets (game viewport sizes, width × height) ──────────────────
 interface ScreenPreset {
@@ -159,6 +159,8 @@ const shell: PixiGameShell = createPixiHbShell({
       { type: 'custom', title: 'Rules', html: '<p>Match symbols left to right on adjacent reels starting from the leftmost reel. All wins are multiplied by the bet.</p>' },
     ],
   },
+  // QA: ?bonusIcon=energy8 shows a provider's BUY BONUS icon (unknown names fall back to the skin's).
+  bonusIcon: (new URLSearchParams(location.search).get('bonusIcon') ?? undefined) as BonusIconName | undefined,
   features: {
     turbo: 2,
     autoplay: {},
@@ -331,7 +333,7 @@ applyScreen(currentScreen);
 renderToolbar();
 log('shell mounted');
 
-// ─── Debug/QA params: ?screen=<id>&kiosk=1&open=settings|info|buybonus ──────
+// ─── Debug/QA params: ?screen=<id>&kiosk=1&bonusIcon=<provider>&open=settings|info|buybonus ──────
 const params = new URLSearchParams(location.search);
 const screenParam = params.get('screen');
 if (screenParam) { const s = SCREENS.find((x) => x.id === screenParam); if (s) applyScreen(s); }

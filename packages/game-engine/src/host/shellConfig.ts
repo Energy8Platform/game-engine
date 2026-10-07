@@ -7,7 +7,7 @@ import type { Lang } from '@energy8platform/shell';
 import type { GameInfoContent, GameInfoSection, PaytableRow, GameMode } from '@energy8platform/shell/pixi';
 import type {
   PixiShellConfig, ShellMode, CurrencyConfig,
-  BonusOption, ShellFeatures, MenuItem,
+  BonusOption, ShellFeatures, MenuItem, BonusIconName,
 } from '@energy8platform/shell/pixi';
 import type { GameModel } from '@energy8platform/platform-core/game-spec';
 import type { WinTier } from '../slot';
@@ -33,6 +33,9 @@ export interface SlotShellOptions {
    *  separator, gameInfo). See `@energy8platform/shell`'s `MenuItem` for preset ids and custom
    *  toggle/range/button/separator row kinds. */
   menu?: MenuItem[];
+  /** The provider whose BUY BONUS icon the button shows, e.g. `'energy8'` (see the shell's
+   *  `BONUS_ICONS`). Omit for the skin's own icon. */
+  bonusIcon?: BonusIconName;
   /** Per-game translation map. Keys are the English source strings (from the spec or copy);
    *  values are the translated strings for each language. Merged with the shell's built-in
    *  `LOCALES` catalog — game strings take precedence over the built-in entries for the same key.
@@ -517,5 +520,6 @@ export function buildShellConfig(
     mode: runtime.mode,
     features,
     menu: opts.menu,
+    bonusIcon: opts.bonusIcon,
   };
 }

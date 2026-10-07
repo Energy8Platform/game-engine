@@ -1,6 +1,8 @@
 import { Container, Graphics, Rectangle, Text, Ticker } from 'pixi.js';
 import type { HbIconName } from '../icons';
 import { makeIcon, IconView } from '../pixi-icon';
+import { bonusGlyph } from '../../pixi/pixi-icon';
+import type { BonusIconName } from '@/core/bonusIcons';
 import { makeText, setText, NUM_FONT_SCALE } from '../text';
 import type { TweenOpts } from '../../pixi/motion-pixi';
 import { FlexBox, type Sizable } from '../../pixi/primitives/flex';
@@ -150,6 +152,14 @@ export class IconButton extends Container implements Sizable {
         round: this.round,
       });
     }
+  }
+
+  /** Show `glyph` (a `size`-px box) in place of the sheet icon — e.g. a provider's BUY BONUS icon. It
+   *  keeps its own colours: only the plaque reacts to hover. */
+  protected replaceGlyph(glyph: Container, size: number): void {
+    this.view.visible = false;
+    glyph.position.set((this.box - size) / 2, (this.box - size) / 2);
+    this.addChild(glyph);
   }
 
   setIcon(name: HbIconName): void {
@@ -639,6 +649,8 @@ export interface BonusButtonOpts {
   face?: 'orange' | 'red';
   /** `close` while a feature is active; the big volatility head otherwise. */
   icon?: 'volatility' | 'close';
+  /** A provider's BUY BONUS icon (core/bonusIcons), in ink, in place of the head; ignored for `close`. */
+  bonusIcon?: BonusIconName;
   onTap: () => void;
 }
 
@@ -647,6 +659,10 @@ export class BonusButton extends IconButton {
     const size = opts.size ?? 58;
     const icon = opts.icon ?? 'volatility';
     super(icon, { size, glyph: Math.round(size * (icon === 'close' ? 0.8 : 0.92)), face: opts.face ?? 'orange', onTap: opts.onTap });
+    if (opts.bonusIcon && icon !== 'close') {
+      const glyph = Math.round(size * 0.8);
+      this.replaceGlyph(bonusGlyph(opts.bonusIcon, glyph, HB.ink), glyph);
+    }
   }
 }
 

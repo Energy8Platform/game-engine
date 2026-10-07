@@ -6,6 +6,7 @@ import { createI18n, type I18n } from './i18n';
 import { KeyboardController, type KeyboardHost } from './keyboard';
 import { DEFAULT_MENU, rangeBounds, seedMenuValues, type MenuItem, type MenuRangeItem } from './menu';
 import { keyboardCapable } from './device';
+import { isBonusIcon } from './bonusIcons';
 import { PACKAGE_VERSION } from './version';
 import type {
   ShellConfig,
@@ -53,6 +54,8 @@ export function resolveConfig(config: ShellConfig): ResolvedShellConfig {
     features: { ...config.features, hotkeys: config.features.hotkeys ?? keyboardCapable() },
     theme: config.theme,
     onBonusBuy: config.onBonusBuy,
+    // An unknown provider name degrades to the skin's own icon rather than a blank button.
+    bonusIcon: isBonusIcon(config.bonusIcon) ? config.bonusIcon : undefined,
     volumes: config.volumes,
     menu: config.menu,
     version: config.version ?? '1.0.0',

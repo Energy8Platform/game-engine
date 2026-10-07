@@ -197,7 +197,7 @@ function sectionControls(host: PixiComponentContext, title: string, width: numbe
   };
   const buyBadge = (): Container => {
     const box = new Container();
-    const badge = new BonusButton({ size: 42, onTap: () => {} });
+    const badge = new BonusButton({ size: 42, bonusIcon: host.config.bonusIcon, onTap: () => {} });
     badge.eventMode = 'none';
     box.addChild(spacerBox(48, 48), badge);
     badge.position.set(3, 3);

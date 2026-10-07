@@ -6,7 +6,7 @@ import type { Rect } from '@/core/popover';
 import type { SafeArea } from '@/core/renderer';
 import { bonusBuyLocked } from '@/core/state';
 import { SKEW, spinEdgeX, type Corners } from './slab';
-import { sIcon, type SGlyph } from './icons';
+import { sIcon, sBonusIcon, type SGlyph } from './icons';
 import { S } from './theme';
 import { SButton, SReadout, SBet, SSpin, SFsCounter, type Sized } from './widgets';
 
@@ -300,7 +300,7 @@ export class SideBar extends Container implements HbBar {
       h: z.spin[1],
       face: feature ? 'red' : 'yellow',
       corners: SKEW.spin,
-      glyph: feature ? sIcon('close', cross, S.fg) : sIcon('bonus', z.buyGlyph, S.ink),
+      glyph: feature ? sIcon('close', cross, S.fg) : sBonusIcon(config.bonusIcon, z.buyGlyph, S.ink),
       glyphSize: feature ? cross : z.buyGlyph,
       onTap: () => (feature ? this.host.actions.deactivateFeature() : this.host.actions.openBuyBonus()),
     });

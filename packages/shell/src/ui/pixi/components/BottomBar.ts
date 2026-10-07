@@ -16,6 +16,15 @@ import {
 import type { SpinAutoplayMode } from '../primitives/widgets';
 import type { IconName } from '../icons';
 import { bonusBuyLocked } from '@/core/state';
+import type { ResolvedShellConfig } from '@/core/types';
+
+/** The BUY BONUS face (bar button and game-info legend): the provider's icon on the accent disc when
+ *  `bonusIcon` is set, else the full-colour coin (social variant in social mode). */
+export function buyFace(config: ResolvedShellConfig): { bonusIcon: ResolvedShellConfig['bonusIcon'] } | { coinArt: string } {
+  return config.bonusIcon
+    ? { bonusIcon: config.bonusIcon }
+    : { coinArt: config.isSocial ? BUY_BONUS_SOCIAL_ART : BUY_BONUS_ART };
+}
 
 // ── design constants (mirror the DOM `.ge-bar-panel` / mobile rules) ──────────
 /** Which of the disc's three faces the autoplay state calls for — see `SpinAutoplayMode`. A run
@@ -359,7 +368,7 @@ export class BottomBar extends Container {
       size,
       border,
       bg: tokens.accent,
-      coinArt: config.isSocial ? BUY_BONUS_SOCIAL_ART : BUY_BONUS_ART,
+      ...buyFace(config),
       label: '',
       tokens,
       ticker: this.host.ticker,

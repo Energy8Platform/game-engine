@@ -1,5 +1,7 @@
 import { Container, Graphics, GraphicsContext } from 'pixi.js';
 import { S_SHEET } from './icons-sheet';
+import { bonusGlyph } from '../pixi/pixi-icon';
+import type { BonusIconName } from '@/core/bonusIcons';
 
 // S glyphs: 24×24 fragments with one colour slot (`currentColor`). The sheet (icons-s.svg, generated
 // into icons-sheet.ts) draws every bar glyph; `play` is hand-authored — the sheet has none.
@@ -52,4 +54,9 @@ export class SGlyph extends Container {
 
 export function sIcon(name: SIconName, size: number, color: string): SGlyph {
   return new SGlyph(name, size, color);
+}
+
+/** The BUY BONUS mask: the provider's icon when one is configured (core/bonusIcons), else the sheet's. */
+export function sBonusIcon(provider: BonusIconName | undefined, size: number, color: string): Container {
+  return provider ? bonusGlyph(provider, size, color) : sIcon('bonus', size, color);
 }
