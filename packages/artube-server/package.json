@@ -1,6 +1,6 @@
 {
   "name": "@energy8platform/artube-server",
-  "version": "0.3.1",
+  "version": "0.3.3",
   "description": "Game backend that runs an @energy8platform/game-sdk slot on the Artube platform",
   "author": "Energy8 Platform",
   "license": "MIT",
@@ -25,7 +25,7 @@
   },
   "engines": { "node": ">=20" },
   "dependencies": {
-    "@energy8platform/platform-core": ">=0.30.11",
+    "@energy8platform/platform-core": ">=0.36.1",
     "@grpc/grpc-js": "^1.12.0",
     "@grpc/proto-loader": "^0.7.13",
     "ws": "^8.18.0"

@@ -16,7 +16,7 @@ const PUBLISHED: Parameters<typeof generate>[2] = {
   harness: '^0.3.1',
   // test/versions.test.ts fails the moment these drift from the workspace's own versions.
   'artube-bridge': '^0.4.0',
-  'artube-server': '^0.3.1',
+  'artube-server': '^0.3.3',
   // lives outside this workspace (github.com/Energy8Platform/golem); not covered by versions.test.ts
   golem: '^0.1.0',
 };
