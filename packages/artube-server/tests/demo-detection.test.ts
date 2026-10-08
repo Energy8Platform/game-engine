@@ -6,11 +6,9 @@
  * `session-info.md`, — а потом отвергла спин с
  * `OperationNotAllowed: Operation Latest is not allowed for demo user.`
  *
- * Прочитать из этого «нет ключа ⇒ демо» нельзя: ровно так же выглядит
- * РЕАЛЬНАЯ сессия, чья валюта совпала с дефолтом сериализатора (игрок:
- * «с другой любой валютой работает, а с дефолтной USD видимо нет»). Поэтому
- * демо — только явный `null` и только вердикт самой платформы; отсутствие
- * поля читается как реальные деньги и проверяется одним запросом.
+ * Поэтому демо — явный `null` или отсутствующий ключ, сразу на коннекте.
+ * Вердикт самой платформы отказом остаётся для валюты, приехавшей мусором
+ * (`""`, не строка): её читаем как реальные деньги и проверяем одним запросом.
  */
 
 import { EventEmitter } from 'node:events';
@@ -183,23 +181,25 @@ function expectNoRoundRpcs(api: ReturnType<typeof platformApi>): void {
 }
 
 describe('чтение currency из SessionInfo', () => {
-  it('отсутствие currency НЕ делает сессию демо: раунд уходит на платформу', async () => {
+  it('отсутствие currency — демо сразу: раунд на платформу не уходит', async () => {
     const s = await openSession(info());
     const { result, error } = await s.play();
 
-    expect(s.init.demo).toBe(false);
+    expect(s.init.demo).toBe(true);
+    expect(s.init.currency).toBeNull();
     expect(error).toBeUndefined();
-    expect(s.api.playRound).toHaveBeenCalledTimes(1);
-    expect(result.balanceAfter).toBe(42); // баланс платформы, не локальный
+    expectNoRoundRpcs(s.api);
+    // Ставка allowed_bets[3] = 1, выигрыш 2× → 999999 - 1 + 2.
+    expect(result.balanceAfter).toBe(1000000);
   });
 
-  it('отклонение от доки попадает в лог, но сессию не переводит в демо', async () => {
+  it('отсутствие currency — отклонение от доки, и оно попадает в лог', async () => {
     const s = await openSession(info());
     const deviation = s.warnings.find((w) => w.message.includes('currency'));
 
     expect(deviation).toBeDefined();
     expect(deviation!.context?.currency_on_wire).toBe('absent');
-    expect(deviation!.message).toContain('реальные деньги');
+    expect(deviation!.message).toContain('демо');
   });
 
   it('явный currency: null — задокументированное демо, без предупреждения', async () => {
@@ -214,19 +214,6 @@ describe('чтение currency из SessionInfo', () => {
 
   it('настоящая валюта — это реальные деньги: раунд уходит на платформу', async () => {
     const s = await openSession(info({ currency: 'USD' }));
-    const { result } = await s.play();
-
-    expect(s.init.demo).toBe(false);
-    expect(s.init.currency).toBe('USD');
-    expect(s.api.playRound).toHaveBeenCalledTimes(1);
-    expect(result.balanceAfter).toBe(42);
-  });
-
-  it('валюту не назвали — играем в USD за реальные деньги, а не в демо', async () => {
-    // Поле пропадает из ответа у ДЕФОЛТНОЙ валюты (сериализатор выбрасывает
-    // значения, равные дефолтному), и наблюдение это подтверждает: на любой
-    // явно заданной валюте всё работало, ломалось только здесь.
-    const s = await openSession(info());
     const { result } = await s.play();
 
     expect(s.init.demo).toBe(false);
@@ -253,22 +240,23 @@ describe('чтение currency из SessionInfo', () => {
     });
   });
 
-  it('классификация провода: демо — ровно и только явный null', () => {
+  it('классификация провода: демо — явный null или нет ключа', () => {
     expect(classifyCurrency(info({ currency: 'USD' }))).toMatchObject({
       demo: false, wire: 'code', code: 'USD', deviates: false,
     });
     expect(classifyCurrency(info({ currency: null }))).toMatchObject({
       demo: true, wire: 'null', code: null, deviates: false,
     });
-    // Валюту не назвали — это USD, а не отсутствие валюты: поле пропадает у
-    // дефолтного значения, и на любой явно заданной валюте всё работало.
     expect(classifyCurrency(info())).toMatchObject({
-      demo: false, wire: 'absent', code: 'USD', deviates: true,
+      demo: true, wire: 'absent', code: null, deviates: true,
     });
   });
 });
 
 describe('вердикт платформы отказом на раундовой RPC', () => {
+  /** Валюта приехала мусором — единственный случай, где демо узнаём отказом. */
+  const garbage = () => info({ currency: '' });
+
   it('распознаётся по коду И по тексту, без привязки к имени операции', () => {
     // Живой провод: без артикля. Дока (error-handling.md:209): с артиклем.
     expect(isDemoUserRejection(demoRejection())).toBe(true);
@@ -290,7 +278,7 @@ describe('вердикт платформы отказом на раундово
   });
 
   it('спин, отвергнутый как демо, доигрывается локально — игрок видит успех', async () => {
-    const s = await openSession(info(), { rejectAsDemo: true });
+    const s = await openSession(garbage(), { rejectAsDemo: true });
     const { result, error } = await s.play();
 
     expect(error).toBeUndefined();
@@ -306,7 +294,7 @@ describe('вердикт платформы отказом на раундово
   });
 
   it('переключение переживает действие: второй спин платформу не трогает', async () => {
-    const s = await openSession(info(), { rejectAsDemo: true });
+    const s = await openSession(garbage(), { rejectAsDemo: true });
     await s.play();
     const second = await s.play();
 
@@ -319,18 +307,18 @@ describe('вердикт платформы отказом на раундово
   });
 
   it('переключение доходит до лога вместе с текстом платформы', async () => {
-    const s = await openSession(info(), { rejectAsDemo: true });
+    const s = await openSession(garbage(), { rejectAsDemo: true });
     await s.play();
     const flip = s.warnings.find((w) => w.message.includes('локальный кошелёк'));
 
     expect(flip).toBeDefined();
-    expect(flip!.context?.currency_on_wire).toBe('absent');
+    expect(flip!.context?.currency_on_wire).toBe('invalid');
     expect(String(flip!.context?.platform_message)).toContain('demo user');
     expect(flip!.context?.demo_balance).toBe(999999);
   });
 
   it('чужой OperationNotAllowed не переводит сессию на локальный кошелёк', async () => {
-    const s = await openSession(info(), {
+    const s = await openSession(garbage(), {
       rejectWith: () => new GamesApiError({
         code: 'OperationNotAllowed', message: 'Operation PlayRound is not allowed.',
       }),
@@ -348,7 +336,7 @@ describe('вердикт платформы отказом на раундово
     // отказ приходит на CloseRound второго. Досчитать такой раунд локальным
     // кошельком значило бы зачислить выигрыш в бутафорию.
     const failing = complexEngine();
-    const s = await openSession(info(), { engine: failing });
+    const s = await openSession(info({ currency: 'USD' }), { engine: failing });
     const opened = await s.play();
     expect(opened.result.creditPending).toBe(true);
 
@@ -391,9 +379,9 @@ describe('баланс демо-сессии', () => {
 
   it('реальной сессии баланс никто не подменяет', async () => {
     expect(buildInit(info({ currency: 'USD', balance: 150.75 })).balance).toBe(150.75);
-    // И у сессии без валюты тоже: локальный кошелёк ей не заводится вовсе,
-    // пока платформа сама не назовёт её демо.
-    const s = await openSession(info({ balance: 150.75 }), { startingDemoBalance: 1000 });
+    // И у сессии с валютой-мусором тоже: локальный кошелёк ей не заводится
+    // вовсе, пока платформа сама не назовёт её демо.
+    const s = await openSession(info({ currency: '', balance: 150.75 }), { startingDemoBalance: 1000 });
     expect(s.init.balance).toBe(150.75);
     expect(s.init.demo).toBe(false);
   });
