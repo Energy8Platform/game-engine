@@ -56,3 +56,18 @@ export function nextTurbo(current: number, maxLevels: number): number {
 export function bonusBuyLocked(s: ShellState): boolean {
   return s.busy || s.autoplay.active || !s.buyBonusEnabled;
 }
+
+/**
+ * Is the bar menu (and the game info it leads to) unavailable right now?
+ *
+ * A round, an autoplay run and a bonus own the screen: Artube's review allows exactly two actions
+ * there — Spin (which speeds the round up, see `ShellController`'s `spin` action) and Autoplay
+ * (which stops the run). The burger, Shift+S and Shift+I all ask this one predicate, so the bar and
+ * the keyboard cannot drift apart the way the buy-bonus locks once did.
+ *
+ * A replay is exempt: between replays the shell sits idle in `'replay'` mode, and the menu is the
+ * only place its sound lives. A replay that is PLAYING is busy, and locks like any other round.
+ */
+export function menuLocked(s: ShellState): boolean {
+  return s.busy || s.autoplay.active || (s.mode !== 'base' && s.mode !== 'replay');
+}

@@ -47,7 +47,7 @@ describe('bar menu popover', () => {
     expect(q(mount, '[data-ge="menu-popover"]')).toBeTruthy();
     const rows = Array.from(mount.querySelectorAll('[data-ge^="menu-row-"], [data-ge="menu-sep"]'));
     expect(rows.map((r) => (r as HTMLElement).dataset.ge)).toEqual([
-      'menu-row-sound', 'menu-row-music', 'menu-row-sfx', 'menu-sep', 'menu-row-gameInfo',
+      'menu-row-sound', 'menu-row-music', 'menu-row-sfx', 'menu-row-spacebar', 'menu-sep', 'menu-row-gameInfo',
     ]);
     expect(q(mount, '[data-ge="settings-modal"]')).toBeNull(); // the overlay is gone for good
   });

@@ -139,7 +139,15 @@ export type GameInfoSection =
   | { type: 'modes'; title?: string; order?: number; modes: GameMode[] }
   | { type: 'controls'; title?: string; order?: number }
   | { type: 'hotkeys'; title?: string; order?: number }
-  | { type: 'paytable'; title?: string; order?: number; rows: PaytableRow[] }
+  | {
+      type: 'paytable';
+      title?: string;
+      order?: number;
+      rows: PaytableRow[];
+      /** Show each win as money — multiplier × the CURRENT bet, in the session currency — instead
+       *  of `x<multiplier>`. Computed when the page opens, so it always matches the bar's bet. */
+      amounts?: boolean;
+    }
   | WinSection
   | { type: 'custom'; title?: string; order?: number; node?: unknown; html?: string };
 
@@ -325,6 +333,9 @@ export interface ShellState {
 
 export interface ShellEvents {
   spin: void;
+  /** Spin pressed (disc or Space) while a round is playing: speed the round up — the host skips
+   *  the presenting segment. Never fires while idle; a spin then is a plain `spin`. */
+  skip: void;
   betChange: number;
   autoplayStart: AutoplayOptions;
   autoplayStop: void;

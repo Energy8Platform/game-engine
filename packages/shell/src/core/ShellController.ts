@@ -1,5 +1,5 @@
 import { EventEmitter } from './EventEmitter';
-import { createInitialState, nextTurbo, stepBet } from './state';
+import { createInitialState, menuLocked, nextTurbo, stepBet } from './state';
 import { resolveTheme, type ShellTokens } from './theme';
 import { formatCurrency } from './format';
 import { createI18n, type I18n } from './i18n';
@@ -104,6 +104,10 @@ export class ShellController extends EventEmitter<ShellEvents> implements ShellH
     if (typeof document !== 'undefined') {
       this.attachKeyboard();
       document.addEventListener('pointerdown', this.pullFocus, true);
+      // A lobby iframe (Artube) starts with focus in the PARENT page, so Space and the hotkeys never
+      // reach this document until the player clicks into the game. Claim it once up front; the
+      // pointerdown above keeps claiming it after every click.
+      if (typeof window !== 'undefined' && window.self !== window.top) this.pullFocus();
     }
     this.renderer.applyTheme(this.tokens);
     this.renderer.renderBar();
@@ -130,7 +134,10 @@ export class ShellController extends EventEmitter<ShellEvents> implements ShellH
 
   private buildActions(): ShellActions {
     const a: ShellActions = {
-      spin: () => this.emit('spin'),
+      // Spin mid-round means "hurry up", not "another round": the host aborts the presenting
+      // segment (the same path as the double-tap skip). One place, so the bar's disc and the
+      // Space key can't disagree about it.
+      spin: () => this.emit(this.state.busy ? 'skip' : 'spin'),
       stepBet: (dir) => {
         const next = stepBet(this.state, dir);
         if (next === this.state.bet) return;
@@ -195,7 +202,8 @@ export class ShellController extends EventEmitter<ShellEvents> implements ShellH
         return self.config.features.hotkeys !== false;
       },
       get spacebarEnabled() {
-        return self.config.features.spacebar !== false;
+        // The feature (author / jurisdiction) AND the player's own menu switch.
+        return self.config.features.spacebar !== false && self.getMenuValue('spacebar') !== false;
       },
       get turboLevels() {
         return self.config.features.turbo;
@@ -242,6 +250,7 @@ export class ShellController extends EventEmitter<ShellEvents> implements ShellH
       this.closeModal();
       return;
     }
+    if (menuLocked(this.state)) return;
     this.emit('menuOpen');
     this.show({ kind: 'menu' });
   }
@@ -251,6 +260,7 @@ export class ShellController extends EventEmitter<ShellEvents> implements ShellH
     this.openMenu();
   }
   openInfo(): void {
+    if (menuLocked(this.state)) return;
     this.emit('infoOpen');
     this.show({ kind: 'gameInfo' });
   }
@@ -306,7 +316,11 @@ export class ShellController extends EventEmitter<ShellEvents> implements ShellH
 
   // ── menu ───────────────────────────────────────────────────────────────────
   get menu(): MenuItem[] {
-    return this.menuItems;
+    // No Space to press (a touch client, hotkeys off) or Space-to-spin not offered at all: the
+    // player's switch for it would be a control that does nothing, so it isn't shown.
+    const f = this.config.features;
+    if (f.hotkeys !== false && f.spacebar !== false) return this.menuItems;
+    return this.menuItems.filter((i) => (i as { id?: string }).id !== 'spacebar');
   }
   /** Replace the item list. Values of ids already in state are kept; new ids are seeded. */
   setMenu(items: MenuItem[]): void {
@@ -398,6 +412,9 @@ export class ShellController extends EventEmitter<ShellEvents> implements ShellH
   }
   setBusy(busy: boolean): void {
     this.state.busy = busy;
+    // The menu popover has no backdrop, so the disc stays tappable under it: a round started that
+    // way must not leave the menu open through it (see `menuLocked`).
+    if (busy && this.overlayKind === 'menu') this.closeModal();
     this.renderer.renderBar();
     this.kbd?.notifyBusyChanged(busy);
   }

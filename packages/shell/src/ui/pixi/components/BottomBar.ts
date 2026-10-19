@@ -15,7 +15,7 @@ import {
 } from '../primitives/widgets';
 import type { SpinAutoplayMode } from '../primitives/widgets';
 import type { IconName } from '../icons';
-import { bonusBuyLocked } from '@/core/state';
+import { bonusBuyLocked, menuLocked } from '@/core/state';
 import type { ResolvedShellConfig } from '@/core/types';
 
 /** The BUY BONUS face (bar button and game-info legend): the provider's icon on the accent disc when
@@ -621,9 +621,13 @@ export class BottomBar extends Container {
     const i = state.availableBets.indexOf(state.bet);
     if (this.betUp) this.betUp.disabled = lockBet || i >= state.availableBets.length - 1;
     if (this.betDown) this.betDown.disabled = lockBet || i <= 0;
-    if (this.spin) this.spin.disabled = state.busy && !auto;
+    // The disc stays live through a round: tapped then, it speeds the round up (the shell turns
+    // that spin into a skip). Except as a halted run's RESUME disc — that would start autoplay
+    // mid-round.
+    if (this.spin) this.spin.disabled = state.busy && !auto && state.autoplay.remaining > 0;
     if (this.autoBtn) this.autoBtn.disabled = state.busy && !auto;
     if (this.buy) this.buy.disabled = bonusBuyLocked(state);
+    if (this.menuBtn) this.menuBtn.disabled = menuLocked(state);
     if (this.betReadout && lockBet) {
       this.betReadout.eventMode = 'none';
       this.betReadout.cursor = 'default';

@@ -41,3 +41,14 @@ export function formatCurrency(value: number, currency: CurrencyConfig, variable
     ? `${currency.symbol}${number}`
     : `${number} ${currency.symbol}`;
 }
+
+/** One paytable win cell: `<sign><multiplier>` by default, or — for a section with `amounts` — the
+ *  money that multiple of the CURRENT bet pays, so the page always quotes the bet on the bar. */
+export function paytableWin(
+  host: { state: { bet: number }; formatCurrency(n: number, win?: boolean): string },
+  multiplier: number,
+  amounts: boolean | undefined,
+  sign = 'x',
+): string {
+  return amounts ? host.formatCurrency(multiplier * host.state.bet, true) : `${sign}${multiplier}`;
+}

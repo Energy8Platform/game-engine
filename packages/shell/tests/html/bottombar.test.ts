@@ -181,12 +181,41 @@ describe('BottomBar base mode', () => {
     expect(down().disabled).toBe(true);
   });
 
-  it('setBusy disables spin/bet but keeps menu enabled', () => {
+  it('setBusy locks bet and menu; the disc stays live and turns into a skip', () => {
     const shell = createGameShell(cfg(mount));
+    const spun = vi.fn();
+    const skipped = vi.fn();
+    shell.on('spin', spun);
+    shell.on('skip', skipped);
     shell.setBusy(true);
-    expect((q(mount, '[data-ge="spin"]') as HTMLButtonElement).disabled).toBe(true);
     expect((q(mount, '[data-ge="bet-up"]') as HTMLButtonElement).disabled).toBe(true);
+    expect((q(mount, '[data-ge="menu"]') as HTMLButtonElement).disabled).toBe(true);
+    const disc = q(mount, '[data-ge="spin"]') as HTMLButtonElement;
+    expect(disc.disabled).toBe(false);
+    disc.click();
+    expect(skipped).toHaveBeenCalledOnce();
+    expect(spun).not.toHaveBeenCalled();
+    shell.setBusy(false);
     expect((q(mount, '[data-ge="menu"]') as HTMLButtonElement).disabled).toBe(false);
+  });
+
+  it('the menu stays shut through autoplay and a bonus, and a round closes an open one', () => {
+    const shell = createGameShell(cfg(mount));
+    const opened = vi.fn();
+    shell.on('menuOpen', opened);
+    shell.setAutoplay({ active: true, remaining: 5 });
+    shell.openMenu();
+    shell.setAutoplay({ active: false, remaining: 0 });
+    shell.setMode('freeSpins');
+    shell.openMenu();
+    shell.openInfo();
+    expect(opened).not.toHaveBeenCalled();
+    expect(q(mount, '[data-ge="menu-popover"]')).toBeNull();
+    shell.setMode('base');
+    shell.openMenu();
+    expect(q(mount, '[data-ge="menu-popover"]')).toBeTruthy();
+    shell.setBusy(true); // spin tapped under the popover
+    expect(q(mount, '[data-ge="menu-popover"]')).toBeNull();
   });
 
   it('setBalance/setWin update the HUD', () => {

@@ -4,7 +4,7 @@ import type { HbBar } from '../pixi-hb/PixiHbRenderer';
 import { autoplayDiscMode } from '../pixi-hb/components/BottomBar';
 import type { Rect } from '@/core/popover';
 import type { SafeArea } from '@/core/renderer';
-import { bonusBuyLocked } from '@/core/state';
+import { bonusBuyLocked, menuLocked } from '@/core/state';
 import { SKEW, spinEdgeX, type Corners } from './slab';
 import { sIcon, sBonusIcon, type SGlyph } from './icons';
 import { S } from './theme';
@@ -438,9 +438,13 @@ export class SideBar extends Container implements HbBar {
     const i = state.availableBets.indexOf(state.bet);
     if (this.bet.up) this.bet.up.disabled = lockBet || i >= state.availableBets.length - 1;
     if (this.bet.down) this.bet.down.disabled = lockBet || i <= 0;
-    if (this.spin) this.spin.disabled = state.busy && !auto;
+    // The SPIN slab stays live through a round: tapped then, it speeds the round up (the shell
+    // turns that spin into a skip). Except as a halted run's RESUME slab — that would start
+    // autoplay mid-round.
+    if (this.spin) this.spin.disabled = state.busy && !auto && state.autoplay.remaining > 0;
     if (this.autoTab) this.autoTab.disabled = state.busy && !auto;
     if (this.buy) this.buy.disabled = bonusBuyLocked(state);
+    this.menuBtn.disabled = menuLocked(state);
     if (lockBet) {
       this.bet.valueHit.eventMode = 'none';
       this.bet.valueHit.cursor = 'default';

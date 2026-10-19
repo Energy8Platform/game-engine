@@ -1,8 +1,8 @@
 import { ICON_NAMES, type IconName } from './icon-names';
 
 /** Built-in presets: the id alone is enough — the shell knows the label, icon and behaviour. */
-export type MenuPresetId = 'sound' | 'music' | 'sfx' | 'gameInfo';
-const PRESET_IDS: readonly string[] = ['sound', 'music', 'sfx', 'gameInfo'];
+export type MenuPresetId = 'sound' | 'music' | 'sfx' | 'spacebar' | 'gameInfo';
+const PRESET_IDS: readonly string[] = ['sound', 'music', 'sfx', 'spacebar', 'gameInfo'];
 
 export function isPresetId(id: string): id is MenuPresetId {
   return PRESET_IDS.includes(id);
@@ -43,6 +43,7 @@ export const DEFAULT_MENU: MenuItem[] = [
   { id: 'sound' },
   { id: 'music' },
   { id: 'sfx' },
+  { id: 'spacebar' },
   { type: 'separator' },
   { id: 'gameInfo' },
 ];
@@ -205,6 +206,20 @@ function preset(host: MenuHost, item: MenuPresetItem): MenuRow | null {
         format: percent,
       };
     }
+    // The player's own switch for Space-to-spin. It lives in `state.menu` like a custom toggle (so
+    // `settingChange` carries it and the settings store keeps it), defaulting ON; the keyboard reads
+    // it through `getMenuValue`. Where Space can't spin at all — no keyboard, or `features.spacebar`
+    // turned off — the shell leaves the row out of `menu` altogether (see `ShellController.menu`).
+    case 'spacebar':
+      return {
+        kind: 'toggle',
+        id: 'spacebar',
+        label,
+        disabled,
+        icon: () => safeIcon(item.icon),
+        get: () => host.getMenuValue('spacebar') !== false,
+        set: (v) => host.setMenuValue('spacebar', v),
+      };
     case 'gameInfo':
       return {
         kind: 'button',
@@ -224,6 +239,7 @@ const DEFAULT_LABELS: Record<string, string> = {
   sound: 'Sound',
   music: 'Music',
   sfx: 'SFX',
+  spacebar: 'Spacebar to spin',
   gameInfo: 'Game info',
 };
 

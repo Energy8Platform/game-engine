@@ -4,6 +4,7 @@ import { createOverlay } from '../primitives';
 import { icon } from '../icons';
 import { buyFace } from './BottomBar';
 import { PACKAGE_VERSION } from '@/core/version';
+import { paytableWin } from '@/core/format';
 
 /** Default order key for the auto-injected hotkeys section: just after `controls` (-1). */
 const HOTKEYS_DEFAULT_ORDER = -0.5;
@@ -86,7 +87,7 @@ function renderSection(host: ShellHost, s: GameInfoSection): HTMLElement {
     case 'modes': return sectionModes(host, s.modes, sec('info-modes', s.title, host.t('Modes')));
     case 'controls': return sectionControls(host, sec('info-controls', s.title, host.t('Controls')));
     case 'hotkeys': return sectionHotkeys(host, sec('info-hotkeys', s.title, host.t('Hotkeys')));
-    case 'paytable': return sectionPaytable(s.rows, sec('info-paytable', s.title, host.t('Paytable')));
+    case 'paytable': return sectionPaytable(host, s, sec('info-paytable', s.title, host.t('Paytable')));
     case 'wins': return sectionWins(s, sec('info-wins', s.title, host.t(winFallbackTitle(s.kind))));
     // Translate the heading (e.g. the host-built DISCLAIMER title); the body stays verbatim.
     case 'custom': return sectionCustom(s, sec('info-custom', s.title != null ? host.t(s.title) : undefined, ''));
@@ -232,13 +233,13 @@ function sectionHotkeys(host: ShellHost, el: HTMLElement): HTMLElement {
 }
 
 // ── paytable (cards — image on top, name, then win tiers "<count> x<mult>") ────
-function sectionPaytable(rows: PaytableRow[], el: HTMLElement): HTMLElement {
+function sectionPaytable(host: ShellHost, s: { rows: PaytableRow[]; amounts?: boolean }, el: HTMLElement): HTMLElement {
   const grid = document.createElement('div'); grid.className = 'ge-gi-pt-grid';
-  for (const r of rows) grid.appendChild(paytableCard(r));
+  for (const r of s.rows) grid.appendChild(paytableCard(host, r, s.amounts));
   el.appendChild(grid);
   return el;
 }
-function paytableCard(r: PaytableRow): HTMLElement {
+function paytableCard(host: ShellHost, r: PaytableRow, amounts?: boolean): HTMLElement {
   const card = document.createElement('div'); card.className = 'ge-gi-pt-card';
   const sym = document.createElement('div'); sym.className = 'ge-gi-pt-sym';
   if (r.symbol.image) {
@@ -251,7 +252,7 @@ function paytableCard(r: PaytableRow): HTMLElement {
   const wins = document.createElement('div'); wins.className = 'ge-gi-pt-wins';
   for (const w of r.wins) {
     const wi = document.createElement('span'); wi.className = 'ge-gi-pt-win';
-    wi.innerHTML = (w.count ? `<i>${w.count}</i> ` : '') + `<b>x${w.multiplier}</b>`;
+    wi.innerHTML = (w.count ? `<i>${w.count}</i> ` : '') + `<b>${paytableWin(host, w.multiplier, amounts)}</b>`;
     wins.appendChild(wi);
   }
   card.append(sym, wins);

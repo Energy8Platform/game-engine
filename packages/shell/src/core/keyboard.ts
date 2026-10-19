@@ -105,7 +105,14 @@ export class KeyboardController {
         return;
       }
       const s = this.host.state;
-      if (s.mode !== 'base' || s.busy || s.autoplay.active) return;
+      if (s.autoplay.active) return;
+      // Mid-round (a bonus included) Space is the disc's other job: the shell turns this spin into
+      // a skip. Not a hold — the round ending must not fire a second one.
+      if (s.busy) {
+        this.host.spin();
+        return;
+      }
+      if (s.mode !== 'base') return;
       this.spaceHeld = true;
       this.host.spin();
       return;

@@ -15,10 +15,21 @@ function host(items: MenuItem[], over: Partial<MenuHost> = {}): MenuHost & { val
   } as never;
 }
 
-it('expands the default list into sound/music/sfx/separator/gameInfo', () => {
+it('expands the default list into sound/music/sfx/spacebar/separator/gameInfo', () => {
   const rows = resolveMenu(host(DEFAULT_MENU));
-  expect(rows.map((r) => r.kind)).toEqual(['toggle', 'range', 'range', 'separator', 'button']);
-  expect(rows.map((r) => ('id' in r ? r.id : '—'))).toEqual(['sound', 'music', 'sfx', '—', 'gameInfo']);
+  expect(rows.map((r) => r.kind)).toEqual(['toggle', 'range', 'range', 'toggle', 'separator', 'button']);
+  expect(rows.map((r) => ('id' in r ? r.id : '—'))).toEqual(['sound', 'music', 'sfx', 'spacebar', '—', 'gameInfo']);
+});
+
+it('the spacebar row defaults ON and writes through setMenuValue (so settingChange carries it)', () => {
+  const h = host(DEFAULT_MENU);
+  const row = resolveMenu(h)[3];
+  if (row.kind !== 'toggle') throw new Error('toggle expected');
+  expect(row.label).toBe('Spacebar to spin');
+  expect(row.get()).toBe(true); // nothing stored yet → on
+  row.set(false);
+  expect(h.values.spacebar).toBe(false);
+  expect(row.get()).toBe(false);
 });
 
 it('gives presets their translated labels and volume bounds', () => {
@@ -27,7 +38,7 @@ it('gives presets their translated labels and volume bounds', () => {
   expect(music).toMatchObject({ kind: 'range', label: 'Music', min: 0, max: 1, step: 0.05 });
   if (music.kind !== 'range') throw new Error('range expected');
   expect(music.format(0.5)).toBe('50%');
-  expect(rows[4]).toMatchObject({ kind: 'button', label: 'Game info', icon: 'info', chevron: true });
+  expect(rows[5]).toMatchObject({ kind: 'button', label: 'Game info', icon: 'info', chevron: true });
 });
 
 it("swaps the sound row's glyph with its value", () => {
@@ -50,7 +61,7 @@ it('routes a preset row through get/set on the host', () => {
 
 it('gameInfo select() opens the info overlay', () => {
   const h = host(DEFAULT_MENU);
-  const row = resolveMenu(h)[4];
+  const row = resolveMenu(h)[5];
   if (row.kind !== 'button') throw new Error('button expected');
   row.select();
   expect(h.actions.openInfo).toHaveBeenCalledOnce();

@@ -50,13 +50,38 @@ describe('keyboard: Space → spin', () => {
     expect(spy).toHaveBeenCalledOnce();
   });
 
-  it('does not emit while a spin is running (busy)', () => {
+  it('while a spin is running (busy) Space skips instead of spinning again', () => {
     const shell = createGameShell(cfg(mount));
     const spy = vi.fn();
+    const skip = vi.fn();
     shell.on('spin', spy);
+    shell.on('skip', skip);
     shell.setBusy(true);
     space();
     expect(spy).not.toHaveBeenCalled();
+    expect(skip).toHaveBeenCalledOnce();
+    shell.setBusy(false); // a skip is not a hold: the round ending fires nothing
+    expect(spy).not.toHaveBeenCalled();
+  });
+
+  it('the player can switch Space-to-spin off in the menu', () => {
+    const shell = createGameShell(cfg(mount));
+    const spy = vi.fn();
+    shell.on('spin', spy);
+    const changes: unknown[] = [];
+    shell.on('settingChange', (c) => changes.push(c));
+    shell.setMenuValue('spacebar', false);
+    expect(changes).toEqual([{ key: 'spacebar', value: false }]);
+    space();
+    expect(spy).not.toHaveBeenCalled();
+    shell.setMenuValue('spacebar', true);
+    space();
+    expect(spy).toHaveBeenCalledOnce();
+  });
+
+  it('hides the Spacebar row where Space cannot spin', () => {
+    const noKeys = cfg(mount); noKeys.features = { ...noKeys.features, hotkeys: false };
+    expect(createGameShell(noKeys).menu.some((i) => (i as { id?: string }).id === 'spacebar')).toBe(false);
   });
 
   it('does not emit while autoplay is active', () => {

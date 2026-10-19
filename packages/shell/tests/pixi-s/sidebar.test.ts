@@ -402,11 +402,11 @@ describe('S side bar — modes and controls', () => {
     expectTab(2, 'yellow', S.ink);
   });
 
-  it('busy: SPIN and autoplay disabled, the bet locked', () => {
+  it('busy: SPIN stays live (it skips), autoplay disabled, the bet locked', () => {
     const ctx = host(1280, 720);
     ctx.state.busy = true;
     const p = parts(build(ctx));
-    expect(p.spin!.disabled).toBe(true);
+    expect(p.spin!.disabled).toBe(false);
     expect(p.autoTab!.disabled).toBe(true);
     expect(p.bet.up!.disabled).toBe(true);
     expect(p.bet.valueHit.eventMode).toBe('none');

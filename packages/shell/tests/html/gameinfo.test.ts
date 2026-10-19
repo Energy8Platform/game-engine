@@ -49,6 +49,23 @@ describe('GameInfo', () => {
     expect(q(modal, '[data-ge="info-custom"]')!.textContent).toContain('Match left to right.');
   });
 
+  it('an `amounts` paytable quotes multiplier × the current bet, re-read on every open', () => {
+    const shell = createGameShell({
+      ...cfg(mount, [
+        { type: 'paytable', amounts: true, rows: [{ symbol: { text: 'Wild' }, wins: [{ count: '5', multiplier: 2.5 }] }] },
+      ]),
+      availableBets: [1, 2],
+    });
+    shell.openInfo();
+    expect(q(mount, '[data-ge="info-paytable"]')!.textContent).toContain('€2.50');
+    shell.closeModal();
+    shell.actions.stepBet(1); // bet 1 → 2
+    shell.openInfo();
+    const text = q(mount, '[data-ge="info-paytable"]')!.textContent!;
+    expect(text).toContain('€5.00');
+    expect(text).not.toContain('x2.5');
+  });
+
   it('localizes the paytable heading and the host-built custom DISCLAIMER heading', () => {
     const shell = createGameShell({
       ...cfg(mount, [

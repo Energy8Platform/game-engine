@@ -24,6 +24,7 @@ import { SKEW } from '../slab';
 import { sIcon, sBonusIcon, type SIconName } from '../icons';
 import { sLabel, sValue, sBody } from '../text';
 import { PACKAGE_VERSION } from '@/core/version';
+import { paytableWin } from '@/core/format';
 import { S } from '../theme';
 
 /** Game info — the S full-screen page: yellow title plate + ✕, sections under yellow title plates. */
@@ -106,7 +107,7 @@ function renderSection(host: PixiComponentContext, s: GameInfoSection, width: nu
     case 'hotkeys':
       return sectionHotkeys(host, s.title ?? host.t('Hotkeys'), width);
     case 'paytable':
-      return sectionPaytable(host, s.rows, s.title ?? host.t('Paytable'), width);
+      return sectionPaytable(host, s.rows, s.title ?? host.t('Paytable'), width, s.amounts);
     case 'wins':
       return sectionWins(host, s, width);
     case 'custom':
@@ -371,7 +372,7 @@ function keycap(_host: PixiComponentContext, label: string): Container {
 }
 
 // ── paytable ───────────────────────────────────────────────────────────────────
-function sectionPaytable(host: PixiComponentContext, rows: PaytableRow[], title: string, width: number): FlexBox {
+function sectionPaytable(host: PixiComponentContext, rows: PaytableRow[], title: string, width: number, amounts?: boolean): FlexBox {
   const sec = section(host, title, width);
   const gap = 12;
   const cols = 3; // always three across (the user's call) — the last row keeps third-width cards
@@ -380,7 +381,7 @@ function sectionPaytable(host: PixiComponentContext, rows: PaytableRow[], title:
   for (let i = 0; i < rows.length; i += cols) {
     const row = new FlexBox({ direction: 'row', align: 'start', gap });
     row.label = 'pt-row';
-    for (const r of rows.slice(i, i + cols)) row.add(paytableCard(host, r, cardW));
+    for (const r of rows.slice(i, i + cols)) row.add(paytableCard(host, r, cardW, amounts));
     row.layout();
     grid.add(row);
   }
@@ -388,7 +389,7 @@ function sectionPaytable(host: PixiComponentContext, rows: PaytableRow[], title:
   return sec;
 }
 
-function paytableCard(_host: PixiComponentContext, r: PaytableRow, w: number): FlexBox {
+function paytableCard(host: PixiComponentContext, r: PaytableRow, w: number, amounts?: boolean): FlexBox {
   const card = new FlexBox({
     direction: 'column',
     align: 'center',
@@ -408,7 +409,7 @@ function paytableCard(_host: PixiComponentContext, r: PaytableRow, w: number): F
     const wr = new FlexBox({ direction: 'row', align: 'center', justify: 'space-between' });
     wr.add(sBody(win.count ? String(win.count) : '', 13.5, S.muted));
     wr.add(new Spacer(), { grow: 1 });
-    wr.add(sValue(`×${win.multiplier}`, 13.5, S.yellow));
+    wr.add(sValue(paytableWin(host, win.multiplier, amounts, '×'), 13.5, S.yellow));
     wins.add(wr);
   }
   card.add(wins);

@@ -123,6 +123,6 @@ describe('createPixiShell — PixiGameShell API-parity facade', () => {
     const shell = createPixiShell(makeConfig());
     const rows = resolveMenu(shell as never);
     expect(rows).toHaveLength(DEFAULT_MENU.length);
-    expect(rows.map((r) => r.kind)).toEqual(['toggle', 'range', 'range', 'separator', 'button']);
+    expect(rows.map((r) => r.kind)).toEqual(['toggle', 'range', 'range', 'toggle', 'separator', 'button']);
   });
 });

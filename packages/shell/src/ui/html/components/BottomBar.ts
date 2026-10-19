@@ -2,7 +2,7 @@ import type { ShellHost } from '@/core/renderer';
 import { effectiveAccent } from '@/core/colors';
 import { icon, type IconName } from '../icons';
 import { BUY_BONUS_ART, BUY_BONUS_SOCIAL_ART, BUY_BONUS_DISABLED_ART } from '../../buy-bonus-art';
-import { bonusBuyLocked } from '@/core/state';
+import { bonusBuyLocked, menuLocked } from '@/core/state';
 import { bonusIconSVG } from '@/core/bonusIcons';
 
 /** A floating labelled money readout (balance/win/bet). */
@@ -299,8 +299,12 @@ function applyBusy(host: ShellHost, bar: HTMLElement): void {
   const i = host.state.availableBets.indexOf(host.state.bet);
   disable('bet-up', lockBet || i >= host.state.availableBets.length - 1);
   disable('bet-down', lockBet || i <= 0);
-  disable('spin', busy && !auto); // keep the STOP disc clickable through autoplay
+  // The disc stays live mid-round — a click speeds the round up (the shell turns that spin into a
+  // skip) — and through autoplay it is the STOP disc. Only a halted run's RESUME disc locks while
+  // busy: it would start autoplay mid-round.
+  disable('spin', busy && !auto && host.state.autoplay.remaining > 0);
   disable('autoplay', busy && !auto); // keep autoplay (stop) clickable through autoplay
+  disable('menu', menuLocked(host.state));
   const betVal = bar.querySelector('[data-ge="bet-value"]') as HTMLElement | null;
   if (betVal) betVal.classList.toggle('ge-disabled', lockBet);
   const buy = bar.querySelector('[data-ge="buybonus"]') as HTMLButtonElement | null;

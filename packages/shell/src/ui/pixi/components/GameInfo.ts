@@ -20,6 +20,7 @@ import { section, paragraph, Spacer } from '../primitives/controls';
 import { BuyBonusBadge } from '../primitives/widgets';
 import { buyFace } from './BottomBar';
 import { PACKAGE_VERSION } from '@/core/version';
+import { paytableWin } from '@/core/format';
 
 /** Game info overlay — modes, controls, paytable, win illustrations, custom sections. */
 export function openGameInfo(host: PixiComponentContext): ShellLayer {
@@ -81,7 +82,7 @@ function renderSection(host: PixiComponentContext, s: GameInfoSection, width: nu
     case 'hotkeys':
       return sectionHotkeys(host, s.title ?? host.t('Hotkeys'), width);
     case 'paytable':
-      return sectionPaytable(host, s.rows, s.title ?? host.t('Paytable'), width);
+      return sectionPaytable(host, s.rows, s.title ?? host.t('Paytable'), width, s.amounts);
     case 'wins':
       return sectionWins(host, s, width);
     case 'custom':
@@ -372,7 +373,7 @@ function keycap(host: PixiComponentContext, label: string): Container {
 }
 
 // ── paytable ───────────────────────────────────────────────────────────────────
-function sectionPaytable(host: PixiComponentContext, rows: PaytableRow[], title: string, width: number): FlexBox {
+function sectionPaytable(host: PixiComponentContext, rows: PaytableRow[], title: string, width: number, amounts?: boolean): FlexBox {
   const sec = section(host, title);
   const inner = width - SECTION_PAD;
   const gap = 10;
@@ -381,7 +382,7 @@ function sectionPaytable(host: PixiComponentContext, rows: PaytableRow[], title:
   const grid = new FlexBox({ direction: 'column', align: 'start', gap });
   for (let i = 0; i < rows.length; i += cols) {
     const row = new FlexBox({ direction: 'row', align: 'start', gap });
-    for (const r of rows.slice(i, i + cols)) row.add(paytableCard(host, r, cardW));
+    for (const r of rows.slice(i, i + cols)) row.add(paytableCard(host, r, cardW, amounts));
     row.layout();
     grid.add(row);
   }
@@ -389,7 +390,7 @@ function sectionPaytable(host: PixiComponentContext, rows: PaytableRow[], title:
   return sec;
 }
 
-function paytableCard(host: PixiComponentContext, r: PaytableRow, w: number): FlexBox {
+function paytableCard(host: PixiComponentContext, r: PaytableRow, w: number, amounts?: boolean): FlexBox {
   const card = new FlexBox({
     direction: 'column',
     align: 'center',
@@ -407,7 +408,7 @@ function paytableCard(host: PixiComponentContext, r: PaytableRow, w: number): Fl
     const wr = new FlexBox({ direction: 'row', align: 'center', justify: 'space-between' });
     wr.add(makeText(win.count ? String(win.count) : '', { size: 13.5, weight: '400', color: host.tokens.plaqueLabel }));
     wr.add(new Spacer(), { grow: 1 });
-    wr.add(makeText(`x${win.multiplier}`, { size: 13.5, weight: '700', color: host.tokens.accent }));
+    wr.add(makeText(paytableWin(host, win.multiplier, amounts), { size: 13.5, weight: '700', color: host.tokens.accent }));
     wins.add(wr);
   }
   card.add(wins);
