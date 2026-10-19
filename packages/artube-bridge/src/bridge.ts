@@ -192,9 +192,10 @@ export class ArtubeBridge {
         this.init = init;
         this.balance = init.balance;
         this.frc = init.frc;
-        // В демо баланс ведём здесь: платформа его не считает.
+        // В демо баланс ведём здесь: платформа его не считает. Ключ — сессия, чтобы
+        // перезагрузка страницы вернула игрока к его же демо-балансу (см. demo.ts).
         if (init.demo) {
-          this.demoWallet = new DemoWallet(this.options.demoBalance ?? init.balance);
+          this.demoWallet = new DemoWallet(this.options.demoBalance ?? init.balance, url.sessionId);
           this.balance = this.demoWallet.balance;
         }
         return init;
