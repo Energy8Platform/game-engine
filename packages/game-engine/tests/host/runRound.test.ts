@@ -70,6 +70,33 @@ describe('runRound', () => {
     expect(onModeExit).not.toHaveBeenCalled();
   });
 
+  it('a first play that fails aborts the spin: onSpinAborted(err), no onSpin/onSpinEnd, still rejects', async () => {
+    const { deps, onSpin } = harness([]);
+    const lost = Object.assign(new Error('lost'), { code: 'ConnectionLost' });
+    deps.play = async () => {
+      throw lost;
+    };
+    const onSpinAborted = vi.fn();
+    const onSpinEnd = vi.fn();
+    await expect(runRound({ ...deps, onSpinAborted, onSpinEnd }, 'spin')).rejects.toBe(lost);
+    expect(onSpinAborted).toHaveBeenCalledWith(lost);
+    expect(onSpin).not.toHaveBeenCalled();
+    expect(onSpinEnd).not.toHaveBeenCalled();
+  });
+
+  it('a drain segment that fails after a presented trigger is not an abort', async () => {
+    const { deps } = harness([{ totalWin: 0, roundId: 'r9', nextActions: ['free_spin'], complete: false }]);
+    const play = deps.play;
+    let n = 0;
+    deps.play = async (a, b, rid) => {
+      if (n++ === 1) throw new Error('mid-drain');
+      return play(a, b, rid);
+    };
+    const onSpinAborted = vi.fn();
+    await expect(runRound({ ...deps, onSpinAborted }, 'buy_bonus')).rejects.toThrow('mid-drain');
+    expect(onSpinAborted).not.toHaveBeenCalled();
+  });
+
   it('buy_bonus + 2 free spins: drains by roundId, fires onModeEnter before 1st FS and onModeExit after last', async () => {
     const { deps, playLog, onSpin, onModeEnter, onModeExit, ack, afterPresent } = harness([
       { totalWin: 0, roundId: 'r9', nextActions: ['free_spin'], complete: false }, // trigger

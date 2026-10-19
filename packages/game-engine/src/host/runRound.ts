@@ -19,6 +19,10 @@ export interface RunRoundDeps<T extends SlotSpinResultBase> {
   afterPresent?(result: T): void;
   /** Once, before the first segment is played (player pressed spin). */
   onSpinStart?(): void;
+  /** The round's FIRST play failed — after `onSpinStart`, before any `onSpin`. The scene started
+   *  spinning on `onSpinStart` and no result will ever stop it; this is its cue to. runRound still
+   *  rejects with the same error afterwards. */
+  onSpinAborted?(err: unknown): void;
   /** Once, after the full drain. */
   onSpinEnd?(last: T, ctx: RenderContext): void;
   /** Fires when a bonus LEVEL becomes active — a fresh push (`resumed=false`) or a return to a
@@ -72,15 +76,23 @@ export async function runRound<T extends SlotSpinResultBase>(
   const modeOf = deps.modeOf ?? ((a: string) => a.toUpperCase());
   const isBonus = deps.isBonusAction ?? (() => false);
 
+  let presented = false; // has the scene been handed any result yet?
   const segment = async (
     a: string,
     roundId: string | undefined,
   ): Promise<{ r: T; ctx: RenderContext }> => {
     const ac = new AbortController();
     deps.beforeSegment?.(ac);
-    const r = await deps.play(a, ctxBet, roundId);
+    let r: T;
+    try {
+      r = await deps.play(a, ctxBet, roundId);
+    } catch (err) {
+      if (!presented) deps.onSpinAborted?.(err);
+      throw err;
+    }
     // ctx carries the ROUND identity (built from the round action), stable across drained segments.
     const ctx = { ...deps.context(action), signal: ac.signal } as RenderContext;
+    presented = true;
     await deps.scene.onSpin(r, ctx);
     deps.ack();
     deps.afterPresent?.(r);

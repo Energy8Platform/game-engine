@@ -36,6 +36,9 @@ export interface SlotShellOptions {
   /** The provider whose BUY BONUS icon the button shows, e.g. `'energy8'` (see the shell's
    *  `BONUS_ICONS`). Omit for the skin's own icon. */
   bonusIcon?: BonusIconName;
+  /** Quote the derived paytable in money (multiplier × the current bet, session currency) instead
+   *  of `x<multiplier>`. The shell computes it each time the page opens, so it follows the bet. */
+  paytableAmounts?: boolean;
   /** Per-game translation map. Keys are the English source strings (from the spec or copy);
    *  values are the translated strings for each language. Merged with the shell's built-in
    *  `LOCALES` catalog — game strings take precedence over the built-in entries for the same key.
@@ -222,7 +225,11 @@ export function toBonusOptions(model: GameModel, t: (s: string) => string = (s) 
 
 /** Build a paytable section from the model's derived paytable view (multipliers per symbol count).
  *  @param t Optional translator applied to symbol names before they enter the shell. */
-function paytableSection(model: GameModel, t: (s: string) => string = (s) => s): GameInfoSection | null {
+function paytableSection(
+  model: GameModel,
+  t: (s: string) => string = (s) => s,
+  amounts = false,
+): GameInfoSection | null {
   const symbols = model.paytable?.symbols ?? [];
   const rows: PaytableRow[] = [];
   for (const s of symbols) {
@@ -236,7 +243,7 @@ function paytableSection(model: GameModel, t: (s: string) => string = (s) => s):
   if (!rows.length) return null;
   // No literal title — the shell renders `s.title ?? host.t('Paytable')`, so the heading is
   // localized (matching how the modes/wins sections rely on the shell's translated fallback).
-  return { type: 'paytable', rows };
+  return amounts ? { type: 'paytable', rows, amounts } : { type: 'paytable', rows };
 }
 
 /** Build a "wins" illustration section sized to the grid; `kind` follows the spec mechanic hint.
@@ -249,6 +256,11 @@ function winsSection(model: GameModel): GameInfoSection | null {
   const { cols, rows } = model.spec.grid;
   const grid = { cols, rows };
   switch (model.spec.mechanic) {
+    case 'lines':
+      // A line game is drawn from its own lines; without them there is nothing true to draw.
+      return model.spec.paylines?.length
+        ? ({ type: 'wins', kind: 'classic', lines: model.spec.paylines, grid } as GameInfoSection)
+        : null;
     case 'cluster':
       return { type: 'wins', kind: 'cluster', minCount: 5, grid } as GameInfoSection;
     case 'ways':
@@ -303,17 +315,19 @@ function orderDisclaimerLast(sections: GameInfoSection[]): GameInfoSection[] {
  * section identity (see `mergeGameInfo`), not wholesale-replaced.
  * @param t Optional translator applied to spec-derived player-facing strings (symbol names, mode titles, etc.).
  * @param tDisclaimer Translation-only resolver for the legal disclaimer body (never socializes); defaults to `t`.
+ * @param paytableAmounts Quote the paytable in money at the current bet (`SlotShellOptions.paytableAmounts`).
  */
 export function defaultGameInfo(
   model: GameModel,
   runtime: ShellRuntime,
   t: (s: string) => string = (s) => s,
   tDisclaimer: (s: string) => string = t,
+  paytableAmounts = false,
 ): GameInfoContent {
   const sections: GameInfoSection[] = [];
   const wins = winsSection(model);
   if (wins) sections.push(wins);
-  const pay = paytableSection(model, t);
+  const pay = paytableSection(model, t, paytableAmounts);
   if (pay) sections.push(pay);
   const modes = modesSection(model, t);
   if (modes) sections.push(modes);
@@ -482,7 +496,7 @@ export function buildShellConfig(
   // pre-translated before they reach the shell renderer.
   // Cast to { sections?: GameInfoSection[] } (pixi-widened) so downstream map/filter calls work
   // against the pixi section union. Host-derived sections never set `node`, so the widening is safe.
-  let gameInfo: { sections?: GameInfoSection[] } = mergeGameInfo(defaultGameInfo(model, runtime, t, tDisclaimer), authored) as { sections?: GameInfoSection[] };
+  let gameInfo: { sections?: GameInfoSection[] } = mergeGameInfo(defaultGameInfo(model, runtime, t, tDisclaimer, opts.paytableAmounts), authored) as { sections?: GameInfoSection[] };
   // The DISCLAIMER is required legal copy and must be shown VERBATIM — never socialized (its
   // wording is mandated, and word-swaps like "bet → play" would corrupt the legal text).
   if (isSocial) {

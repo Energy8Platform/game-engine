@@ -2,7 +2,7 @@ import type { Shell } from '@energy8platform/shell/pixi';
 
 /**
  * Per-game persistence of the player's shell preferences — turbo level and every menu value
- * (sound, music, sfx, and any custom row) — in `localStorage`.
+ * (sound, music, sfx, spacebar, and any custom row) — in `localStorage`.
  *
  * Opt-in via `createSlotGame({ persistSettings })`. A game that doesn't ask for it behaves exactly
  * as before: nothing is read, nothing is written, no storage is touched.

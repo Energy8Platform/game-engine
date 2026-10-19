@@ -54,6 +54,28 @@ describe('createConnectionRecovery', () => {
     expect(calls.filter((c) => c === 'reconnecting')).toHaveLength(1);
   });
 
+  it('возврат без открытого раунда перечитывает баланс: потерянный спин платформа могла рассчитать', async () => {
+    const { rec, calls } = harness({
+      refreshBalance: async () => {
+        calls.push('balance');
+      },
+    });
+    await rec.onState({ status: 'lost' });
+    await rec.onState({ status: 'restored' });
+    expect(calls).toEqual(['halt', 'reconnecting', 'reset', 'dismiss', 'balance']);
+  });
+
+  it('упавшее перечитывание баланса не всплывает экраном', async () => {
+    const { rec, calls } = harness({
+      refreshBalance: async () => {
+        throw new Error('nope');
+      },
+    });
+    await rec.onState({ status: 'lost' });
+    await rec.onState({ status: 'restored' });
+    expect(calls).not.toContain('error');
+  });
+
   it('исчерпанный реконнект — это уже не «сейчас вернёмся»', () => {
     const { rec, calls } = harness();
     rec.onState({ status: 'lost', code: 'ConnectionGone' });

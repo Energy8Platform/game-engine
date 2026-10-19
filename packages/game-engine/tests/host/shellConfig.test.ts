@@ -458,6 +458,22 @@ describe('mergeGameInfo', () => {
     expect(winsOf()).toEqual([]);
   });
 
+  it('линейная игра со своими линиями получает wins/classic из spec.paylines', () => {
+    const paylines = [[1, 1, 1, 1, 1], [0, 1, 2, 1, 0]];
+    const m = { ...model, spec: { ...model.spec, paylines } } as unknown as GameModel;
+    const wins = (buildShellConfig({}, m, { balance: 0, mode: 'base' }).gameInfo.sections ?? [])
+      .filter((s) => s.type === 'wins');
+    expect(wins).toEqual([{ type: 'wins', kind: 'classic', lines: paylines, grid: { cols: 5, rows: 3 } }]);
+  });
+
+  it('paytableAmounts переводит выведенный пейтейбл в деньги (считает shell от текущей ставки)', () => {
+    const pay = (opts: { paytableAmounts?: boolean }) =>
+      (buildShellConfig(opts, model, { balance: 0, mode: 'base' }).gameInfo.sections ?? [])
+        .find((s) => s.type === 'paytable') as { amounts?: boolean } | undefined;
+    expect(pay({})?.amounts).toBeUndefined();
+    expect(pay({ paytableAmounts: true })?.amounts).toBe(true);
+  });
+
   it('остальной экран правил остаётся, даже когда иллюстрации выигрышей нет', () => {
     const sections = buildShellConfig({}, model, {
       balance: 0, mode: 'base', disclaimerLines: ['Malfunction voids all wins.'],

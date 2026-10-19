@@ -73,6 +73,21 @@ describe('attachSettingsStore against a live shell', () => {
     expect(shell.getVolume('music')).toBe(0.25);
   });
 
+  it('the Spacebar switch round-trips, and a restore reaches a listener subscribed before it', () => {
+    // createSlotGame subscribes its audio mapping BEFORE attaching the store: a restore is just a
+    // settingChange, and one fired before anyone listened left the game audible under a muted menu.
+    const storage = memStorage({ [KEY]: JSON.stringify({ menu: { sound: false, spacebar: false } }) });
+    const shell = createGameShell(cfg());
+    const heard: unknown[] = [];
+    shell.on('settingChange', (c) => heard.push(c));
+    attachSettingsStore(shell, { key: 'my-game', storage, maxTurbo: 3 });
+
+    expect(heard).toEqual([{ key: 'sound', value: false }, { key: 'spacebar', value: false }]);
+    expect(shell.getMenuValue('spacebar')).toBe(false);
+    shell.setMenuValue('spacebar', true);
+    expect(JSON.parse(storage.getItem(KEY)!).menu.spacebar).toBe(true);
+  });
+
   it('a real menu change on the shell lands in storage', () => {
     const storage = memStorage();
     const shell = createGameShell(cfg());

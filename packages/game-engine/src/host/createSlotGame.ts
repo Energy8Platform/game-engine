@@ -384,6 +384,22 @@ export async function createSlotGame<T extends SlotSpinResultBase = SlotSpinResu
     // The game may swap in its own shell (a custom renderer over the same core) via shellFactory;
     // default is the built-in Pixi shell. The host drives whichever it gets through the Shell contract.
     shell = (opts.shellFactory ?? createPixiShell)(pixiShellCfg);
+    // Shell settings → engine state. Sound/volume map onto the AudioManager. Subscribed BEFORE the
+    // settings store restores below: a restore is a `settingChange` like any other, and one fired
+    // into a host that isn't listening yet left the menu saying "muted" over a game playing sound.
+    shell.on('settingChange', ({ key, value }: { key: string; value: unknown }) => {
+      switch (key) {
+        case 'sound':
+          value ? game.audio.unmuteAll() : game.audio.muteAll();
+          break;
+        case 'music':
+          game.audio.setVolume('music', Number(value));
+          break;
+        case 'sfx':
+          game.audio.setVolume('sfx', Number(value));
+          break;
+      }
+    });
     // Opt-in, per game, and BEFORE `currentTurbo` is seeded from `shell.state.turbo` below — the
     // restored level has to be in place by the time the host reads it, or the first spin would run
     // at the default speed while the bar shows the remembered one. `features.turbo` is passed as the
@@ -418,21 +434,6 @@ export async function createSlotGame<T extends SlotSpinResultBase = SlotSpinResu
     });
     // Double-tap-to-skip is a game-level option (default on), set once via createSlotGame({ skipGesture }).
     const skipEnabled = opts.skipGesture ?? true;
-
-    // Shell settings → engine state. Sound/volume map onto the AudioManager.
-    shell.on('settingChange', ({ key, value }: { key: string; value: unknown }) => {
-      switch (key) {
-        case 'sound':
-          value ? game.audio.unmuteAll() : game.audio.muteAll();
-          break;
-        case 'music':
-          game.audio.setVolume('music', Number(value));
-          break;
-        case 'sfx':
-          game.audio.setVolume('sfx', Number(value));
-          break;
-      }
-    });
 
     // Overlay layer sits ABOVE the shell (the shell already mounted its root onto the uiLayer;
     // adding ours afterwards keeps it on top). It eats pointer events while open so shell controls
@@ -571,6 +572,10 @@ export async function createSlotGame<T extends SlotSpinResultBase = SlotSpinResu
       dismiss: () => shell!.closeModal(),
       getState: async () => (await ps?.getState()) ?? null,
       drain: (snapshot) => recoverRound(snapshot),
+      refreshBalance: async () => {
+        const b = await ps?.sdk?.getBalance();
+        if (b) balanceGate.onBalance(b.balance);
+      },
       onError: showPlayError,
       isBlocked: () => playErrorOpen,
     });
@@ -585,14 +590,20 @@ export async function createSlotGame<T extends SlotSpinResultBase = SlotSpinResu
     // Double-tap skip: a double-tap on the play area aborts the current segment (the scene collapses
     // to its final visual via ctx.signal) and notifies the scene's onSkip. Gated by the shell's
     // skip-gesture setting (`skipEnabled`) and only active while a round is presenting.
+    const skipSegment = () => {
+      currentSegmentAbort?.abort();
+      gameScene()?.onSkip?.();
+    };
     const { createDoubleTapSkip } = await import('./skipGesture');
     const skip = createDoubleTapSkip({
       enabled: () => skipEnabled,
       active: () => presenting,
-      onSkip: () => {
-        currentSegmentAbort?.abort();
-        gameScene()?.onSkip?.();
-      },
+      onSkip: skipSegment,
+    });
+    // Spin (disc or Space) pressed mid-round: the shell sends `skip` instead of `spin`. Same abort
+    // as the double-tap, but not behind `skipGesture` — that option is about taps on the play area.
+    shell.on('skip', () => {
+      if (presenting) skipSegment();
     });
     // Listen for taps on the scene root (game.worldRoot — the scaled scene container). The shell
     // lives on the sibling uiLayer, so its bar taps never reach worldRoot — taps here are the play area.
@@ -764,6 +775,8 @@ export async function createSlotGame<T extends SlotSpinResultBase = SlotSpinResu
             winReporter.open(); // the scene may now grow WIN per cascade step
           },
           onSpinStart: () => scene.onSpinStart?.(),
+          // The first play failed (lost link, refused bet): stop the reels onSpinStart set going.
+          onSpinAborted: (err) => scene.onSpinAborted?.(err),
           onSpinEnd: (last, ctx) => scene.onSpinEnd?.(last, ctx),
           afterPresent: (r) => {
             // WIN readout = THIS spin's win (cumulative delta); the cumulative total goes to the
@@ -784,6 +797,9 @@ export async function createSlotGame<T extends SlotSpinResultBase = SlotSpinResu
         .finally(() => {
           presenting = false;
           winReporter.close(); // also closes the window when a segment threw mid-flight
+          // A failed play never reached afterPresent, so the gate would hold every later credit —
+          // the reconnect's balance for a spin the platform settled without us included.
+          balanceGate.afterPresent();
           shell!.setBusy(false);
         });
     };

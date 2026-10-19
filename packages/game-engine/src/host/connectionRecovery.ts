@@ -16,7 +16,8 @@
  *  - **lost + `ConnectionGone`** — the bridge gave up retrying. That is terminal and honest about
  *    it: a Reload modal, not a "Reconnecting…" that will never resolve.
  *  - **restored** — reset autoplay, take the overlay down, and finish what the drop interrupted:
- *    if the platform still holds an open round, play it out silently to settlement. No modal asks
+ *    if the platform still holds an open round, play it out to settlement; if it holds none,
+ *    re-read the balance — a lost spin the platform settled on its own still moved money. No modal asks
  *    the player to confirm this — it is their own round, they already paid for it, and an extra
  *    screen here is the very thing the remark objected to.
  *
@@ -58,6 +59,12 @@ export interface ConnectionRecoveryDeps {
   getState(): Promise<PlayResultData | null>;
   /** Play a recovered round out to settlement (the host's `resumeDrain`). */
   drain(snapshot: PlayResultData): Promise<void>;
+  /**
+   * Re-read the wallet and paint it. Called when there is no open round to finish — which is also
+   * the case of a spin the drop cut off that the platform settled anyway (a one-shot PlayRound):
+   * the money moved, and the bar must say so even though no result ever reached the game.
+   */
+  refreshBalance?(): Promise<void>;
   /** Report a recovery that itself failed (the host routes it to its play-error modal). */
   onError(err: unknown): void;
   /**
@@ -89,7 +96,14 @@ export function createConnectionRecovery(deps: ConnectionRecoveryDeps): Connecti
       // is back in the game, and the next play resolves the open round (or refuses it, loudly).
       return;
     }
-    if (!snapshot) return;
+    if (!snapshot) {
+      try {
+        await deps.refreshBalance?.();
+      } catch {
+        // Same as above: the next balance push or play brings the truth; no screen for this.
+      }
+      return;
+    }
     try {
       await deps.drain(snapshot);
     } catch (err) {

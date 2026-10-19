@@ -104,6 +104,10 @@ export interface SlotSceneController<T extends SlotSpinResultBase = SlotSpinResu
   onCreate(api: SceneApi): void;
   /** Fires once per round when the player presses spin (before the network result). */
   onSpinStart(): void;
+  /** The round never got a result: its first play failed (a dropped connection, a refused bet)
+   *  after `onSpinStart`. Stop whatever `onSpinStart` set going — the reels spin forever otherwise.
+   *  `onSpinEnd` does NOT follow. Optional; the host shows the error itself. */
+  onSpinAborted?(err: unknown): void;
   /** Render ONE segment (a spin or one free spin). Await your own pacing. */
   onSpin(result: T, ctx: RenderContext): Promise<void>;
   /** Fires when a bonus LEVEL begins. With nested bonuses this fires once per level (free spins,
