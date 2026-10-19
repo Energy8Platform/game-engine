@@ -3,7 +3,7 @@
 #
 # `@energy8platform/artube-server/vite` copies THIS FILE verbatim into the
 # `dist-artube-server/` artifact it emits on `BUILD_TARGET=artube vite build`,
-# next to a generated `index.js`, a `package.json` and the game's `game.spin`.
+# next to a generated `server.js`, a `package.json` and the game's `game.spin`.
 # One file, so the template a studio reads here and the Dockerfile a studio
 # actually builds can never drift.
 #
@@ -62,7 +62,7 @@ RUN node -e " \
   console.log(\`[artube-server] engine binary OK: \${found}\`); \
 "
 
-COPY index.js ./
+COPY server.js ./
 COPY game.spin ./game.spin
 EXPOSE 80
-CMD ["node", "index.js"]
+CMD ["node", "server.js"]

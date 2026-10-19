@@ -20,6 +20,25 @@ import type { Plugin } from 'vite';
 import { resolveSpinPath, type ArtubePluginOptions } from './devPlugin.js';
 import { DEFAULT_SERVER_OUT_DIR, emitServerArtifact } from './emitServer.js';
 
+/**
+ * `build.js` at the root of the FRONTEND bundle (`dist-artube/`). Artube's frontend pipeline runs
+ * it from that directory: it copies `index.html` and `assets/` into `dist/`, the folder their CI
+ * deploys. Verbatim from Artube's publishing instructions — CommonJS, so it runs under plain
+ * `node build.js` with no package.json beside it.
+ */
+export const ARTUBE_FRONTEND_BUILD_JS = `const fs = require('fs');
+const path = require('path');
+
+const OUT_DIR = 'dist';
+fs.mkdirSync(OUT_DIR, { recursive: true });
+fs.copyFileSync('index.html', path.join(OUT_DIR, 'index.html'));
+
+// assets/ -> dist/assets/
+fs.cpSync('assets', path.join(OUT_DIR, 'assets'), { recursive: true });
+
+console.log(\`Built \${OUT_DIR}/index.html\`);
+`;
+
 export function artubeBuildPlugin(opts: ArtubePluginOptions = {}): Plugin {
   let root = process.cwd();
 
@@ -29,6 +48,10 @@ export function artubeBuildPlugin(opts: ArtubePluginOptions = {}): Plugin {
 
     configResolved(config) {
       root = config.root;
+    },
+
+    generateBundle() {
+      this.emitFile({ type: 'asset', fileName: 'build.js', source: ARTUBE_FRONTEND_BUILD_JS });
     },
 
     /**

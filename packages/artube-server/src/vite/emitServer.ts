@@ -15,7 +15,7 @@
  *
  *     dist-artube-server/
  *       Dockerfile      ← copied verbatim from this package's Dockerfile.template
- *       index.js        ← generated entry point, plain JS: no build step in the image
+ *       server.js       ← generated entry point, plain JS: no build step in the image
  *       package.json    ← declares @energy8platform/artube-server, nothing else
  *       game.spin       ← byte-for-byte copy of the game's own math
  *       README.md       ← what to do with the directory
@@ -115,7 +115,8 @@ export function readGameName(root: string): string {
 
 /**
  * The generated entry point. This is the file `Dockerfile.template`'s
- * `CMD ["node", "index.js"]` runs, and it is deliberately the *shortest*
+ * `CMD ["node", "server.js"]` runs — `server.js`, the name Artube's server
+ * repos use, and it is deliberately the *shortest*
  * program that satisfies the deployment contract: read the platform's
  * environment, listen, and shut down cleanly on the signals Kubernetes sends.
  *
@@ -172,7 +173,7 @@ export function renderPackageJson(opts: PackageJsonOptions): string {
         private: true,
         type: 'module',
         engines: { node: '>=20' },
-        scripts: { start: 'node index.js' },
+        scripts: { start: 'node server.js' },
         dependencies: { '@energy8platform/artube-server': opts.serverSpec },
       },
       null,
@@ -203,7 +204,7 @@ ${opts.outDirName}/
   Dockerfile     the deployment contract: port 80, /livez + /healthz, and a
                  build-time check that the e8-server engine binary really got
                  installed (see below)
-  index.js       the entry point — plain JS, so the image has no build step
+  server.js      the entry point — plain JS, so the image has no build step
   package.json   one dependency: @energy8platform/artube-server@${opts.serverSpec}
   ${ARTIFACT_SPIN_NAME}      the game's math, byte-for-byte
 \`\`\`
@@ -305,7 +306,7 @@ export function emitServerArtifact(opts: EmitOptions): EmitResult {
   }
 
   copyFileSync(resolvePackageFile('Dockerfile.template'), join(outDir, 'Dockerfile'));
-  writeFileSync(join(outDir, 'index.js'), renderEntry());
+  writeFileSync(join(outDir, 'server.js'), renderEntry());
   writeFileSync(join(outDir, 'package.json'), renderPackageJson({ gameName, serverSpec }));
   writeFileSync(
     join(outDir, 'README.md'),
@@ -314,7 +315,7 @@ export function emitServerArtifact(opts: EmitOptions): EmitResult {
 
   return {
     outDir,
-    files: ['Dockerfile', 'index.js', 'package.json', ARTIFACT_SPIN_NAME, 'README.md'],
+    files: ['Dockerfile', 'server.js', 'package.json', ARTIFACT_SPIN_NAME, 'README.md'],
     serverSpec,
     spinSource: opts.spinPath,
   };

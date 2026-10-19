@@ -13,7 +13,7 @@
  * Node-side devDependency — nothing here is ever bundled into the game.
  */
 export { artubePlugin } from './plugin.js';
-export { artubeBuildPlugin } from './buildPlugin.js';
+export { artubeBuildPlugin, ARTUBE_FRONTEND_BUILD_JS } from './buildPlugin.js';
 /**
  * Artube's own branded loading screen, VENDORED from `@artube/loader` 2.1.0 —
  * see the provenance header in `partnerLoader.ts`. It lives here, and not in a

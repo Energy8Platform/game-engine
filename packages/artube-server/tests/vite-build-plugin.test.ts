@@ -24,7 +24,9 @@ import {
   readGameName,
   ARTIFACT_SPIN_NAME,
   DEFAULT_SERVER_OUT_DIR,
+  ARTUBE_FRONTEND_BUILD_JS,
 } from '../src/vite/index.js';
+import { execFileSync } from 'node:child_process';
 
 const dirs: string[] = [];
 afterEach(() => {
@@ -66,7 +68,7 @@ describe('the emitted artifact', () => {
     const root = gameRoot();
     runBuild(artubeBuildPlugin(), root);
     const out = join(root, DEFAULT_SERVER_OUT_DIR);
-    for (const f of ['Dockerfile', 'index.js', 'package.json', ARTIFACT_SPIN_NAME, 'README.md']) {
+    for (const f of ['Dockerfile', 'server.js', 'package.json', ARTIFACT_SPIN_NAME, 'README.md']) {
       expect(existsSync(join(out, f)), `${f} must be emitted`).toBe(true);
     }
   });
@@ -85,14 +87,14 @@ describe('the emitted artifact', () => {
     const out = join(root, DEFAULT_SERVER_OUT_DIR);
 
     const dockerfile = readFileSync(join(out, 'Dockerfile'), 'utf8');
-    expect(dockerfile).toContain('CMD ["node", "index.js"]');
+    expect(dockerfile).toContain('CMD ["node", "server.js"]');
     // The `rootDir`/`outDir` trap only exists because the image compiled the
     // entry point. No compile, no trap — and no `AS build` stage to have one in.
     expect(dockerfile).not.toMatch(/AS build/i);
     expect(dockerfile).not.toMatch(/^RUN npm run build/m);
     expect(dockerfile).not.toContain('COPY --from=');
 
-    const entry = readFileSync(join(out, 'index.js'), 'utf8');
+    const entry = readFileSync(join(out, 'server.js'), 'utf8');
     expect(entry).toContain("from '@energy8platform/artube-server'");
     expect(entry).toContain('loadConfigFromEnv()');
     // Nothing about a particular environment is baked in — the same image is
@@ -156,7 +158,7 @@ describe('the emitted artifact', () => {
   it('honours a custom out dir', () => {
     const root = gameRoot();
     runBuild(artubeBuildPlugin({ serverOutDir: 'server-out' }), root);
-    expect(existsSync(join(root, 'server-out', 'index.js'))).toBe(true);
+    expect(existsSync(join(root, 'server-out', 'server.js'))).toBe(true);
     expect(existsSync(join(root, DEFAULT_SERVER_OUT_DIR))).toBe(false);
   });
 
@@ -172,6 +174,26 @@ describe('the emitted artifact', () => {
     expect(() => runBuild(artubeBuildPlugin(), root)).toThrow(
       /spin math not found[\s\S]*script\.spin/,
     );
+  });
+});
+
+describe('the frontend bundle', () => {
+  it('gets build.js at its root, which copies index.html + assets/ into dist/', () => {
+    const emitted: any[] = [];
+    (artubeBuildPlugin().generateBundle as any).call({ emitFile: (f: unknown) => emitted.push(f) });
+    expect(emitted).toEqual([{ type: 'asset', fileName: 'build.js', source: ARTUBE_FRONTEND_BUILD_JS }]);
+
+    // Run it the way Artube's pipeline does: `node build.js` inside the bundle directory.
+    const bundle = mkdtempSync(join(tmpdir(), 'artube-front-'));
+    dirs.push(bundle);
+    writeFileSync(join(bundle, 'index.html'), '<!doctype html>');
+    mkdirSync(join(bundle, 'assets', 'img'), { recursive: true });
+    writeFileSync(join(bundle, 'assets', 'img', 'a.png'), 'png');
+    writeFileSync(join(bundle, 'build.js'), ARTUBE_FRONTEND_BUILD_JS);
+    const out = execFileSync(process.execPath, ['build.js'], { cwd: bundle, encoding: 'utf8' });
+    expect(out).toContain('Built dist/index.html');
+    expect(readFileSync(join(bundle, 'dist', 'index.html'), 'utf8')).toBe('<!doctype html>');
+    expect(readFileSync(join(bundle, 'dist', 'assets', 'img', 'a.png'), 'utf8')).toBe('png');
   });
 });
 

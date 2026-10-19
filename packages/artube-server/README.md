@@ -44,10 +44,15 @@ production without anyone noticing. The Vite plugin already knows that path
 (it hands it to the dev backend on every `npm run dev:artube`), so the build
 half now writes the whole deployable:
 
+The frontend bundle (`dist-artube/`) gets one file from the plugin too:
+`build.js`, Artube's own publishing script. Their frontend pipeline runs
+`node build.js` in the bundle, which copies `index.html` and `assets/` into
+the `dist/` folder it deploys.
+
 ```
 dist-artube-server/
   Dockerfile      ← this package's Dockerfile.template, copied verbatim
-  index.js        ← generated entry point, plain JS
+  server.js       ← generated entry point, plain JS
   package.json    ← one dependency: @energy8platform/artube-server
   game.spin       ← the game's math, byte-for-byte
   README.md       ← what to do with the directory
@@ -106,12 +111,12 @@ already names the published version, and `serverSpec` becomes unnecessary.
 
 ## Usage: a hand-written entry point
 
-The emitted `index.js` is eight lines, and this is what they are. Write them
+The emitted `server.js` is eight lines, and this is what they are. Write them
 yourself if you are assembling a server repo by hand instead of using the
 plugin's artifact:
 
 ```ts
-// index.ts — or just index.js, and skip the compile
+// server.ts — or just server.js, and skip the compile
 import { createArtubeServer, loadConfigFromEnv } from '@energy8platform/artube-server';
 
 const config = loadConfigFromEnv();
@@ -130,7 +135,7 @@ hands over (see the table below) and throws with the missing variable's name
 if a required one is absent — fail fast on a broken deploy, not on the first
 request.
 
-> If you do compile it, `Dockerfile.template`'s `CMD ["node", "index.js"]` no
+> If you do compile it, `Dockerfile.template`'s `CMD ["node", "server.js"]` no
 > longer matches — point it at whatever your build actually emits, and check
 > with `ls` before shipping. (This is the `rootDir`/`outDir` mismatch the
 > template used to have to warn about at length; it only exists on the
@@ -236,7 +241,7 @@ is an escape hatch to stage the upgrade rather than a long-term fix.
 
 - `Dockerfile.template` — emitted as `dist-artube-server/Dockerfile` by the
   build plugin, or copied to a server repo's root as `Dockerfile` by hand. A
-  single stage: no TypeScript build, `CMD ["node", "index.js"]`. The container
+  single stage: no TypeScript build, `CMD ["node", "server.js"]`. The container
   **listens on port 80** (`EXPOSE 80`) — the platform's Kubernetes ingress
   expects exactly that.
 - There is no `package-lock.json` in the emitted artifact (it cannot be
