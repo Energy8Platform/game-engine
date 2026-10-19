@@ -58,6 +58,10 @@ export interface GameSpec {
   actions: Record<string, ActionSpec>;
   /** Open hint for codegen/UI: 'cascade' | 'cluster' | 'ways' | 'lines' | … */
   mechanic?: string;
+  /** The paylines of a `mechanic: 'lines'` game: one array per line, the row (0 = top) it takes in
+   *  each column, so every line has `grid.cols` entries in `0..grid.rows-1`. Drives the Game Info
+   *  "Paylines" illustration; the math keeps its own copy in the script. */
+  paylines?: number[][];
   /**
    * Lua script key for the exported E8 `config.json`. Default `"script.lua"`, which the platform
    * resolves to `games/{id}/script.lua`. Override only when the script lives at a custom S3 key.

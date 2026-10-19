@@ -16,6 +16,14 @@ describe('validateSpec', () => {
   it('accepts a valid spec', () => {
     expect(() => validateSpec(base())).not.toThrow();
   });
+  it('accepts paylines that fit the grid, rejects ones that do not', () => {
+    const s = base(); s.paylines = [[1, 1, 1], [0, 1, 2]];
+    expect(() => validateSpec(s)).not.toThrow();
+    s.paylines = [[1, 1]]; // too short for 3 columns
+    expect(() => validateSpec(s)).toThrow(/paylines\[0\]/);
+    s.paylines = [[0, 1, 3]]; // row 3 on a 3-row grid
+    expect(() => validateSpec(s)).toThrow(/paylines/);
+  });
   it('rejects duplicate symbol ids', () => {
     const s = base(); s.symbols.push({ id: 'A', kind: 'low', pay: { 3: 2 } });
     expect(() => validateSpec(s)).toThrow(GameSpecError);

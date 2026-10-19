@@ -12,6 +12,14 @@ export function validateSpec(spec: GameSpec): void {
   if (spec.maxWin <= 0) throw new GameSpecError('spec.maxWin must be > 0');
   if (spec.grid.cols <= 0 || spec.grid.rows <= 0) throw new GameSpecError('spec.grid dimensions must be > 0');
 
+  for (const [i, line] of (spec.paylines ?? []).entries()) {
+    if (line.length !== spec.grid.cols || line.some((r) => !Number.isInteger(r) || r < 0 || r >= spec.grid.rows)) {
+      throw new GameSpecError(
+        `spec.paylines[${i}] must list one row per column (${spec.grid.cols}), each in 0..${spec.grid.rows - 1}`,
+      );
+    }
+  }
+
   if (!spec.betLevels.length) throw new GameSpecError('spec.betLevels must be non-empty');
   for (let i = 1; i < spec.betLevels.length; i++) {
     if (spec.betLevels[i] <= spec.betLevels[i - 1]) {
