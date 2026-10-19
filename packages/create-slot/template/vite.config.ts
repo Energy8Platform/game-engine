@@ -91,10 +91,9 @@ export default async () => {
       // `dist-stake`, `dist-artube`. `build:artube` wipes its folders first so a previous build's
       // stale hashed assets don't ride along to the CDN.
       //
-      // CONSEQUENCE: Artube's CI pipeline deploys the repo's `dist` folder (their hosting/devops
-      // docs). A game built with `build:artube` therefore needs that pipeline pointed at
-      // `dist-artube` — change the job's artifact path, or copy the folder in CI. That is the
-      // accepted trade for keeping the two targets visibly separate.
+      // Artube's CI pipeline deploys the frontend repo's `dist` folder (their hosting/devops docs).
+      // `dist-artube` carries their `build.js` (emitted by artubePlugin): commit its contents into
+      // the frontend repo, and the pipeline's `node build.js` copies index.html + assets/ into `dist`.
       ...(isStake ? { build: { outDir: 'dist-stake' } } : {}),
       ...(isArtube ? { build: { outDir: 'dist-artube' } } : {}),
       plugins,

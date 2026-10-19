@@ -36,14 +36,13 @@ export function genPackageJson(a: Answers, v: DepVersions): string {
     // `dist-artube-server` (emitted by artubePlugin's build half — with this game's `.spin` in it).
     // Both are wiped first so a previous build's stale hashed assets can't ride along to the CDN.
     //
-    // CONSEQUENCE: Artube's CI pipeline deploys the repo's `dist` folder, so point the pipeline at
-    // `dist-artube` (change the job's artifact path, or copy the folder in CI). That is the accepted
-    // trade for keeping the targets separate.
+    // `dist-artube` carries Artube's `build.js` (artubePlugin emits it): its contents go into the
+    // frontend repo, and the pipeline's `node build.js` copies index.html + assets/ into `dist`.
     scripts['dev:artube'] = 'BUILD_TARGET=artube vite';
     scripts['build:artube'] =
       'rm -rf dist-artube dist-artube-server && BUILD_TARGET=artube vite build';
     scripts['bundle:artube'] =
-      `rm -f ${a.id}-artube.zip && npm run build:artube && cd dist-artube && zip -r ../${a.id}-artube.zip . && cd .. && echo 'Artube artifacts: dist-artube/ (point the CI pipeline here) + ${a.id}-artube.zip, and dist-artube-server/ (docker build it)'`;
+      `rm -f ${a.id}-artube.zip && npm run build:artube && cd dist-artube && zip -r ../${a.id}-artube.zip . && cd .. && echo 'Artube artifacts: dist-artube/ (frontend repo contents, with build.js) + ${a.id}-artube.zip, and dist-artube-server/ (docker build it)'`;
   }
   const pkg = {
     name: a.id,

@@ -50,11 +50,11 @@ exactly as it will in production — a plain \`npm run dev\` would answer spins 
 **Deployment: \`npm run build:artube\` produces BOTH deployables.**
 
 - \`dist-artube/\` — the frontend. Its own folder (like \`dist-stake/\`), so no target can silently
-  ship another target's bytes. **Artube's CI pipeline deploys the repo's \`dist\` folder**, so a game
-  built this way needs its pipeline pointed at \`dist-artube\` — change the job's artifact path, or
-  copy the folder in CI. That is the accepted trade for keeping the targets visibly separate.
+  ship another target's bytes. It carries Artube's \`build.js\`: commit the folder's contents into the
+  frontend repo, and Artube's pipeline runs \`node build.js\` there, which copies \`index.html\` and
+  \`assets/\` into the \`dist\` folder it deploys.
 - \`dist-artube-server/\` — the backend, emitted by the same \`artubePlugin\` (its \`apply: 'build'\`
-  half). It contains this game's \`.spin\` copied byte-for-byte, a plain-JS \`index.js\`, a
+  half). It contains this game's \`.spin\` copied byte-for-byte, a plain-JS \`server.js\`, a
   \`package.json\` pinning \`@energy8platform/artube-server\`, and a \`Dockerfile\`. \`docker build\` it
   as-is, or commit its contents into the server repo. The plugin does this because it already knows
   the spin path — the alternative was a human copying the math between repos, which is how a
@@ -131,9 +131,10 @@ The core lifecycle hooks are REQUIRED (empty bodies are fine where there's nothi
 - \`onEnterMode(trigger, ctx)\` / \`onExitMode(last, ctx)\` — a mode/bonus begins / ends (switch bgm here).
 - \`onSpinEnd(result, ctx)\` — the round fully drained; controls unlocked, settle to idle.
 
-Optional reactions: \`onBetChanged\`, \`onTurboChanged\`, \`onAutoplayChanged\`, \`onSkip\` (double-tap
-skip — collapse the animation to its final state; \`ctx.signal\` is aborted), \`onPause\`/\`onResume\`
-(tab focus). \`ctx\` = \`{ bet, action, mode, formatAmount(v), turbo, signal }\`. The scene NEVER calls
+Optional reactions: \`onBetChanged\`, \`onTurboChanged\`, \`onAutoplayChanged\`, \`onSkip\` (double-tap,
+or SPIN/Space pressed mid-round — collapse the animation to its final state; \`ctx.signal\` is
+aborted), \`onSpinAborted(err)\` (the round's first play failed after \`onSpinStart\` — stop whatever
+it started; no \`onSpinEnd\` follows), \`onPause\`/\`onResume\` (tab focus). \`ctx\` = \`{ bet, action, mode, formatAmount(v), turbo, signal }\`. The scene NEVER calls
 play/ack/roundId, never touches the balance readout, and never runs the FS loop — a bonus is one round
 the host drains segment-by-segment. The WIN readout is the host's too (cleared at spin start, set
 post-onSpin); the ONE exception is \`api.shell.reportWin\` for a step-by-step cascade climb, which the
