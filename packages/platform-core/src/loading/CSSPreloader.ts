@@ -29,6 +29,10 @@ interface PreloaderState {
   startedAt: number;
   /** Ms after mount before the game may take over — see {@link brandGateDelay}. */
   gateMs: number;
+  /** The player skipped the intro (`handle.skipped`): the brand gate is lifted. */
+  skipped: boolean;
+  /** Releases a pending brand-gate wait early — set while one is running. */
+  gateRelease: (() => void) | null;
   showPercentage: boolean;
   tapToStart: boolean;
   tapToStartText: string;
@@ -53,7 +57,7 @@ function clampProgress(p: number): number {
  * once that window has passed, so a slow boot pays nothing.
  */
 function brandGateDelay(): number {
-  if (!state) return 0;
+  if (!state || state.skipped) return 0;
   const elapsed = Date.now() - state.startedAt;
   return Math.max(0, state.gateMs - elapsed);
 }
@@ -173,6 +177,8 @@ ${SPLASH_CSS}
     gateMs:
       Math.max(withSplash ? SPLASH_DURATION_MS : 0, variant.introMs ?? 0) +
       BRAND_FLOOR_MS,
+    skipped: false,
+    gateRelease: null,
     showPercentage: config?.showPercentage === true,
     tapToStart: config?.tapToStart !== false,
     tapToStartText: config?.tapToStartText ?? 'TAP TO START',
@@ -182,6 +188,12 @@ ${SPLASH_CSS}
     tapHandler: null,
     removed: false,
   };
+  const own = state;
+  void handle?.skipped?.then(() => {
+    if (state !== own) return; // a later preloader replaced this one
+    own.skipped = true;
+    own.gateRelease?.();
+  });
 }
 
 export function setCSSPreloaderProgress(progress: number): void {
@@ -234,7 +246,10 @@ export function waitCSSPreloaderTap(): Promise<void> {
     // between the splash and the game when tapToStart is false; without it a
     // fast boot would cut to gameplay while the splash was still animating.
     const gates: Promise<unknown>[] = [
-      new Promise<void>((r) => setTimeout(r, brandGateDelay())),
+      new Promise<void>((r) => {
+        state!.gateRelease = r; // the intro's skip lifts it early
+        setTimeout(r, brandGateDelay());
+      }),
     ];
 
     // Gate 2 — the player's tap, when one is required.

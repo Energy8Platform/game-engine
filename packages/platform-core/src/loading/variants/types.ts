@@ -12,6 +12,9 @@ export interface PreloaderVariantHandle {
   setProgress(p: number, showPercentage: boolean): void;
   /** Swap the waiting indicator to the tap-to-start cue. */
   showTapText(text: string): void;
+  /** Resolves when the player skips the variant's intro: the brand gate (intro + floor) is lifted
+   *  then, so a loaded game takes over at once. */
+  skipped?: Promise<void>;
 }
 
 /**

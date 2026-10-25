@@ -77,6 +77,32 @@ describe('createCSSPreloader — variant selection', () => {
     expect(progress).toEqual([0.25]);
     expect(container.querySelector(`.${SPLASH_CLASS}`)).toBeNull();
   });
+
+  it("lifts the brand gate when the variant's intro is skipped", async () => {
+    vi.useFakeTimers();
+    let skip!: () => void;
+    const skipped = new Promise<void>((r) => (skip = r));
+    createCSSPreloader(container, {
+      tapToStart: false,
+      preloaderVariant: {
+        buildContentHTML: () => '<div></div>',
+        css: '',
+        introMs: 5000,
+        splash: false,
+        mount: () => ({ setProgress: () => {}, showTapText: () => {}, skipped }),
+      },
+    });
+    let settled = false;
+    void waitCSSPreloaderTap().then(() => {
+      settled = true;
+    });
+    await vi.advanceTimersByTimeAsync(600);
+    expect(settled).toBe(false);
+    skip();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(settled).toBe(true);
+    vi.useRealTimers();
+  });
 });
 
 describe('energy8 variant', () => {
