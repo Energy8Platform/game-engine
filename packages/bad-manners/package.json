@@ -1,6 +1,6 @@
 {
   "name": "@energy8platform/bad-manners",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Bad Manners studio branding for Energy8 slots — the studio intro preloader and the Pixi game shell.",
   "type": "module",
   "exports": {
@@ -27,7 +27,7 @@
     "prepublishOnly": "npm run build"
   },
   "peerDependencies": {
-    "@energy8platform/platform-core": ">=0.40.0",
+    "@energy8platform/platform-core": ">=0.41.0",
     "@energy8platform/shell": ">=0.15.0",
     "pixi.js": "^8.16.0"
   },
