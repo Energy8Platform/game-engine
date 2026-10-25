@@ -46,6 +46,14 @@ Sub-paths:
 > while busy / autoplay / in a bonus (`menuLocked` in `core/state.ts`); SPIN pressed mid-round emits `skip`. The old full-screen Settings overlay
 > is gone; `openSettings()` is a deprecated alias for `openMenu()`.
 
+### `@energy8platform/bad-manners`
+
+BAD MANNERS studio branding, built from `packages/bad-manners/brand/BRANDBOOK.md`:
+- `./preloader`: `badMannersPreloader`, a DOM `PreloaderVariant` object for `loading.preloaderVariant`.
+- `./shell`: `createBadMannersShell`, its own Pixi `ShellRenderer` over the `@energy8platform/shell` core. It does not use the HB renderer contracts.
+
+Kit assets are embedded by `scripts/gen-assets.mjs`. Demo: `examples/bad-manners-demo`.
+
 ### `@energy8platform/game-engine`
 
 PixiJS v8-based casino game engine. Depends on `@energy8platform/platform-core`. Sub-paths re-export platform-core modules so existing import paths (`@energy8platform/game-engine/lua`, `/debug` for DevBridge, `/vite`) stay stable.

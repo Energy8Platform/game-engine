@@ -1,0 +1,54 @@
+{
+  "name": "@energy8platform/bad-manners",
+  "version": "0.1.0",
+  "description": "Bad Manners studio branding for Energy8 slots — the studio intro preloader and the Pixi game shell.",
+  "type": "module",
+  "exports": {
+    "./preloader": {
+      "import": "./dist/preloader.esm.js",
+      "require": "./dist/preloader.cjs.js",
+      "types": "./dist/preloader.d.ts"
+    },
+    "./shell": {
+      "import": "./dist/shell.esm.js",
+      "require": "./dist/shell.cjs.js",
+      "types": "./dist/shell.d.ts"
+    }
+  },
+  "files": [
+    "dist",
+    "brand/fonts/*.txt"
+  ],
+  "scripts": {
+    "gen-assets": "node scripts/gen-assets.mjs",
+    "build": "rollup -c rollup.config.mjs",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "prepublishOnly": "npm run build"
+  },
+  "peerDependencies": {
+    "@energy8platform/platform-core": ">=0.40.0",
+    "@energy8platform/shell": ">=0.15.0",
+    "pixi.js": "^8.16.0"
+  },
+  "peerDependenciesMeta": {
+    "pixi.js": { "optional": true },
+    "@energy8platform/shell": { "optional": true }
+  },
+  "devDependencies": {
+    "@rollup/plugin-typescript": "^12.1.0",
+    "jsdom": "^25.0.1",
+    "rollup": "^4.24.0",
+    "rollup-plugin-dts": "^6.1.0",
+    "tslib": "^2.8.0",
+    "typescript": "^5.6.0",
+    "vitest": "^2.0.0"
+  },
+  "keywords": ["casino", "energy8", "bad-manners", "preloader", "game-shell", "pixijs"],
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/energy8platform/game-engine.git",
+    "directory": "packages/bad-manners"
+  }
+}
