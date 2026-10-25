@@ -3,7 +3,7 @@
 // Phaser/Three/custom-engine consumers import these from
 // `@energy8platform/platform-core` instead of pulling in game-engine.
 
-import type { PreloaderVariantName } from './loading/variants';
+import type { PreloaderVariant, PreloaderVariantName } from './loading/variants';
 
 // SDK types
 export type {
@@ -101,11 +101,13 @@ export interface LoadingScreenConfig {
    */
   externalOverlayMinDisplayTime?: number;
   /**
-   * Which visual identity the CSS preloader renders. Defaults to `'energy8'`;
-   * an unknown value falls back to the default. Ignored when `cssPreloaderHTML`
-   * is set (custom HTML bypasses the variant).
+   * Which visual identity the CSS preloader renders: a built-in name (defaults
+   * to `'energy8'`; an unknown one falls back to the default) or a
+   * `PreloaderVariant` object shipped by a provider package (its `splash: false`
+   * skips the powered-by pre-roll, as hellbuddha's does). Ignored when
+   * `cssPreloaderHTML` is set (custom HTML bypasses the variant).
    */
-  preloaderVariant?: PreloaderVariantName;
+  preloaderVariant?: PreloaderVariantName | PreloaderVariant;
   /** Background color (hex number or CSS string) */
   backgroundColor?: number | string;
   /** Background gradient (CSS string applied to the CSS preloader) */

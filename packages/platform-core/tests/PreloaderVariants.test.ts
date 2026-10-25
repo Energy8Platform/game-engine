@@ -11,7 +11,7 @@ import {
 import { VARIANTS } from '../src/loading/variants';
 import type { PreloaderVariantName } from '../src/loading/variants';
 import { HELLBUDDHA_INTRO_MS, LOADER_BAR_MAX_WIDTH as HB_BAR_MAX_WIDTH } from '../src/loading/variants/hellbuddha';
-import { BRAND_FLOOR_MS, SPLASH_DURATION_MS } from '../src/loading/splash';
+import { BRAND_FLOOR_MS, SPLASH_CLASS, SPLASH_DURATION_MS } from '../src/loading/splash';
 import { ENERGY8_INTRO_MS } from '../src/loading/variants/energy8';
 
 describe('preloader variant registry', () => {
@@ -59,6 +59,23 @@ describe('createCSSPreloader — variant selection', () => {
       preloaderVariant: 'does-not-exist' as PreloaderVariantName,
     });
     expect(container.querySelector('#ge-pl-loader-rect')).not.toBeNull();
+  });
+
+  it('renders a variant object passed from outside the registry, honouring its splash opt-out', () => {
+    const progress: number[] = [];
+    createCSSPreloader(container, {
+      preloaderVariant: {
+        buildContentHTML: () => '<div id="ext-loader"></div>',
+        css: '',
+        mount: () => ({ setProgress: (p) => progress.push(p), showTapText: () => {} }),
+        splash: false,
+      },
+    });
+    setCSSPreloaderProgress(0.25);
+    expect(container.querySelector('#ext-loader')).not.toBeNull();
+    expect(container.querySelector('#ge-pl-loader-rect')).toBeNull();
+    expect(progress).toEqual([0.25]);
+    expect(container.querySelector(`.${SPLASH_CLASS}`)).toBeNull();
   });
 });
 

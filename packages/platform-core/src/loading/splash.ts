@@ -3,9 +3,9 @@
  * boot, above whatever preloader variant the game selected.
  *
  * This is deliberately NOT configurable per game: it is the platform's
- * attribution and plays on every boot. Only a preloader variant — i.e. the
- * registry, not a game — may opt out (`PreloaderVariant.splash: false`;
- * hellbuddha does). `CSSPreloader` mounts it as a layer inside the same overlay
+ * attribution and plays on every boot. Only a preloader variant — a branded
+ * identity (the registry's, or a provider package's), not a plain game flag —
+ * may opt out (`PreloaderVariant.splash: false`; hellbuddha and bad-manners do). `CSSPreloader` mounts it as a layer inside the same overlay
  * it already owns, so there is still exactly one element to tear down and no
  * gap where the page shows through.
  */

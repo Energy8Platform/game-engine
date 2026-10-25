@@ -1,6 +1,6 @@
 import type { LoadingScreenConfig } from '../types';
 import { VARIANTS, DEFAULT_VARIANT_NAME } from './variants';
-import type { PreloaderVariantHandle } from './variants';
+import type { PreloaderVariant, PreloaderVariantHandle } from './variants';
 import {
   BRAND_FLOOR_MS,
   SPLASH_CSS,
@@ -75,9 +75,12 @@ export function createCSSPreloader(
 
   // Pick the visual identity. Unknown names fall back to the default so a bad
   // config value degrades to a working preloader rather than a blank overlay.
-  const variant =
-    VARIANTS[config?.preloaderVariant ?? DEFAULT_VARIANT_NAME] ??
-    VARIANTS[DEFAULT_VARIANT_NAME];
+  // A variant OBJECT comes from a provider package and is used as is.
+  const picked = config?.preloaderVariant;
+  const variant: PreloaderVariant =
+    typeof picked === 'object'
+      ? picked
+      : (VARIANTS[picked ?? DEFAULT_VARIANT_NAME] ?? VARIANTS[DEFAULT_VARIANT_NAME]);
 
   const bgGradient =
     variant.background ??

@@ -36,8 +36,8 @@ export interface PreloaderVariant {
   /**
    * `false` skips the platform's "POWERED BY ENERGY8 ENGINE" pre-roll for this
    * identity. Deliberately a property of the variant, not of
-   * `LoadingScreenConfig`: a game cannot opt out of the attribution, only the
-   * registry can. Default `true`.
+   * `LoadingScreenConfig`: a game cannot opt out of the attribution, only a
+   * branded identity can. Default `true`.
    */
   splash?: boolean;
   /**
