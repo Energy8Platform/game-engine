@@ -71,8 +71,8 @@ const BURST: Array<[number, Props]> = [
   [0.4, { scale: 1, alpha: 1 }],
   [1, { scale: 1, alpha: 0, y: -14 }],
 ];
-/** The tongue's pop-out (t = 800 in the full intro; t = 0 in the short one). */
-export const TONGUE_IN: Track = {
+/** The tongue's pop-out. */
+const TONGUE_IN: Track = {
   target: 'tongue',
   at: 800,
   dur: 360,
@@ -125,9 +125,8 @@ export const TIMELINE: Track[] = [
   { target: 'progress', at: 2200, dur: 300, ease: 'power2.inOut', keys: [[0, { widthFrac: 0 }], [1, { widthFrac: 0.7 }]] },
 ];
 
-/** §6.3: the full intro runs at least this long; the short (repeat-visit) one exits after SHORT_MS. */
+/** §6.3: the intro runs at least this long. */
 export const MIN_MS = 2400;
-export const SHORT_MS = 1000;
 /** Skip (tap / click / space) is honoured this long into the intro. */
 export const SKIP_AFTER_MS = 500;
 /** The underline fill the intro animates to before it follows the real load. */

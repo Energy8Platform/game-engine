@@ -76,7 +76,7 @@ export function openGameInfo(ctx: BmCtx): Layer {
       scroll = new ScrollBox(ctx.canvas, 'y');
       scroll.position.set((w - colW) / 2, y0);
       const s = stack(scroll.content, colW);
-      t.sections.forEach((sec, i) => renderSection(ctx, sec, s, colW, i === 0 ? 0 : SECTION_GAP, !rules));
+      t.sections.forEach((sec, i) => renderSection(ctx, sec, s, colW, i === 0 ? 0 : SECTION_GAP));
       if (tab === tabs.length - 1) {
         const gameVersion = ctx.config.version ?? '1.0.0';
         s.add(body(`${gameVersion}.${PACKAGE_VERSION.split('.').join('')}`, 16, C.grey500), s.y ? SECTION_GAP : 0);
@@ -177,22 +177,22 @@ function stack(c: Container, w: number): Stack {
   };
 }
 
-function heading(s: Stack, text: string, gap: number, center: boolean): void {
-  s.add(display(text, TYPE.tab), gap, center);
+function heading(s: Stack, text: string, gap: number): void {
+  s.add(display(text, TYPE.tab), gap);
 }
 
-/** Description copy: body 20, paper at 80%. */
-function copy(text: string, w: number, center: boolean): Container {
-  const t = body(text, 20, C.paper, { wrap: w, align: center ? 'center' : 'left' });
+/** Description copy: body 20, paper at 80%, centred. */
+function copy(text: string, w: number): Container {
+  const t = body(text, 20, C.paper, { wrap: w, align: 'center' });
   t.alpha = 0.8;
   return t;
 }
 
-function renderSection(ctx: BmCtx, sec: GameInfoSection, s: Stack, w: number, gap: number, center: boolean): void {
+function renderSection(ctx: BmCtx, sec: GameInfoSection, s: Stack, w: number, gap: number): void {
   switch (sec.type) {
     case 'paytable':
       if (sec.title) {
-        heading(s, sec.title, gap, center);
+        heading(s, sec.title, gap);
         gap = 24;
       }
       s.add(paytable(ctx, sec.rows, w, sec.amounts), gap);
@@ -202,28 +202,28 @@ function renderSection(ctx: BmCtx, sec: GameInfoSection, s: Stack, w: number, ga
       return;
     case 'modes':
       if (sec.title) {
-        heading(s, sec.title, gap, center);
+        heading(s, sec.title, gap);
         gap = 24;
       }
       sec.modes.forEach((m, i) => modeBlock(ctx, m, s, w, i ? 36 : gap));
       return;
     case 'controls':
-      heading(s, sec.title ?? ctx.t('Controls'), gap, center);
-      controls(ctx, s, w);
+      heading(s, sec.title ?? ctx.t('Controls'), gap);
+      s.add(controls(ctx, w), 16);
       return;
     case 'hotkeys':
-      heading(s, sec.title ?? ctx.t('Hotkeys'), gap, center);
-      hotkeys(ctx, s, w);
+      heading(s, sec.title ?? ctx.t('Hotkeys'), gap);
+      s.add(hotkeys(ctx, w), 16);
       return;
     case 'custom':
       if (sec.title != null) {
-        heading(s, ctx.t(sec.title), gap, center);
+        heading(s, ctx.t(sec.title), gap);
         gap = 16;
       }
-      if (sec.node) s.add(borrow(sec.node as Container), gap, center);
+      if (sec.node) s.add(borrow(sec.node as Container), gap);
       else if (sec.html) {
         const text = sec.html.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim();
-        if (text) s.add(body(text, TYPE.body, C.paper, { wrap: w, align: center ? 'center' : 'left' }), gap, center);
+        if (text) s.add(body(text, TYPE.body, C.paper, { wrap: w, align: 'center' }), gap);
       }
       return;
   }
@@ -308,9 +308,9 @@ const WIN_TITLE: Record<WinSection['kind'], string> = {
 };
 
 function wins(ctx: BmCtx, sec: WinSection, s: Stack, w: number, gap: number): void {
-  heading(s, sec.title ?? ctx.t(WIN_TITLE[sec.kind]), gap, true);
+  heading(s, sec.title ?? ctx.t(WIN_TITLE[sec.kind]), gap);
   const desc = (): void => {
-    if (sec.description) s.add(copy(sec.description, w, true), 16);
+    if (sec.description) s.add(copy(sec.description, w), 16);
   };
   if (sec.kind === 'classic') {
     desc();
@@ -423,7 +423,7 @@ function modeBlock(ctx: BmCtx, m: GameMode, s: Stack, w: number, gap: number): v
   if (typeof m.rtp === 'number') pairs.push([ctx.t('RTP'), `${m.rtp}%`]);
   if (m.maxWin != null) pairs.push([ctx.t('Max win'), m.maxWin]);
   if (pairs.length) s.add(metaLine(pairs, w), 6);
-  if (m.description) s.add(copy(m.description, w, true), 8);
+  if (m.description) s.add(copy(m.description, w), 8);
 }
 
 /** «LABEL value» pairs (label body 16 grey400 caps, value num 18 lime), packed into centred lines no
@@ -465,8 +465,9 @@ function metaLine(pairs: Array<[string, string]>, w: number): Container {
   return out;
 }
 
-// ── rules: controls / hotkeys ────────────────────────────────────────────────
-function controls(ctx: BmCtx, s: Stack, w: number): void {
+// ── controls / hotkeys ───────────────────────────────────────────────────────
+// Rows flush left inside one block; the caller centres the block in the column.
+function controls(ctx: BmCtx, w: number): Container {
   const f = ctx.config.features;
   const rows: Array<[IconName, string, string, boolean]> = [
     ['spin', 'Spin', 'Start a spin at the current bet.', true],
@@ -482,6 +483,8 @@ function controls(ctx: BmCtx, s: Stack, w: number): void {
     ['close', 'Close', 'Dismiss the current overlay.', true],
   ];
   const TX = 64;
+  const out = new Container();
+  const s = stack(out, w);
   rows
     .filter((r) => r[3])
     .forEach(([icon, name, desc], i) => {
@@ -493,12 +496,15 @@ function controls(ctx: BmCtx, s: Stack, w: number): void {
       const d = body(ctx.t(desc), 18, C.grey400, { wrap: w - TX });
       d.position.set(TX, n.height + 2);
       row.addChild(g, n, d);
-      s.add(row, i ? 18 : 16, false);
+      s.add(row, i ? 18 : 0, false);
     });
+  return out;
 }
 
-function hotkeys(ctx: BmCtx, s: Stack, w: number): void {
+function hotkeys(ctx: BmCtx, w: number): Container {
   const f = ctx.config.features;
+  const out = new Container();
+  const s = stack(out, w);
   const rows: Array<[string[], string, boolean]> = [
     [['Space'], 'Spin', true],
     [['Shift', '↑', '/', 'Shift', '='], 'Raise bet', true],
@@ -524,8 +530,9 @@ function hotkeys(ctx: BmCtx, s: Stack, w: number): void {
     c.y = (h - c.height) / 2;
     n.position.set(chipCol + 32, (h - n.height) / 2);
     row.addChild(c, n);
-    s.add(row, i ? 12 : 16, false);
+    s.add(row, i ? 12 : 0, false);
   });
+  return out;
 }
 
 /** Key chips (num 16 on a grey700 rounded rect); '/' between combos as grey400 copy. */

@@ -5,11 +5,13 @@ import { bonusBuyLocked, type BmCtx, type Layer } from '../context';
 import { ProgressBar, ScrollBox } from '../scroll';
 import { body as bodyText, display, num } from '../text';
 import { C, SIZE, TYPE } from '../theme';
-import { CardModal, EDGE_X, Panel, buildCard } from './panel';
+import { tween } from '../motion';
+import { CONTENT_TOP, EDGE_X, Panel } from './panel';
 
 // §5.2 Buy Bonus: the Panel frame, a horizontal strip of 340×720 cards (scaled to the room, scrolling
-// along x when they overflow) with a scroll-progress bar under it, BALANCE | BET at the bottom, and a
-// small confirm card over the strip.
+// along x when they overflow) with a scroll-progress bar under it, BALANCE | BET at the bottom. The
+// confirm is the S skin's: a copy of the chosen card flies to the centre and grows while the strip
+// fades out, then CANCEL | BUY take the place of its CTA.
 
 /** Card design size (§5.2) and the gap between cards. */
 const CW = 340;
@@ -19,6 +21,8 @@ const RADIUS = 12;
 const BORDER = 3;
 const GAP = 20;
 const PAD = 24;
+/** The big card's bottom margin. */
+const EDGE_Y_BOTTOM = 40;
 /** The art fills the card top down to here; the name sits over its bottom edge. */
 const ART_H = 340;
 const NAME_LH = 48;
@@ -62,9 +66,18 @@ export class BuyBonusPanel extends Panel {
   private cardW = CW;
   /** CTA per slot (tests). */
   ctas: PillButton[] = [];
-  confirm?: CardModal;
+  /** The confirm: the card copy at the centre, the CANCEL | BUY row on it and the bonus it confirms
+   *  (cleared as soon as the confirm starts going back). */
+  flyer?: Container;
+  actions?: Container;
   confirmBonus?: BonusOption;
   private confirmSig = '';
+  /** Puts the flyer `p` of the way from its card to the centre and the page parts at alpha 1 − p. */
+  private flyAt?: (p: number) => void;
+  private flyP = 0;
+  private tweens: Array<() => void> = [];
+  /** What fades out under the flyer. */
+  private parts: Container[] = [];
   private sw = 0;
   private sh = 0;
   /** Panel's constructor calls resize() before this class's fields exist — ignore that one. */
@@ -74,6 +87,7 @@ export class BuyBonusPanel extends Panel {
     super(ctx, { title: ctx.t('Buy bonus'), onClose: () => ctx.closeLayer(), layout: () => {} });
     this.slots = groupBonusSlots(bonuses);
     this.opts.layout = (b, w, h, top) => this.layoutBody(b, w, h, top);
+    this.opts.onClose = () => (this.flyer ? this.cancelConfirm() : ctx.closeLayer());
     this.live = true;
     this.resize(ctx.screenW, ctx.screenH);
   }
@@ -85,13 +99,13 @@ export class BuyBonusPanel extends Panel {
     const same = w === this.sw && h === this.sh;
     this.sw = w;
     this.sh = h;
-    if (this.confirm && this.confirmSig !== this.sig()) this.closeConfirm();
-    if (this.confirm && same) return;
-    super.resize(w, h);
-    this.confirm?.resize(w, h);
+    if (same && this.flyer && this.confirmSig === this.sig()) return;
+    this.rebuild();
   }
 
+  /** Re-lay the page; a resize or the end of a cancel drops the confirm, unanimated. */
   private rebuild(): void {
+    this.removeConfirm();
     super.resize(this.sw, this.sh);
   }
 
@@ -180,6 +194,7 @@ export class BuyBonusPanel extends Panel {
     bar.visible = scroll.maxScroll > 0; // a strip that fits has nothing to track
 
     root.addChild(scroll, bar, balance, bet);
+    this.parts = [scroll, bar, balance, bet];
   }
 
   /** One 340×720 card (design px; the caller scales it). */
@@ -211,6 +226,7 @@ export class BuyBonusPanel extends Panel {
       onTap: tap(() => this.select(bonus)),
     });
     cta.disabled = !ok && !active;
+    cta.label = 'bb-cta';
     cta.position.set(PAD, ctaY);
     this.ctas[slot] = cta;
     const priceT = num(this.ctx.fmt(price), TYPE.price);
@@ -240,8 +256,11 @@ export class BuyBonusPanel extends Panel {
     card.addChild(name);
     if (nav) {
       const cy = zoneTop + zoneH / 2;
-      card.addChild(this.chevron('chevron-left', PAD + CHEVRON / 2, cy, tap(() => this.step(slot, -1))));
-      card.addChild(this.chevron('chevron-right', CW - PAD - CHEVRON / 2, cy, tap(() => this.step(slot, 1))));
+      const prev = this.chevron('chevron-left', PAD + CHEVRON / 2, cy, tap(() => this.step(slot, -1)));
+      const next = this.chevron('chevron-right', CW - PAD - CHEVRON / 2, cy, tap(() => this.step(slot, 1)));
+      prev.label = 'bb-nav';
+      next.label = 'bb-nav';
+      card.addChild(prev, next);
     }
 
     // the description, clipped to the room above the volatility / price
@@ -322,50 +341,125 @@ export class BuyBonusPanel extends Panel {
 
   // ── confirm ─────────────────────────────────────────────────────────────────
   private select(bonus: BonusOption): void {
-    if (this.confirm) return;
+    if (this.flyer) return; // a confirm is out
     if (this.isActive(bonus)) {
       this.ctx.actions.deactivateFeature();
       this.ctx.closeLayer();
       return;
     }
     if (!this.affordable(bonus)) return;
-    const feature = bonus.type === 'feature';
-    const verb = this.ctx.t(feature ? 'Activate' : 'Buy');
-    const price = this.ctx.fmt(bonus.priceMultiplier * this.ctx.state.bet);
-    this.confirmBonus = bonus;
-    this.confirmSig = this.sig();
-    this.confirm = buildCard(this.ctx, {
-      title: `${verb} ${bonus.title}?`,
-      onClose: () => this.closeConfirm(),
-      content: (box, w) => {
-        const t = num(price, TYPE.price);
-        if (t.width > w) t.scale.set(w / t.width);
-        t.position.set((w - t.width) / 2, 0);
-        box.addChild(t);
-        return t.height;
-      },
-      actions: [
-        { label: this.ctx.t('Cancel'), kind: 'secondary-white', onTap: () => this.closeConfirm() },
-        { label: verb, kind: 'primary', onTap: () => this.commit(bonus) },
-      ],
-    }) as CardModal;
-    this.stage.eventMode = 'none'; // the strip, stepper and wheel sleep under the confirm
-    this.addChild(this.confirm);
+    this.openConfirm(bonus);
   }
 
-  private closeConfirm(): void {
-    const c = this.confirm;
-    if (!c) return;
-    this.confirm = this.confirmBonus = undefined;
-    c.onRemove();
-    this.removeChild(c);
-    c.destroy({ children: true });
-    this.stage.eventMode = 'passive';
+  /** As the S skin: a copy of the card flies from its spot to the centre and grows (300ms) while the
+   *  strip, the progress bar and the band fade out; then CANCEL | BUY (or ACTIVATE) fade in over its
+   *  CTA (150ms). */
+  private openConfirm(bonus: BonusOption): void {
+    const slot = this.slots.findIndex((m) => m.includes(bonus));
+    const card = this.scroll?.content.getChildByLabel(`bb-card-${slot}`);
+    if (!card) return;
+    const q = card.scale.x;
+    // the big card: between the title strip and the bottom margin, at most 1.3× the strip's
+    const m = EDGE_Y_BOTTOM;
+    const s = Math.min(q * 1.3, (this.dh - CONTENT_TOP - m) / CH, (this.dw - 2 * EDGE_X) / CW);
+    const to = { x: (this.dw - CW * s) / 2, y: CONTENT_TOP + (this.dh - m - CONTENT_TOP - CH * s) / 2 };
+    const from = this.body.toLocal(card.getGlobalPosition());
+
+    const rowCta = this.ctas[slot];
+    const flyer = this.buildCard(slot);
+    this.ctas[slot] = rowCta;
+    const cta = flyer.getChildByLabel('bb-cta')!;
+    cta.visible = false;
+    for (const c of flyer.children) {
+      c.eventMode = 'none'; // taps on the copy do nothing
+      if (c.label === 'bb-nav') c.visible = false;
+    }
+    flyer.position.copyFrom(from);
+    flyer.scale.set(q);
+    this.body.addChild(flyer);
+    card.visible = false;
+    this.scroll!.eventMode = 'none'; // no drag or wheel under the confirm; a rebuild's new box is live
+    this.flyer = flyer;
+    this.confirmBonus = bonus;
+    this.confirmSig = this.sig();
+    const parts = this.parts;
+    this.flyAt = (p) => {
+      if (this.destroyed || flyer.destroyed) return;
+      this.flyP = p;
+      flyer.position.set(from.x + (to.x - from.x) * p, from.y + (to.y - from.y) * p);
+      flyer.scale.set(q + (s - q) * p);
+      for (const n of parts) {
+        n.alpha = 1 - p;
+        n.visible = p < 1; // alpha 0 still takes taps (the bet stepper, the other CTAs)
+      }
+    };
+    this.tweens.push(
+      tween(this.ctx.ticker, {
+        duration: 300,
+        onUpdate: (p) => this.flyAt?.(p),
+        onComplete: () => {
+          if (this.destroyed || flyer.destroyed) return;
+          const verb = this.ctx.t(bonus.type === 'feature' ? 'Activate' : 'Buy');
+          const g = 16;
+          const bw = (CW - 2 * PAD - g) / 2;
+          const actions = new Container();
+          const cancel = new PillButton(this.ctx.ticker, { label: this.ctx.t('Cancel'), kind: 'secondary-white', width: bw, height: SIZE.pill.h, onTap: () => this.cancelConfirm() });
+          const ok = new PillButton(this.ctx.ticker, { label: verb, kind: 'primary', width: bw, height: SIZE.pill.h, onTap: () => this.commit(bonus) });
+          ok.x = bw + g;
+          actions.addChild(cancel, ok);
+          actions.position.copyFrom(cta.position);
+          actions.alpha = 0;
+          actions.eventMode = 'none'; // takes taps once fully shown
+          this.actions = actions;
+          flyer.addChild(actions);
+          this.tweens.push(
+            tween(this.ctx.ticker, {
+              duration: 150,
+              onUpdate: (p) => {
+                if (!actions.destroyed) actions.alpha = p;
+              },
+              onComplete: () => {
+                if (!actions.destroyed) actions.eventMode = 'passive';
+              },
+            }),
+          );
+        },
+      }),
+    );
+  }
+
+  /** Escape, CANCEL and the ✕: the action row goes at once and the card flies back (250ms) while the
+   *  page fades back in; then the page rebuilds. A second cancel on the way back is a no-op. */
+  private cancelConfirm(): void {
+    if (!this.flyer || !this.confirmBonus) return;
+    this.confirmBonus = undefined;
+    for (const stop of this.tweens.splice(0)) stop();
+    this.actions?.destroy({ children: true });
+    this.actions = undefined;
+    const p0 = this.flyP;
+    this.tweens.push(
+      tween(this.ctx.ticker, {
+        duration: 250,
+        onUpdate: (p) => this.flyAt?.(p0 * (1 - p)),
+        onComplete: () => {
+          if (!this.destroyed) this.rebuild();
+        },
+      }),
+    );
+  }
+
+  /** Drop the confirm at once, before a rebuild or a close: tweens stopped, the flyer gone. */
+  private removeConfirm(): void {
+    for (const stop of this.tweens.splice(0)) stop();
+    if (!this.flyer) return;
+    this.flyAt?.(0);
+    this.flyer.destroy({ children: true });
+    this.flyer = this.actions = this.flyAt = this.confirmBonus = undefined;
   }
 
   private commit(bonus: BonusOption): void {
     if (!this.affordable(bonus)) return;
-    this.closeConfirm();
+    this.removeConfirm();
     if (bonus.type === 'feature') this.ctx.actions.activateFeature(bonus);
     else this.ctx.actions.selectBuyBonus(bonus.id);
     this.ctx.closeLayer();
@@ -373,13 +467,13 @@ export class BuyBonusPanel extends Panel {
 
   // ── keyboard ────────────────────────────────────────────────────────────────
   onKey(e: KeyboardEvent): boolean {
-    if (this.confirm) {
+    if (this.flyer) {
       if (e.code === 'Escape') {
-        this.closeConfirm();
+        this.cancelConfirm();
         return true;
       }
-      if (e.code === 'Enter' && this.confirmBonus) {
-        this.commit(this.confirmBonus);
+      if (e.code === 'Enter' || e.code === 'Space') {
+        if (this.confirmBonus) this.commit(this.confirmBonus); // not on the way back
         return true;
       }
       return false;
@@ -398,7 +492,7 @@ export class BuyBonusPanel extends Panel {
   }
 
   onRemove(): void {
-    this.closeConfirm();
+    this.removeConfirm();
     super.onRemove();
   }
 }

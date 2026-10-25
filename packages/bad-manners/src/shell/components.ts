@@ -1,4 +1,4 @@
-import { Container, NineSliceSprite, Rectangle, Sprite, type FederatedPointerEvent, type Text, type Ticker } from 'pixi.js';
+import { Container, Graphics, NineSliceSprite, Rectangle, Sprite, type FederatedPointerEvent, type Text, type Ticker } from 'pixi.js';
 import { SLICE, faceTex, FACE_ASPECT, iconTex, uiTex, type BubbleVariant, type IconName, type UiName } from './assets';
 import { ease, reducedMotion, tween } from './motion';
 import { display, fitWidth, num } from './text';
@@ -485,13 +485,20 @@ export class SpinButton extends Btn {
 }
 
 // ── BuyButton ────────────────────────────────────────────────────────────────
-/** The round BUY: the face mark as it is in the logo (white face, black outline — only the tongue is
- *  the accent); with a feature on, the accent disc with a ✕ that switches it off. */
+/** The BUY disc's ring at the kit's 128 (§3.3's 3 px outline). */
+const BUY_RING = 3;
+
+/** The round BUY: an ink disc with an accent ring, the logo face inside it (its black outline melts
+ *  into the disc — a white face with the accent tongue); with a feature on, the accent disc with a ✕
+ *  that switches it off. */
 export class BuyButton extends Btn {
   private base?: Sprite;
+  private disc?: Graphics;
+  private size: number;
 
   constructor(ticker: Ticker, o: { size: number; active: boolean; onTap: () => void }) {
     super(ticker, o.size, o.size, o.onTap);
+    this.size = o.size;
     const k = o.size / SIZE.spin;
     if (o.active) {
       this.base = new Sprite(uiTex('spin-base'));
@@ -500,19 +507,25 @@ export class BuyButton extends Btn {
       x.position.set(o.size / 2, o.size / 2);
       this.view.addChild(this.base, x);
     } else {
-      const f = face(o.size);
+      this.disc = new Graphics();
+      const f = face(o.size * 0.74);
       f.position.set(o.size / 2, o.size / 2);
-      this.view.addChild(f);
+      this.view.addChild(this.disc, f);
     }
     this.paint('idle');
   }
 
   protected paint(s: BtnState): void {
     if (this.base) this.base.texture = uiTex(s === 'disabled' ? 'spin-base-disabled' : s === 'press' ? 'spin-base-press' : s === 'hover' ? 'spin-base-hover' : 'spin-base');
+    if (this.disc) {
+      const r = this.size / 2;
+      const ring = BUY_RING * (this.size / SIZE.spin);
+      const color = s === 'disabled' ? C.grey500 : s === 'hover' ? C.limeHover : s === 'press' ? C.limePress : C.lime;
+      this.disc.clear().circle(r, r, r - ring / 2).fill(C.ink).stroke({ width: ring, color });
+    }
     this.view.alpha = s === 'disabled' ? 0.45 : 1;
   }
 }
-
 // ── Slider ───────────────────────────────────────────────────────────────────
 export interface SliderOpts {
   width: number;

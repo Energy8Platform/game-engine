@@ -1,32 +1,14 @@
 import type { PreloaderVariant, PreloaderVariantHandle } from '@energy8platform/platform-core/loading';
 import { INTRO_SVG } from '../generated/intro-svg';
 import { LIME, parseColor } from '../shell/theme';
-import { EASE, LAYERS, MIN_MS, PRELOAD_FILL, SHORT_MS, SKIP_AFTER_MS, STAGE, TIMELINE, TONGUE_IN, frame, type Props, type Track } from './intro';
+import { EASE, LAYERS, MIN_MS, PRELOAD_FILL, SKIP_AFTER_MS, STAGE, TIMELINE, frame, type Props } from './intro';
 
 // Bad Manners studio intro as a CSS-preloader variant (BRANDBOOK §6). Pass it to the game:
 //   createSlotGame({ loading: { preloaderVariant: badMannersPreloader }, ... })
 //
 // The intro is the studio's own pre-roll, so it skips the platform's powered-by splash (as hellbuddha
-// does); `introMs` holds the brand gate until it has played.
-
-const SEEN_KEY = 'bm.introSeen';
-const DAY_MS = 24 * 60 * 60 * 1000;
-
-let short: boolean | undefined;
-
-/** §6.3: a repeat launch within 24h gets the short intro. Decided once per page, then stamped. */
-function isShort(): boolean {
-  if (short !== undefined) return short;
-  short = false;
-  try {
-    const seen = Number(localStorage.getItem(SEEN_KEY));
-    short = Number.isFinite(seen) && seen > 0 && Date.now() - seen < DAY_MS;
-    localStorage.setItem(SEEN_KEY, String(Date.now()));
-  } catch {
-    /* storage blocked — always the full intro */
-  }
-  return short;
-}
+// does); `introMs` holds the brand gate until it has played, and a skip lifts it. It plays in full on
+// every launch — nothing is kept in storage.
 
 function reducedMotion(): boolean {
   return typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches;
@@ -62,10 +44,7 @@ export function createBadMannersPreloader(opts: BadMannersPreloaderOptions = {})
   const accent = `#${a.toString(16).padStart(6, '0')}`;
   return {
     ...intro,
-    // read when the preloader is created — the brand gate waits for the intro
-    get introMs() {
-      return isShort() ? SHORT_MS : MIN_MS;
-    },
+    introMs: MIN_MS, // the brand gate waits for the intro
     buildContentHTML: () =>
       `<div class="bm-intro"><div class="bm-intro-stage">${Object.keys(LAYERS).map((id) => layerHTML(id, accent)).join('')}</div><div class="bm-intro-tap"></div></div>`,
   };
@@ -125,18 +104,16 @@ const intro: Omit<PreloaderVariant, 'buildContentHTML' | 'introMs'> = {
       els.progress.style.width = `${bar * Math.max(PRELOAD_FILL, loaded)}px`;
     };
 
-    const shortIntro = isShort();
     const animated = !reducedMotion() && typeof stage.animate === 'function';
-    const finals = finalProps();
-    // short / no-motion: the final lockup from the start (the short one then pops the tongue out)
-    if (shortIntro || !animated) {
-      for (const [id, p] of Object.entries(finals)) paint(id, id === 'tongue' && animated ? LAYERS.tongue.init : p);
+    // no motion: the final lockup from the start
+    if (!animated) {
+      for (const [id, p] of Object.entries(finalProps())) paint(id, p);
       drive();
     } else {
       for (const [id, l] of Object.entries(LAYERS)) paint(id, l.init);
     }
 
-    const tracks: Track[] = !animated ? [] : shortIntro ? [{ ...TONGUE_IN, at: 0 }] : TIMELINE;
+    const tracks = animated ? TIMELINE : [];
     const seen = new Set<string>();
     const anims = tracks.map((t) => {
       const first = !seen.has(t.target);
@@ -147,7 +124,7 @@ const intro: Omit<PreloaderVariant, 'buildContentHTML' | 'introMs'> = {
       );
     });
     // the intro's last track is the underline fill: once it lands, the load drives the width
-    const fill = !shortIntro ? anims[anims.length - 1] : undefined;
+    const fill = anims[anims.length - 1];
     if (fill) {
       fill.onfinish = () => {
         drive();
@@ -155,11 +132,15 @@ const intro: Omit<PreloaderVariant, 'buildContentHTML' | 'introMs'> = {
       };
     }
 
-    // skip: tap / click / space after 500ms → jump to the final frame (the brand gate still holds)
+    // skip: tap / click / space after 500ms → the final frame, and the brand gate lifts (a loaded game
+    // takes over at once)
     const startedAt = performance.now();
+    let skipped!: () => void;
+    const skippedP = new Promise<void>((r) => (skipped = r));
     const skip = (): void => {
       if (performance.now() - startedAt < SKIP_AFTER_MS) return;
       for (const a of anims) a.finish();
+      skipped();
     };
     const onKey = (e: KeyboardEvent): void => {
       if (!overlay.isConnected) removeEventListener('keydown', onKey);
@@ -169,6 +150,7 @@ const intro: Omit<PreloaderVariant, 'buildContentHTML' | 'introMs'> = {
     addEventListener('keydown', onKey);
 
     return {
+      skipped: skippedP,
       setProgress(p, showPercentage) {
         loaded = Math.max(loaded, p);
         if (driven) drive();
