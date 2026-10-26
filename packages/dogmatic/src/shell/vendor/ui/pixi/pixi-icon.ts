@@ -1,0 +1,125 @@
+import { Container, Graphics, GraphicsContext, GraphicsContextSystem } from 'pixi.js';
+import { iconSVG, type IconName } from './icons';
+import { bonusIconSVG, type BonusIconName } from '../../core/bonusIcons';
+import type { Sizable } from './primitives/flex';
+
+// Icons/coins are parsed from small-viewBox SVGs (24-unit glyphs, ~260-unit coin). Pixi's default
+// bezierSmoothness (0.5) flattens curves with a ~1-unit path-space tolerance — coarse facets at
+// that scale that magnify when the glyph is scaled to button size. Max it out (capped at 0.99) so
+// every SVG-parsed curve stays smooth. Global default; set once, before any GraphicsContext builds.
+GraphicsContextSystem.defaultOptions.bezierSmoothness = 0.99;
+
+// The DOM shell renders each icon as an inline <svg> sized to 1em and recoloured via
+// `currentColor`. The Pixi shell rebuilds the same 24×24 vector paths through Pixi's SVG
+// parser (GraphicsContext.svg) and scales them to the requested pixel size — same shapes,
+// crisp at any scale. Recolour rebuilds the geometry with the colour substituted for
+// `currentColor` (recolour happens only on hover/active, so this is cheap).
+
+const VIEWBOX = 24;
+
+// Cache parsed contexts by `name|fill` — many icons repeat across the bar at the same colour.
+const cache = new Map<string, GraphicsContext>();
+
+function context(name: IconName, color: string): GraphicsContext {
+  const key = `${name}|${color}`;
+  let ctx = cache.get(key);
+  if (!ctx) {
+    ctx = new GraphicsContext().svg(iconSVG(name, color));
+    cache.set(key, ctx);
+  }
+  return ctx;
+}
+
+/** A recolourable, scalable icon. Its content is centred on the local origin's box so the view's
+ *  bounds are `size × size` and `rotation` spins around the glyph centre (like CSS 50% 50%). */
+export class IconView extends Container implements Sizable {
+  private gfx: Graphics;
+  private _size: number;
+  private _color: string;
+  private _iconName: IconName;
+
+  constructor(name: IconName, size: number, color = '#ffffff') {
+    super();
+    this._iconName = name;
+    this._size = size;
+    this._color = color;
+    this.gfx = new Graphics(context(name, color));
+    this.addChild(this.gfx);
+    this.layout();
+  }
+
+  private layout(): void {
+    const s = this._size / VIEWBOX;
+    this.gfx.scale.set(s);
+    this.gfx.pivot.set(VIEWBOX / 2, VIEWBOX / 2);
+    this.gfx.position.set(this._size / 2, this._size / 2);
+  }
+
+  get size(): number {
+    return this._size;
+  }
+
+  get iconName(): IconName {
+    return this._iconName;
+  }
+
+  setColor(color: string): void {
+    if (color === this._color) return;
+    this._color = color;
+    this.gfx.context = context(this._iconName, color);
+  }
+
+  /** Swap the glyph in place (e.g. the menu's sound row flips soundOn/soundOff on toggle) — same
+   *  cached-context rebuild as setColor, keyed on the new name instead of a new colour. */
+  setIcon(name: IconName): void {
+    if (name === this._iconName) return;
+    this._iconName = name;
+    this.gfx.context = context(name, this._color);
+  }
+
+  setSize(size: number): void {
+    if (size === this._size) return;
+    this._size = size;
+    this.layout();
+  }
+
+  // ── Sizable: a raw icon occupies a size×size em box (the DOM's 1em <span>), positioned by that
+  //    box so flex rows centre the EM box like CSS line-box centring — not the ink, which for
+  //    off-centre glyphs (chevron, info) sits asymmetrically and drifts vertically.
+  measureSize(): { w: number; h: number } {
+    return { w: this._size, h: this._size };
+  }
+  setLayoutSize(): void {
+    /* fixed-size glyph — no stretch */
+  }
+
+  /** Rotation around the glyph centre (radians) — used by the spinning SPIN disc. */
+  set spin(r: number) {
+    this.gfx.rotation = r;
+  }
+  get spin(): number {
+    return this.gfx.rotation;
+  }
+}
+
+export function makeIcon(name: IconName, size: number, color = '#ffffff'): IconView {
+  return new IconView(name, size, color);
+}
+
+const bonusCache = new Map<string, GraphicsContext>();
+
+/** A provider's BUY BONUS icon (core/bonusIcons) in `color`, filling a `size × size` box from the
+ *  local origin. Shared by every Pixi skin; contexts are parsed once per name|colour. */
+export function bonusGlyph(name: BonusIconName, size: number, color: string): Container {
+  const key = `${name}|${color}`;
+  let ctx = bonusCache.get(key);
+  if (!ctx) {
+    ctx = new GraphicsContext().svg(bonusIconSVG(name, color));
+    bonusCache.set(key, ctx);
+  }
+  const box = new Container();
+  const g = new Graphics(ctx);
+  g.scale.set(size / VIEWBOX);
+  box.addChild(g);
+  return box;
+}

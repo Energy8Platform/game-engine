@@ -1,0 +1,58 @@
+import type { ShellTokens } from '../../core/theme';
+
+/** The Hellbuddha palette. Fixed by brand: `theme.scheme` / `theme.accent` from ShellConfig are
+ *  ignored by this renderer. */
+export const HB = {
+  orange: '#ff961f', // DOGMATIC brand orange; upstream token name preserved.
+  gold: '#e58212',
+  red: '#e0301e', // volatility fill, feature (Ante) CTA
+  beige: '#f7f7f7',
+  beigeHover: '#dedede',
+  ink: '#000000', // borders (black everywhere), glyph strokes, text on beige/accent
+  panel: '#131315',
+  bar: '#131315',
+  fg: '#f7f7f7',
+  muted: 'rgba(247,247,247,.6)',
+  track: 'rgba(247,247,247,.18)',
+  line: '#000000', // rules inside a frame (header rule, hero divider) — black like the borders
+  card: 'rgba(245,239,227,.06)', // block ground for bonus cards (game-info blocks draw nothing)
+  backdrop: 'rgba(10,6,4,.55)',
+  winOk: '#4ade80',
+  winNo: '#f87171',
+} as const;
+
+export const BORDER = 2;
+export const RADIUS = 8;
+
+/** A ShellTokens-shaped view of the palette so `createShell`'s host typing keeps working. HB
+ *  components read `HB` directly; this only feeds core (e.g. the popover's default colours). */
+export function resolveHbTokens(): ShellTokens {
+  return {
+    fg: HB.fg,
+    muted: HB.muted,
+    icon: HB.fg,
+    iconActive: HB.orange,
+    surface: HB.panel,
+    hairline: HB.line,
+    veil: 'rgba(245,239,227,.05)',
+    veilStrong: 'rgba(245,239,227,.1)',
+    track: HB.track,
+    soft: HB.beige,
+    spin: HB.orange,
+    spinFg: HB.beige,
+    plaqueDark: HB.panel,
+    plaqueGlass: HB.panel,
+    plaqueGlassHover: '#2a2a2a',
+    plaqueSolid: HB.panel,
+    plaqueLine: HB.line,
+    plaqueLabel: HB.muted,
+    bar: HB.bar,
+    btn: HB.beige,
+    btnInk: HB.ink,
+    accent: HB.orange,
+    backdrop: HB.backdrop,
+    white: HB.beige,
+    winOk: HB.winOk,
+    winNo: HB.winNo,
+  };
+}

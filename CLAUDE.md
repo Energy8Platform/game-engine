@@ -55,6 +55,14 @@ BAD MANNERS studio branding, built from `packages/bad-manners/brand/BRANDBOOK.md
 
 Kit assets are embedded by `scripts/gen-assets.mjs`. Demo: `examples/bad-manners-demo`.
 
+### `@energy8platform/dogmatic`
+
+DOGMATIC provider branding:
+- `./preloader`: `dogmaticPreloader`, the neon collar loader.
+- `./shell`: `createDogmaticShell`, the provider's fork of the shell 0.15.0 Pixi UI in `src/shell/vendor/`, running over the published `createShell`.
+
+Do not edit the vendor files to "sync" them with `packages/shell`: they are the provider's design. Demo: `examples/dogmatic-demo`.
+
 ### `@energy8platform/game-engine`
 
 PixiJS v8-based casino game engine. Depends on `@energy8platform/platform-core`. Sub-paths re-export platform-core modules so existing import paths (`@energy8platform/game-engine/lua`, `/debug` for DevBridge, `/vite`) stay stable.
