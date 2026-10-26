@@ -1,6 +1,6 @@
 {
   "name": "@energy8platform/dogmatic",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "DOGMATIC provider branding for Energy8 slots — the neon collar loader and the Pixi game shell.",
   "type": "module",
   "exports": {
