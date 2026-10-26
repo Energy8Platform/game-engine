@@ -202,8 +202,9 @@ export class ShellController extends EventEmitter<ShellEvents> implements ShellH
         return self.config.features.hotkeys !== false;
       },
       get spacebarEnabled() {
-        // The feature (author / jurisdiction) AND the player's own menu switch.
-        return self.config.features.spacebar !== false && self.getMenuValue('spacebar') !== false;
+        // The feature (author / jurisdiction) AND, where it is offered, the player's own menu switch.
+        const f = self.config.features;
+        return f.spacebar !== false && (!f.spacebarToggle || self.getMenuValue('spacebar') !== false);
       },
       get turboLevels() {
         return self.config.features.turbo;
@@ -316,10 +317,11 @@ export class ShellController extends EventEmitter<ShellEvents> implements ShellH
 
   // ── menu ───────────────────────────────────────────────────────────────────
   get menu(): MenuItem[] {
-    // No Space to press (a touch client, hotkeys off) or Space-to-spin not offered at all: the
-    // player's switch for it would be a control that does nothing, so it isn't shown.
+    // The switch is offered only with `features.spacebarToggle` (Artube). Even then, no Space to
+    // press (a touch client, hotkeys off) or Space-to-spin not offered at all: the player's switch
+    // for it would be a control that does nothing, so it isn't shown.
     const f = this.config.features;
-    if (f.hotkeys !== false && f.spacebar !== false) return this.menuItems;
+    if (f.spacebarToggle && f.hotkeys !== false && f.spacebar !== false) return this.menuItems;
     return this.menuItems.filter((i) => (i as { id?: string }).id !== 'spacebar');
   }
   /** Replace the item list. Values of ids already in state are kept; new ids are seeded. */

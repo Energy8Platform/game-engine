@@ -181,8 +181,17 @@ describe('BottomBar base mode', () => {
     expect(down().disabled).toBe(true);
   });
 
-  it('setBusy locks bet and menu; the disc stays live and turns into a skip', () => {
+  it('the menu stays open through a round without features.menuLock', () => {
     const shell = createGameShell(cfg(mount));
+    shell.setBusy(true);
+    expect((q(mount, '[data-ge="menu"]') as HTMLButtonElement).disabled).toBe(false);
+    shell.openMenu();
+    expect(q(mount, '[data-ge="menu-popover"]')).toBeTruthy();
+  });
+
+  it('setBusy locks bet and menu; the disc stays live and turns into a skip', () => {
+    const c = cfg(mount); c.features = { ...c.features, menuLock: true };
+    const shell = createGameShell(c);
     const spun = vi.fn();
     const skipped = vi.fn();
     shell.on('spin', spun);
@@ -200,7 +209,8 @@ describe('BottomBar base mode', () => {
   });
 
   it('the menu stays shut through autoplay and a bonus, and a round closes an open one', () => {
-    const shell = createGameShell(cfg(mount));
+    const c = cfg(mount); c.features = { ...c.features, menuLock: true };
+    const shell = createGameShell(c);
     const opened = vi.fn();
     shell.on('menuOpen', opened);
     shell.setAutoplay({ active: true, remaining: 5 });

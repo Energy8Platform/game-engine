@@ -41,7 +41,9 @@ export function bonusBuyLocked(s: ShellState): boolean {
   return s.busy || s.autoplay.active || !s.buyBonusEnabled;
 }
 
-/** The menu (and game info) is locked during a round, a run and a bonus; a replay is exempt. */
+/** With `features.menuLock` (Artube), the menu (and game info) is locked during a round, a run and
+ *  a bonus; a replay is exempt. */
 export function menuLocked(s: ShellState): boolean {
+  if (!s.menuLock) return false;
   return s.busy || s.autoplay.active || (s.mode !== 'base' && s.mode !== 'replay');
 }

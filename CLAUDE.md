@@ -42,8 +42,9 @@ Sub-paths:
 >
 > The burger on the bar opens a **configurable popover menu** (`ShellConfig.menu`: preset ids
 > `sound`/`music`/`sfx`/`spacebar`/`gameInfo` plus custom `toggle`/`range`/`button`/`separator` rows), whose
-> values live in shell state (`getMenuValue`/`setMenuValue`). The menu (burger, Shift+S, Shift+I) is locked
-> while busy / autoplay / in a bonus (`menuLocked` in `core/state.ts`); SPIN pressed mid-round emits `skip`. The old full-screen Settings overlay
+> values live in shell state (`getMenuValue`/`setMenuValue`). Artube-only (host sets them on an Artube launch):
+> `features.menuLock` locks the menu (burger, Shift+S, Shift+I) while busy / autoplay / in a bonus (`menuLocked`
+> in `core/state.ts`), and `features.spacebarToggle` shows the `spacebar` row. SPIN pressed mid-round emits `skip` everywhere. The old full-screen Settings overlay
 > is gone; `openSettings()` is a deprecated alias for `openMenu()`.
 
 ### `@energy8platform/bad-manners`

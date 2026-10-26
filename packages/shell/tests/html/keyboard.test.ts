@@ -65,7 +65,8 @@ describe('keyboard: Space → spin', () => {
   });
 
   it('the player can switch Space-to-spin off in the menu', () => {
-    const shell = createGameShell(cfg(mount));
+    const c = cfg(mount); c.features = { ...c.features, spacebarToggle: true };
+    const shell = createGameShell(c);
     const spy = vi.fn();
     shell.on('spin', spy);
     const changes: unknown[] = [];
@@ -79,8 +80,18 @@ describe('keyboard: Space → spin', () => {
     expect(spy).toHaveBeenCalledOnce();
   });
 
+  it('without features.spacebarToggle there is no switch, and a stored "off" is ignored', () => {
+    const shell = createGameShell(cfg(mount));
+    expect(shell.menu.some((i) => (i as { id?: string }).id === 'spacebar')).toBe(false);
+    const spy = vi.fn();
+    shell.on('spin', spy);
+    shell.setMenuValue('spacebar', false);
+    space();
+    expect(spy).toHaveBeenCalledOnce();
+  });
+
   it('hides the Spacebar row where Space cannot spin', () => {
-    const noKeys = cfg(mount); noKeys.features = { ...noKeys.features, hotkeys: false };
+    const noKeys = cfg(mount); noKeys.features = { ...noKeys.features, hotkeys: false, spacebarToggle: true };
     expect(createGameShell(noKeys).menu.some((i) => (i as { id?: string }).id === 'spacebar')).toBe(false);
   });
 

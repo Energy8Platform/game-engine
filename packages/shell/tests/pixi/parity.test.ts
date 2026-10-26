@@ -122,7 +122,8 @@ describe('createPixiShell — PixiGameShell API-parity facade', () => {
   it('the menu model both renderers draw has one row per configured item', () => {
     const shell = createPixiShell(makeConfig());
     const rows = resolveMenu(shell as never);
-    expect(rows).toHaveLength(DEFAULT_MENU.length);
-    expect(rows.map((r) => r.kind)).toEqual(['toggle', 'range', 'range', 'toggle', 'separator', 'button']);
+    // minus the Spacebar switch, which only `features.spacebarToggle` (Artube) shows
+    expect(rows).toHaveLength(DEFAULT_MENU.length - 1);
+    expect(rows.map((r) => r.kind)).toEqual(['toggle', 'range', 'range', 'separator', 'button']);
   });
 });

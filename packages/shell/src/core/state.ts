@@ -21,6 +21,7 @@ export function createInitialState(config: ShellConfig): ShellState {
       sfx: clampVolume(config.volumes?.sfx),
     },
     menu: seedMenuValues(config.menu ?? DEFAULT_MENU),
+    menuLock: config.features?.menuLock === true,
   };
 }
 
@@ -65,9 +66,12 @@ export function bonusBuyLocked(s: ShellState): boolean {
  * (which stops the run). The burger, Shift+S and Shift+I all ask this one predicate, so the bar and
  * the keyboard cannot drift apart the way the buy-bonus locks once did.
  *
+ * Only with `features.menuLock` (Artube); everywhere else the menu stays open to the player.
+ *
  * A replay is exempt: between replays the shell sits idle in `'replay'` mode, and the menu is the
  * only place its sound lives. A replay that is PLAYING is busy, and locks like any other round.
  */
 export function menuLocked(s: ShellState): boolean {
+  if (!s.menuLock) return false;
   return s.busy || s.autoplay.active || (s.mode !== 'base' && s.mode !== 'replay');
 }

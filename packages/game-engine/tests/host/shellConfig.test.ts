@@ -565,6 +565,16 @@ describe('applyJurisdiction (Stake jurisdiction → shell features)', () => {
     expect(c.features.hotkeys).toBe(false);
   });
 
+  // Блокировка меню на раунд и переключатель «Spacebar to spin» — требования ревью Artube, только там.
+  it('блокировка меню и переключатель пробела — только на запуске Artube', () => {
+    const artube = buildShellConfig({}, model, { balance: 0, mode: 'base', artube: true }).features;
+    expect(artube.menuLock).toBe(true);
+    expect(artube.spacebarToggle).toBe(true);
+    const plain = buildShellConfig({}, model, { balance: 0, mode: 'base' }).features;
+    expect(plain.menuLock).toBeUndefined();
+    expect(plain.spacebarToggle).toBeUndefined();
+  });
+
   it('на десктопе решение остаётся за шеллом — хост не навязывает своего', () => {
     // Не `true`: шелл сам померит клиента (core/device.ts). Хост говорит, только когда знает точно.
     const c = buildShellConfig({}, model, { balance: 0, mode: 'base', device: 'desktop' });

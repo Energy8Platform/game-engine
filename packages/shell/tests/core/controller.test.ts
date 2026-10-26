@@ -145,7 +145,8 @@ describe('menu', () => {
 
   it('defaults to DEFAULT_MENU and swaps the list with setMenu', () => {
     const { c: shell } = make();
-    expect(shell.menu).toEqual(DEFAULT_MENU);
+    // The Spacebar switch is Artube's (`features.spacebarToggle`), so the default list leaves it out.
+    expect(shell.menu).toEqual(DEFAULT_MENU.filter((i) => (i as { id?: string }).id !== 'spacebar'));
     shell.setMenu([{ id: 'sound' }, { id: 'speed', type: 'range', label: 'S', min: 1, max: 5, value: 3 }]);
     expect(shell.getMenuValue('speed')).toBe(3);
   });

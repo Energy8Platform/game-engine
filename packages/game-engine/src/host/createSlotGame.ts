@@ -332,6 +332,7 @@ export async function createSlotGame<T extends SlotSpinResultBase = SlotSpinResu
       jurisdiction: config?.jurisdiction,
       // Decides whether the shell offers a keyboard at all — see buildShellConfig.
       device: initData?.device,
+      artube: isArtubeNow,
       // Currency-specific ladder + per-currency default from /wallet/authenticate (Stake) or the
       // backend's `allowed_bets` (Artube); absent on dev/devBridge → buildShellConfig falls back to
       // the spec.

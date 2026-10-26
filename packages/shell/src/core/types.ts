@@ -176,6 +176,14 @@ export interface ShellFeatures {
   /** Spacebar starts a spin in base mode. Defaults to `true`; set `false` to disable the
    *  keyboard shortcut (e.g. jurisdictions that forbid quick-spin keys). */
   spacebar?: boolean;
+  /** The player's own "Spacebar to spin" switch in the menu (the `spacebar` preset). Off by default:
+   *  the row is left out and Space follows `spacebar` alone. Artube's review asked for it, so the
+   *  host turns it on for an Artube launch. */
+  spacebarToggle?: boolean;
+  /** Lock the menu (burger, Shift+S, Shift+I) through a round, an autoplay run and a bonus — see
+   *  `menuLocked`. Off by default; the host turns it on for an Artube launch, whose review asks
+   *  for it. */
+  menuLock?: boolean;
   /** Autoplay: `null` (or omitted) disables it; an object enables it (optionally with limits). */
   autoplay?: AutoplayConfig | null;
   buyBonus: BonusOption[] | false;
@@ -329,6 +337,8 @@ export interface ShellState {
   /** Values of CUSTOM menu items, keyed by id. Seeded from the item list; preset values live in
    *  their own homes (`soundOn`, `volumes`) and are reached through `getMenuValue`. */
   menu: Record<string, boolean | number>;
+  /** `features.menuLock`, copied in so `menuLocked` stays a function of state alone. */
+  menuLock: boolean;
 }
 
 export interface ShellEvents {

@@ -80,6 +80,9 @@ export interface ShellRuntime {
    *  that documents them. Left unset the shell measures the client itself (shell's core/device.ts);
    *  the host only speaks when the platform told it outright. */
   device?: 'desktop' | 'mobile' | string;
+  /** An Artube launch: its review asks for the menu lock and the Spacebar-to-spin switch, which
+   *  no other host gets. */
+  artube?: boolean;
   /** Bet ladder from `/wallet/authenticate` (`initData.config.betLevels`, major units). Stake ladders
    *  are CURRENCY-SPECIFIC (us_/non_us_/social_), so this overrides the spec's static `betLevels` on a
    *  Stake launch; falls back to the spec on dev/devBridge. */
@@ -521,6 +524,10 @@ export function buildShellConfig(
   // after the author's features for the same reason a jurisdiction restriction is — the platform
   // knows what it launched us on, and a game can't opt out of the hardware.
   if (runtime.device === 'mobile') features.hotkeys = false;
+  if (runtime.artube) {
+    features.menuLock = true;
+    features.spacebarToggle = true;
+  }
   return {
     language: runtime.language ?? 'en',
     isSocial,
